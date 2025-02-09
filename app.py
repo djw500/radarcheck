@@ -49,17 +49,21 @@ def fetch_hrrr_image():
     response.raise_for_status()
     return Image.open(BytesIO(response.content))
 
+
 def annotate_image(img, text):
     draw = ImageDraw.Draw(img)
     try:
         font = ImageFont.truetype("arial.ttf", 20)
     except IOError:
         font = ImageFont.load_default()
-    pos = (10, 10)
-    text_width, text_height = draw.textsize(text, font=font)
-    rect = (pos[0]-2, pos[1]-2, pos[0]+text_width+2, pos[1]+text_height+2)
-    draw.rectangle(rect, fill="black")
-    draw.text(pos, text, fill="white", font=font)
+    text_position = (10, 10)
+    # Use the font's getsize() method to determine the size of the text.
+    text_width, text_height = font.getsize(text)
+    # Draw a semi-opaque black rectangle behind the text for readability.
+    rect_position = (text_position[0] - 2, text_position[1] - 2,
+                     text_position[0] + text_width + 2, text_position[1] + text_height + 2)
+    draw.rectangle(rect_position, fill="black")
+    draw.text(text_position, text, fill="white", font=font)
     return img
 
 @app.route("/latest-forecast")
