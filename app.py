@@ -1,40 +1,72 @@
 import os
-from datetime import datetime
+import zipfile
 from io import BytesIO
+from datetime import datetime
 
 import requests
+import xarray as xr
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
 from flask import Flask, send_file, render_template_string
 from PIL import Image, ImageDraw, ImageFont
+import geopandas as gpd
+from shapely.geometry import box
 import pytz
 
 app = Flask(__name__)
 
-# IEM endpoints (real endpoints)
-WMS_BASE_URL = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi"
-METADATA_URL = "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json"
+# --- Configuration ---
+CACHE_DIR = "cache"
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
 
-# Bounding box around Philadelphia (approximate)
-BBOX = "-75.5,39.5,-74.5,40.5"
-WIDTH = 600
-HEIGHT = 600
+# HRRR file parameters
+init_time = "2025-02-09 12:00"   # For display purposes
+forecast_hour = "20"             # Forecast lead time (6-hour forecast) as two-digit string
+date_str = "20250214"            # YYYYMMDD format used in the file path
+init_hour = "00"                 # Hour of initialization (e.g., "12" for 12z)
 
-WMS_PARAMS = {
-    "service": "WMS",
-    "request": "GetMap",
-    "version": "1.1.1",
-    "layers": "refd_0000",
-    "styles": "",
-    "srs": "EPSG:4326",
-    "bbox": BBOX,
-    "width": WIDTH,
-    "height": HEIGHT,
-    "format": "image/png"
-}
+# Construct URL for HRRR surface forecast file
+HRRR_URL = (f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/hrrr/prod/hrrr.{date_str}/conus/"
+            f"hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2")
 
-def fetch_metadata():
-    response = requests.get(METADATA_URL)
-    response.raise_for_status()
-    return response.json()
+# Local cache filenames
+GRIB_FILENAME = os.path.join(CACHE_DIR, f"hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2")
+COUNTY_ZIP = os.path.join(CACHE_DIR, "cb_2018_us_county_20m.zip")
+COUNTY_DIR = os.path.join(CACHE_DIR, "county_shapefile")
+COUNTY_SHP = os.path.join(COUNTY_DIR, "cb_2018_us_county_20m.shp")
+
+# --- Utility Functions ---
+
+def download_file(url, local_path):
+    """Download a file if it doesn't exist in cache."""
+    if not os.path.exists(local_path):
+        print(f"Downloading from: {url}")
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        with open(local_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"Downloaded: {local_path}")
+    else:
+        print(f"Using cached file: {local_path}")
+
+def fetch_grib():
+    """Download and cache the HRRR GRIB file."""
+    download_file(HRRR_URL, GRIB_FILENAME)
+    return GRIB_FILENAME
+
+def fetch_county_shapefile():
+    """Download and extract the county shapefile if needed."""
+    url_county = "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip"
+    download_file(url_county, COUNTY_ZIP)
+    if not os.path.exists(COUNTY_DIR):
+        with zipfile.ZipFile(COUNTY_ZIP, "r") as zip_ref:
+            zip_ref.extractall(COUNTY_DIR)
+        print("Extracted county shapefile.")
+    else:
+        print("County shapefile already extracted.")
+    return COUNTY_SHP
 
 def get_local_time_text(utc_time_str):
     utc_time = datetime.strptime(utc_time_str, "%Y-%m-%d %H:%M:%S")
@@ -44,47 +76,126 @@ def get_local_time_text(utc_time_str):
     local_time = utc_time.astimezone(eastern_zone)
     return local_time.strftime("Forecast valid at: %Y-%m-%d %I:%M %p %Z")
 
-def fetch_hrrr_image():
-    response = requests.get(WMS_BASE_URL, params=WMS_PARAMS)
-    response.raise_for_status()
-    return Image.open(BytesIO(response.content))
-
-
-def annotate_image(img, text):
-    draw = ImageDraw.Draw(img)
+def create_plot():
+    # --- Step 1: Download and open GRIB file ---
+    grib_path = fetch_grib()
+    # Try using filter by shortName for 2m temperature. If that fails, fallback to surface.
     try:
-        font = ImageFont.truetype("arial.ttf", 20)
-    except IOError:
-        font = ImageFont.load_default()
-    text_position = (10, 10)
-    # Use the font's getsize() method to determine the size of the text.
-    text_width, text_height = font.getsize(text)
-    # Draw a semi-opaque black rectangle behind the text for readability.
-    rect_position = (text_position[0] - 2, text_position[1] - 2,
-                     text_position[0] + text_width + 2, text_position[1] + text_height + 2)
-    draw.rectangle(rect_position, fill="black")
-    draw.text(text_position, text, fill="white", font=font)
-    return img
-
-@app.route("/latest-forecast")
-def latest_forecast():
-    try:
-        metadata = fetch_metadata()
-        utc_time_str = metadata.get("model_init_utc", "2025-02-08 00:00:00")
-        annotation_text = get_local_time_text(utc_time_str)
-    except Exception:
-        annotation_text = "Forecast time unknown"
-
-    try:
-        img = fetch_hrrr_image()
+        ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': '2t'})
+        print("Loaded dataset with filter_by_keys={'shortName': '2t'}")
     except Exception as e:
-        return f"Error fetching image: {e}", 500
+        print("Error with shortName filter, trying typeOfLevel filter.")
+        ds = xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'accum'}})
+    
+    # Determine temperature variable (or use snowfall variable if available)
+    if "t2m" in ds.data_vars:
+        temp_var = "t2m"
+        temp_celsius = ds[temp_var] - 273.15
+        data_to_plot = temp_celsius
+        var_label = "2-m Temperature (°C)"
+    elif "TMP" in ds.data_vars:
+        temp_var = "TMP"
+        temp_celsius = ds[temp_var] - 273.15
+        data_to_plot = temp_celsius
+        var_label = "2-m Temperature (°C)"
+    elif "sdwe" in ds.data_vars:
+        # Assume sdwe is snow water equivalent in mm; convert to cm of snow
+        sdwe = ds["sdwe"]
+        snowfall_cm = sdwe / 10.0
+        snowfall_in = snowfall_cm / 2.54  # inches
+        data_to_plot = snowfall_in
+        var_label = "Snowfall (inches)"
+    else:
+        # Fallback to first variable
+        var_label = list(ds.data_vars.keys())[0]
+        data_to_plot = ds[var_label]
 
-    annotated = annotate_image(img, annotation_text)
-    img_io = BytesIO()
-    annotated.save(img_io, "PNG")
-    img_io.seek(0)
-    return send_file(img_io, mimetype="image/png")
+    # --- Step 2: Subset the data for Philadelphia region ---
+    # Desired bounds (you can adjust as needed)
+    desired_lat_min, desired_lat_max = 39.0, 40.5
+    desired_lon_min, desired_lon_max = -76, -74.0
+
+    # Check file coordinate system (convert if necessary)
+    lon = data_to_plot.longitude
+    if float(lon.min()) >= 0:
+        philly_lon_min = 360 + desired_lon_min
+        philly_lon_max = 360 + desired_lon_max
+        print("Adjusted longitude bounds to 0-360:", philly_lon_min, philly_lon_max)
+    else:
+        philly_lon_min = desired_lon_min
+        philly_lon_max = desired_lon_max
+
+    def get_subset(data):
+        return data.where(
+            (data.latitude >= desired_lat_min) & (data.latitude <= desired_lat_max) &
+            (data.longitude >= philly_lon_min) & (data.longitude <= philly_lon_max),
+            drop=True
+        )
+
+    subset = get_subset(data_to_plot)
+    print("Subset shape:", subset.shape)
+
+    # --- Step 3: Create the plot ---
+    fig = plt.figure(figsize=(8, 6))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    subset.plot.pcolormesh(
+        ax=ax,
+        x="longitude",
+        y="latitude",
+        cmap="coolwarm",
+        add_colorbar=True,
+        transform=ccrs.PlateCarree()
+    )
+    ax.set_title(f"HRRR Forecast: {var_label}\nInit: {init_time}, fxx={forecast_hour}")
+    ax.coastlines(resolution='50m')
+    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--")
+    gl.top_labels = False
+    gl.right_labels = False
+
+    # --- Step 4: Overlay county boundaries ---
+    shp_path = fetch_county_shapefile()
+    counties = gpd.read_file(shp_path)
+    # Correct the subset longitude from 0-360 to -180 to 180 for plotting
+    subset_corrected = subset.assign_coords(
+        longitude=(((subset.longitude + 180) % 360) - 180)
+    )
+    bbox = box(
+        float(subset_corrected.longitude.min()),
+        float(subset_corrected.latitude.min()),
+        float(subset_corrected.longitude.max()),
+        float(subset_corrected.latitude.max())
+    )
+    print("Plot bounding box:", bbox)
+    counties_philly = counties[counties.intersects(bbox)]
+    ax.add_geometries(
+        counties_philly.geometry,
+        crs=ccrs.PlateCarree(),
+        edgecolor='gray',
+        facecolor='none',
+        linewidth=1.0
+    )
+
+    # Mark a specific region of interest (e.g., center of Philadelphia)
+    roi_lat = 40.04877
+    roi_lon = -75.38903
+    ax.plot(roi_lon, roi_lat, marker='*', markersize=15, color='gold', transform=ccrs.PlateCarree())
+
+    # Save plot to a BytesIO buffer
+    buf = BytesIO()
+    plt.savefig(buf, format="PNG", bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+# --- Flask Endpoints ---
+
+@app.route("/forecast")
+def forecast():
+    try:
+        img_buf = create_plot()
+    except Exception as e:
+        return f"Error generating plot: {e}", 500
+    return send_file(img_buf, mimetype="image/png")
 
 @app.route("/")
 def index():
@@ -94,7 +205,7 @@ def index():
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Philadelphia HRRR Forecast</title>
+      <title>HRRR Forecast Visualization</title>
       <style>
         body { margin: 0; padding: 0; text-align: center; font-family: Arial, sans-serif; background: #f0f0f0; }
         header { background: #004080; color: white; padding: 1em; }
@@ -104,10 +215,10 @@ def index():
     </head>
     <body>
       <header>
-        <h1>Philadelphia HRRR Forecast</h1>
+        <h1>HRRR Forecast Visualization</h1>
       </header>
       <main>
-        <img src="/latest-forecast" alt="Latest HRRR Forecast">
+        <img src="/forecast" alt="HRRR Forecast Plot">
       </main>
       <footer>
         &copy; 2025 Weather App
