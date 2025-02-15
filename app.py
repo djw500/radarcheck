@@ -1,7 +1,7 @@
 import os
 import zipfile
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 import xarray as xr
@@ -20,11 +20,26 @@ CACHE_DIR = "cache"
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
 
-# HRRR file parameters
-init_time = "2025-02-09 12:00"   # For display purposes
-forecast_hour = "20"             # Forecast lead time (6-hour forecast) as two-digit string
-date_str = "20250214"            # YYYYMMDD format used in the file path
-init_hour = "00"                 # Hour of initialization (e.g., "12" for 12z)
+def get_latest_hrrr_run():
+    """Find the most recent HRRR run available."""
+    now = datetime.utcnow()
+    # HRRR runs every hour, but we'll check the last 3 hours in case of delays
+    for hours_ago in range(3):
+        check_time = now - timedelta(hours=hours_ago)
+        date_str = check_time.strftime("%Y%m%d")
+        init_hour = check_time.strftime("%H")
+        
+        # Check if the directory exists
+        url = f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/hrrr/prod/hrrr.{date_str}/"
+        response = requests.head(url)
+        if response.status_code == 200:
+            return date_str, init_hour, check_time.strftime("%Y-%m-%d %H:%M")
+    
+    raise Exception("Could not find a recent HRRR run")
+
+# Get the most recent HRRR run
+date_str, init_hour, init_time = get_latest_hrrr_run()
+forecast_hour = "01"  # Use 1-hour forecast for most recent data
 
 # Construct URL for HRRR surface forecast file
 HRRR_URL = (f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/hrrr/prod/hrrr.{date_str}/conus/"
