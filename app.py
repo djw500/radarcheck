@@ -23,8 +23,8 @@ app = Flask(__name__)
 def get_latest_hrrr_run():
     """Find the most recent HRRR run available."""
     now = datetime.utcnow()
-    # HRRR runs every hour, but we'll check the last 3 hours in case of delays
-    for hours_ago in range(3):
+    # HRRR runs every hour but has ~2 hour delay, so start checking 3 hours ago
+    for hours_ago in range(3, 6):
         check_time = now - timedelta(hours=hours_ago)
         date_str = check_time.strftime("%Y%m%d")
         init_hour = check_time.strftime("%H")
@@ -36,7 +36,16 @@ def get_latest_hrrr_run():
                f"var_REFC=on")
         response = requests.head(url)
         if response.status_code == 200:
-            return date_str, init_hour, check_time.strftime("%Y-%m-%d %H:%M")
+            model_time = datetime(
+                year=check_time.year,
+                month=check_time.month,
+                day=check_time.day,
+                hour=int(init_hour),
+                minute=0,
+                second=0,
+                tzinfo=pytz.UTC
+            )
+            return date_str, init_hour, model_time.strftime("%Y-%m-%d %H:%M:%S")
     
     raise Exception("Could not find a recent HRRR run")
 

@@ -122,15 +122,27 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             transform=ccrs.PlateCarree()
         )
         
-        # Convert init_time to Eastern Time
-        utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M")
+        # Get model initialization time
+        utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M:%S")
         utc = pytz.UTC.localize(utc_time)
         eastern = pytz.timezone('America/New_York')
         est_init_time = utc.astimezone(eastern)
         
-        # Calculate forecast valid time
-        forecast_delta = timedelta(hours=int(forecast_hour))
-        est_valid_time = est_init_time + forecast_delta
+        # Get actual valid time from the GRIB data
+        if 'valid_time' in ds.coords:
+            valid_time = ds.valid_time.values
+            if isinstance(valid_time, np.datetime64):
+                valid_time = valid_time.astype('datetime64[s]').tolist()
+                valid_time = pytz.UTC.localize(valid_time)
+                est_valid_time = valid_time.astimezone(eastern)
+            else:
+                # Fallback to calculated time if valid_time not available
+                forecast_delta = timedelta(hours=int(forecast_hour))
+                est_valid_time = est_init_time + forecast_delta
+        else:
+            # Fallback to calculated time if valid_time not available
+            forecast_delta = timedelta(hours=int(forecast_hour))
+            est_valid_time = est_init_time + forecast_delta
         
         ax.set_title(f"HRRR Forecast: {var_label}\n"
                     f"Model Run: {est_init_time.strftime('%I:%M %p %Z')}\n"
