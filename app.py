@@ -103,15 +103,27 @@ def fetch_grib(forecast_hour):
             return False
         try:
             with FileLock(f"{filename}.lock"):
-                ds = xr.open_dataset(filename, engine="cfgrib")
+                # Try with chunks to avoid memory issues
+                ds = xr.open_dataset(filename, engine="cfgrib", chunks={'time': 1})
+                # Force load a small part to verify file integrity
+                ds['unknown'].isel(time=0).load()
                 ds.close()
                 return True
-        except Exception as e:
-            logger.warning(f"GRIB file invalid: {filename}, Error: {str(e)}")
+        except (OSError, ValueError, RuntimeError) as e:
+            if "End of resource reached when reading message" in str(e):
+                logger.error(f"GRIB file corrupted (premature EOF): {filename}")
+            else:
+                logger.warning(f"GRIB file invalid: {filename}, Error: {str(e)}")
             with FileLock(f"{filename}.lock"):
-                if os.path.exists(filename):
-                    os.remove(filename)
-                    logger.info(f"Deleted invalid file: {filename}")
+                try:
+                    if os.path.exists(filename):
+                        os.remove(filename)
+                        logger.info(f"Deleted invalid file: {filename}")
+                    # Also clean up any partial downloads
+                    if os.path.exists(f"{filename}.tmp"):
+                        os.remove(f"{filename}.tmp")
+                except OSError as e:
+                    logger.error(f"Error cleaning up invalid files: {str(e)}")
             return False
 
     # Try to use cached file
