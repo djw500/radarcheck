@@ -93,9 +93,49 @@ def fetch_grib(forecast_hour):
            f"dir=%2Fhrrr.{date_str}%2Fconus&"
            f"{repomap['HRRR_VARS']}"
            f"leftlon={repomap['HRRR_LON_MIN']}&rightlon={repomap['HRRR_LON_MAX']}&toplat={repomap['HRRR_LAT_MAX']}&bottomlat={repomap['HRRR_LAT_MIN']}&")
+    
     filename = os.path.join(repomap["CACHE_DIR"], f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2")
-    download_file(url, filename)
-    return filename
+    
+    # Check if file exists and is valid
+    if os.path.exists(filename):
+        # Check if file is empty or corrupted
+        if os.path.getsize(filename) < 1000:  # Less than 1KB is probably invalid
+            logger.warning(f"Existing GRIB file appears corrupted: {filename}")
+            os.remove(filename)
+            logger.info(f"Deleted corrupted file: {filename}")
+        else:
+            try:
+                # Try to open with xarray to verify it's valid
+                ds = xr.open_dataset(filename, engine="cfgrib")
+                ds.close()
+                logger.info(f"Using cached valid GRIB file: {filename}")
+                return filename
+            except Exception as e:
+                logger.warning(f"Cached GRIB file invalid: {filename}, Error: {str(e)}")
+                os.remove(filename)
+                logger.info(f"Deleted invalid file: {filename}")
+
+    # Download new file
+    logger.info(f"Downloading GRIB file from: {url}")
+    try:
+        download_file(url, filename)
+        
+        # Verify downloaded file
+        if not os.path.exists(filename) or os.path.getsize(filename) < 1000:
+            raise ValueError(f"Downloaded file is missing or too small: {filename}")
+            
+        # Try to open with xarray to verify it's valid
+        ds = xr.open_dataset(filename, engine="cfgrib")
+        ds.close()
+        
+        logger.info(f"Successfully downloaded and verified GRIB file: {filename}")
+        return filename
+        
+    except Exception as e:
+        if os.path.exists(filename):
+            os.remove(filename)
+        logger.error(f"Failed to download or verify GRIB file: {str(e)}", exc_info=True)
+        raise ValueError(f"Failed to obtain valid GRIB file: {str(e)}")
 
 def fetch_county_shapefile():
     """Wrapper to maintain compatibility with existing code"""
