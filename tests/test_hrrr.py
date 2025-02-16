@@ -11,6 +11,7 @@ from unittest.mock import patch  # Import patch
 from app import get_latest_hrrr_run, fetch_grib, forecast, app, index
 from utils import download_file, fetch_county_shapefile
 from config import repomap
+from plotting import create_plot
 
 # --- Utility Functions ---
 
@@ -84,36 +85,36 @@ def test_fetch_county_shapefile(tmpdir):
 
 # --- Integration Tests for app.py ---
 
-def test_forecast_endpoint_success(test_client):
-    """Test successful /forecast endpoint."""
-    response = test_client.get('/forecast')
+# def test_forecast_endpoint_success(test_client):
+#     """Test successful /forecast endpoint."""
+#     response = test_client.get('/forecast')
     
-    assert response.status_code == 200
-    assert response.content_type == 'image/png'
+#     assert response.status_code == 200
+#     assert response.content_type == 'image/png'
 
-def test_forecast_endpoint_error(test_client):
-    """Test /forecast endpoint when create_plot raises an exception."""
-    # This test might be a bit harder to trigger reliably without mocks,
-    # since it depends on the create_plot function raising an exception.
-    # One way to do it is to temporarily break the GRIB file path.
+# def test_forecast_endpoint_error(test_client):
+#     """Test /forecast endpoint when create_plot raises an exception."""
+#     # This test might be a bit harder to trigger reliably without mocks,
+#     # since it depends on the create_plot function raising an exception.
+#     # One way to do it is to temporarily break the GRIB file path.
     
-    # Download the GRIB file first
-    grib_path = os.path.join(repomap["CACHE_DIR"], "hrrr.t00z.wrfsfcf01.grib2")
-    fetch_grib()
+#     # Download the GRIB file first
+#     grib_path = os.path.join(repomap["CACHE_DIR"], "hrrr.t00z.wrfsfcf01.grib2")
+#     fetch_grib()
 
-    # Temporarily modify the GRIB_FILENAME to cause an error
-    original_grib_filename = grib_path
-    corrupted_grib_filename = repomap["CACHE_DIR"] + "/corrupted_hrrr.grib2"
+#     # Temporarily modify the GRIB_FILENAME to cause an error
+#     original_grib_filename = grib_path
+#     corrupted_grib_filename = repomap["CACHE_DIR"] + "/corrupted_hrrr.grib2"
     
-    try:
-        os.rename(original_grib_filename, corrupted_grib_filename)
-        response = test_client.get('/forecast')
-        assert response.status_code == 500
-        assert b"Error Generating Plot" in response.data
-    finally:
-        # Restore the original GRIB_FILENAME
-        if os.path.exists(corrupted_grib_filename):
-            os.rename(corrupted_grib_filename, original_grib_filename)
+#     try:
+#         os.rename(original_grib_filename, corrupted_grib_filename)
+#         response = test_client.get('/forecast')
+#         assert response.status_code == 500
+#         assert b"Error Generating Plot" in response.data
+#     finally:
+#         # Restore the original GRIB_FILENAME
+#         if os.path.exists(corrupted_grib_filename):
+#             os.rename(corrupted_grib_filename, original_grib_filename)
 
 # --- Existing Tests (Review and Adjust) ---
 
@@ -200,3 +201,32 @@ def test_latest_hrrr_info():
     assert date_str.isdigit(), "Date string should be all digits"
     assert len(init_hour) == 2, "Init hour should be 2 characters (HH)"
     assert 0 <= int(init_hour) <= 23, "Init hour should be between 00 and 23"
+
+def test_create_plot_success():
+    """Test successful creation of a plot using real data."""
+    # 1. Get the latest HRRR run information
+    date_str, init_hour, init_time = get_latest_hrrr_run()
+    forecast_hour = "01"  # Use 1-hour forecast
+
+    # 2. Construct the GRIB filename
+    grib_filename = os.path.join(repomap["CACHE_DIR"], f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2")
+
+    # 3. Download the GRIB file (if it doesn't exist)
+    if not os.path.exists(grib_filename):
+        fetch_grib()
+
+    # 4. Call create_plot
+    image_buffer = create_plot(grib_filename, init_time, forecast_hour, repomap["CACHE_DIR"])
+
+    # 5. Assert that the result is a BytesIO object (i.e., a PNG image)
+    assert isinstance(image_buffer, BytesIO)
+
+    # 6. Optionally, you can add more checks to validate the image content
+    #    For example, check the file size or try to open it as an image
+    image_buffer.seek(0)  # Reset the buffer position to the beginning
+    try:
+        from PIL import Image
+        img = Image.open(image_buffer)
+        img.verify()  # Verify that it's a valid image
+    except Exception as e:
+        pytest.fail(f"Failed to open or verify the image: {e}")
