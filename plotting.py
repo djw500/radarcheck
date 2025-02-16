@@ -65,31 +65,42 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             var_label = list(ds.data_vars.keys())[0]
             data_to_plot = ds[var_label]
 
-        # Refactor/clean up this step 3 and step 4 to have a sensible and more clear windowing logic. Take out the philly name. AI!
-        # --- Step 3: Subset the data for Philadelphia region ---
-        desired_lat_min, desired_lat_max = 38.8, 40.7
-        desired_lon_min, desired_lon_max = -76.5, -73.5
+        # --- Step 3: Define region bounds ---
+        region_bounds = {
+            'lat_min': 38.8,
+            'lat_max': 40.7,
+            'lon_min': -76.5,
+            'lon_max': -73.5
+        }
 
+        # --- Step 4: Subset and plot the data ---
+        # Handle longitude wrapping if needed
         lon = data_to_plot.longitude
         if float(lon.min()) >= 0:
-            philly_lon_min = 360 + desired_lon_min
-            philly_lon_max = 360 + desired_lon_max
-            print("Adjusted longitude bounds to 0-360:", philly_lon_min, philly_lon_max)
-        else:
-            philly_lon_min = desired_lon_min
-            philly_lon_max = desired_lon_max
+            # Convert negative longitudes to 0-360 range
+            region_bounds['lon_min'] = 360 + region_bounds['lon_min']
+            region_bounds['lon_max'] = 360 + region_bounds['lon_max']
+            print(f"Adjusted longitude bounds to 0-360: {region_bounds['lon_min']}, {region_bounds['lon_max']}")
 
-        print(f"Subsetting data with bounds: lat({desired_lat_min}, {desired_lat_max}), lon({philly_lon_min}, {philly_lon_max})")
-        # Get the nearest grid points to our desired boundaries
-        lat_mask = (data_to_plot.latitude >= desired_lat_min - 0.1) & (data_to_plot.latitude <= desired_lat_max + 0.1)
-        lon_mask = (data_to_plot.longitude >= philly_lon_min - 0.1) & (data_to_plot.longitude <= philly_lon_max + 0.1)
+        # Create the subset with a small buffer for interpolation
+        buffer = 0.1
+        lat_mask = (data_to_plot.latitude >= region_bounds['lat_min'] - buffer) & \
+                  (data_to_plot.latitude <= region_bounds['lat_max'] + buffer)
+        lon_mask = (data_to_plot.longitude >= region_bounds['lon_min'] - buffer) & \
+                  (data_to_plot.longitude <= region_bounds['lon_max'] + buffer)
+        
         subset = data_to_plot.where(lat_mask & lon_mask, drop=True)
-        print("Subset shape:", subset.shape)
+        print(f"Subset shape: {subset.shape}")
 
-        # --- Step 4: Create the plot ---
+        # Create the plot
         fig = plt.figure(figsize=(8, 6))
         ax = plt.axes(projection=ccrs.PlateCarree())
-        ax.set_extent([philly_lon_min, philly_lon_max, desired_lat_min, desired_lat_max], crs=ccrs.PlateCarree())
+        ax.set_extent([
+            region_bounds['lon_min'], 
+            region_bounds['lon_max'],
+            region_bounds['lat_min'], 
+            region_bounds['lat_max']
+        ], crs=ccrs.PlateCarree())
         
         print("Creating plot...")
         subset.plot.pcolormesh(
