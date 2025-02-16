@@ -37,6 +37,7 @@ def mock_response():
     mock = MagicMock()
     mock.status_code = 200
     mock.content = b"mock_grib_data"
+    mock.iter_content.return_value = [b"mock_grib_data"]  # Mock iter_content
     return mock
 
 @pytest.fixture
