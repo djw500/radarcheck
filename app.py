@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import requests
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
-from flask import Flask, send_file, render_template_string
+from flask import Flask, send_file, render_template_string, redirect, url_for
 from PIL import Image, ImageDraw, ImageFont
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -96,34 +96,28 @@ from plotting import create_plot, create_forecast_gif
 
 # --- Flask Endpoints ---
 
+@app.route("/frame/<int:hour>")
+def get_frame(hour):
+    """Serve a single forecast frame."""
+    try:
+        if not 1 <= hour <= 24:
+            return "Invalid forecast hour", 400
+            
+        # Format hour as two digits
+        hour_str = f"{hour:02d}"
+        
+        # Get or create the frame
+        grib_path = fetch_grib(hour_str)
+        image_buffer = create_plot(grib_path, init_time, hour_str, repomap["CACHE_DIR"])
+        
+        return send_file(image_buffer, mimetype="image/png")
+    except Exception as e:
+        return str(e), 500
+
 @app.route("/forecast")
 def forecast():
-    try:
-        # Fetch GRIB files for the next 12 hours
-        grib_paths = []
-        for hour in range(1, 13):
-            grib_path = fetch_grib(hour)
-            grib_paths.append(grib_path)
-        
-        # Create animated GIF
-        gif_buf = create_forecast_gif(grib_paths, init_time, repomap["CACHE_DIR"], duration=750)
-    except Exception as e:
-        import traceback
-        error_msg = f"""
-        <html>
-            <body>
-                <h1>Error Generating Plot</h1>
-                <pre>
-Error: {str(e)}
-
-Full Traceback:
-{traceback.format_exc()}
-                </pre>
-            </body>
-        </html>
-        """
-        return error_msg, 500
-    return send_file(gif_buf, mimetype="image/gif")
+    """Legacy endpoint for GIF - redirect to main page"""
+    return redirect(url_for('index'))
 
 @app.route("/")
 def index():
@@ -131,26 +125,123 @@ def index():
     <!DOCTYPE html>
     <html lang="en">
     <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>HRRR Forecast Visualization</title>
-      <style>
-        body { margin: 0; padding: 0; text-align: center; font-family: Arial, sans-serif; background: #f0f0f0; }
-        header { background: #004080; color: white; padding: 1em; }
-        img { max-width: 100%; height: auto; }
-        footer { background: #004080; color: white; padding: 0.5em; position: fixed; bottom: 0; width: 100%; }
-      </style>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>HRRR Forecast Visualization</title>
+        <style>
+            body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
+            .container { max-width: 1200px; margin: 0 auto; }
+            header { background: #004080; color: white; padding: 1em; margin-bottom: 20px; border-radius: 5px; }
+            .forecast-container { 
+                background: white;
+                padding: 20px;
+                border-radius: 5px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .controls {
+                margin: 20px 0;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            #timeSlider {
+                flex-grow: 1;
+            }
+            .loading {
+                display: none;
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(255,255,255,0.9);
+                padding: 20px;
+                border-radius: 5px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            }
+            footer { margin-top: 20px; text-align: center; color: #666; }
+        </style>
     </head>
     <body>
-      <header>
-        <h1>HRRR Forecast Visualization</h1>
-      </header>
-      <main>
-        <img src="/forecast" alt="HRRR Forecast Plot">
-      </main>
-      <footer>
-        &copy; 2025 Weather App
-      </footer>
+        <div class="container">
+            <header>
+                <h1>HRRR Forecast Visualization</h1>
+            </header>
+            <div class="forecast-container">
+                <div class="controls">
+                    <button id="playButton">Play</button>
+                    <input type="range" id="timeSlider" min="1" max="24" value="1">
+                    <span id="timeDisplay">Hour +1</span>
+                </div>
+                <div style="position: relative;">
+                    <img id="forecastImage" src="/frame/1" alt="HRRR Forecast Plot" style="width: 100%; height: auto;">
+                    <div id="loading" class="loading">Loading...</div>
+                </div>
+            </div>
+            <footer>&copy; 2025 Weather App</footer>
+        </div>
+        
+        <script>
+            const slider = document.getElementById('timeSlider');
+            const timeDisplay = document.getElementById('timeDisplay');
+            const forecastImage = document.getElementById('forecastImage');
+            const loading = document.getElementById('loading');
+            const playButton = document.getElementById('playButton');
+            
+            let isPlaying = false;
+            let playInterval;
+            
+            // Preload images
+            const images = new Array(24);
+            function preloadImage(hour) {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        images[hour-1] = img;
+                        resolve();
+                    };
+                    img.onerror = reject;
+                    img.src = `/frame/${hour}`;
+                });
+            }
+            
+            // Preload first few frames immediately
+            Promise.all([1,2,3].map(preloadImage)).then(() => {
+                // Then load the rest in background
+                for (let hour = 4; hour <= 24; hour++) {
+                    preloadImage(hour);
+                }
+            });
+            
+            function updateDisplay(hour) {
+                timeDisplay.textContent = `Hour +${hour}`;
+                if (images[hour-1]) {
+                    forecastImage.src = images[hour-1].src;
+                } else {
+                    forecastImage.src = `/frame/${hour}`;
+                }
+            }
+            
+            slider.addEventListener('input', () => {
+                const hour = parseInt(slider.value);
+                updateDisplay(hour);
+            });
+            
+            playButton.addEventListener('click', () => {
+                if (isPlaying) {
+                    clearInterval(playInterval);
+                    playButton.textContent = 'Play';
+                } else {
+                    playInterval = setInterval(() => {
+                        let hour = parseInt(slider.value);
+                        hour = hour >= 24 ? 1 : hour + 1;
+                        slider.value = hour;
+                        updateDisplay(hour);
+                    }, 500);
+                    playButton.textContent = 'Pause';
+                }
+                isPlaying = !isPlaying;
+            });
+        </script>
     </body>
     </html>
     """
