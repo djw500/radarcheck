@@ -3,6 +3,7 @@ import logging
 from io import BytesIO
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
+from utils.filelock import file_lock, FileLockException
 
 import requests
 import matplotlib.pyplot as plt
@@ -101,14 +102,19 @@ def fetch_grib(forecast_hour):
         if not os.path.exists(filename) or os.path.getsize(filename) < 1000:
             return False
         try:
-            ds = xr.open_dataset(filename, engine="cfgrib")
-            ds.close()
-            return True
+            with file_lock(filename):
+                ds = xr.open_dataset(filename, engine="cfgrib")
+                ds.close()
+                return True
         except Exception as e:
             logger.warning(f"GRIB file invalid: {filename}, Error: {str(e)}")
-            if os.path.exists(filename):
-                os.remove(filename)
-                logger.info(f"Deleted invalid file: {filename}")
+            try:
+                with file_lock(filename):
+                    if os.path.exists(filename):
+                        os.remove(filename)
+                        logger.info(f"Deleted invalid file: {filename}")
+            except Exception as lock_e:
+                logger.error(f"Failed to acquire lock to delete invalid file: {str(lock_e)}")
             return False
 
     # Try to use cached file
@@ -120,14 +126,30 @@ def fetch_grib(forecast_hour):
     for attempt in range(3):
         logger.info(f"Downloading GRIB file from: {url} (attempt {attempt + 1}/3)")
         try:
-            download_file(url, filename)
-            if try_load_grib(filename):
+            temp_filename = f"{filename}.tmp"
+            download_file(url, temp_filename)
+            
+            # Verify the temporary file
+            if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) < 1000:
+                raise ValueError(f"Downloaded file is missing or too small: {temp_filename}")
+            
+            # Try to open with xarray to verify it's valid
+            ds = xr.open_dataset(temp_filename, engine="cfgrib")
+            ds.close()
+            
+            # If verification passed, move the file into place atomically
+            with file_lock(filename):
+                os.replace(temp_filename, filename)
                 logger.info(f"Successfully downloaded and verified GRIB file: {filename}")
                 return filename
+                
         except Exception as e:
             logger.error(f"Download attempt {attempt + 1} failed: {str(e)}", exc_info=True)
-            if os.path.exists(filename):
-                os.remove(filename)
+            if os.path.exists(temp_filename):
+                try:
+                    os.remove(temp_filename)
+                except Exception:
+                    pass
     
     raise ValueError("Failed to obtain valid GRIB file after 3 attempts")
 
