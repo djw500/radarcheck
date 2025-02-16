@@ -1,8 +1,9 @@
 import os
 import zipfile
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import pytz
 import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
@@ -83,7 +84,19 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             transform=ccrs.PlateCarree()
         )
         
-        ax.set_title(f"HRRR Forecast: {var_label}\nInit: {init_time}, fxx={forecast_hour}")
+        # Convert init_time to Eastern Time
+        utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M")
+        utc = pytz.UTC.localize(utc_time)
+        eastern = pytz.timezone('America/New_York')
+        est_init_time = utc.astimezone(eastern)
+        
+        # Calculate forecast valid time
+        forecast_delta = timedelta(hours=int(forecast_hour))
+        est_valid_time = est_init_time + forecast_delta
+        
+        ax.set_title(f"HRRR Forecast: {var_label}\n"
+                    f"Model Run: {est_init_time.strftime('%I:%M %p %Z')}\n"
+                    f"Valid: {est_valid_time.strftime('%I:%M %p %Z')}")
         ax.coastlines(resolution='50m')
         gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--")
         gl.top_labels = False
