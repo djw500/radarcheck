@@ -1,19 +1,26 @@
 import os
-import zipfile
 import requests
+import zipfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 def download_file(url, local_path):
     """Download a file if it doesn't exist in cache."""
     if not os.path.exists(local_path):
-        print(f"Downloading from: {url}")
+        logger.info(f"Downloading from: {url}")
         response = requests.get(url, stream=True)
         response.raise_for_status()
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        
         with open(local_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print(f"Downloaded: {local_path}")
+        logger.info(f"Downloaded: {local_path}")
     else:
-        print(f"Using cached file: {local_path}")
+        logger.info(f"Using cached file: {local_path}")
 
 def fetch_county_shapefile(cache_dir):
     """Download and extract the county shapefile if needed."""
@@ -26,7 +33,7 @@ def fetch_county_shapefile(cache_dir):
     if not os.path.exists(county_dir):
         with zipfile.ZipFile(county_zip, "r") as zip_ref:
             zip_ref.extractall(county_dir)
-        print("Extracted county shapefile.")
+        logger.info("Extracted county shapefile.")
     else:
-        print("County shapefile already extracted.")
+        logger.info("County shapefile already extracted.")
     return county_shp
