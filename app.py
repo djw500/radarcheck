@@ -29,8 +29,11 @@ def get_latest_hrrr_run():
         date_str = check_time.strftime("%Y%m%d")
         init_hour = check_time.strftime("%H")
         
-        # Check if the directory exists
-        url = f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/hrrr/prod/hrrr.{date_str}/"
+        # Check if the file exists using the filter URL
+        url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
+               f"file=hrrr.t{init_hour}z.wrfsfcf01.grib2&"
+               f"dir=%2Fhrrr.{date_str}%2Fconus&"
+               f"var_REFC=on")
         response = requests.head(url)
         if response.status_code == 200:
             return date_str, init_hour, check_time.strftime("%Y-%m-%d %H:%M")
@@ -42,8 +45,10 @@ date_str, init_hour, init_time = get_latest_hrrr_run()
 forecast_hour = "01"  # Use 1-hour forecast for most recent data
 
 # Construct URL for HRRR surface forecast file
-HRRR_URL = (f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/hrrr/prod/hrrr.{date_str}/conus/"
-            f"hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2")
+HRRR_URL = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
+            f"file=hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2&"
+            f"dir=%2Fhrrr.{date_str}%2Fconus&"
+            f"var_REFC=on")  # Requesting composite reflectivity
 
 # Local cache filenames
 GRIB_FILENAME = os.path.join(CACHE_DIR, f"hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2")
