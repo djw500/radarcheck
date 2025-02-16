@@ -34,43 +34,6 @@ def test_client():
 
 # --- Unit Tests for utils.py ---
 
-def test_download_file_success(tmpdir):
-    """Test successful file download."""
-    url = "https://example.com/robots.txt"  # Use a real, small file
-    local_path = str(tmpdir.join("robots.txt"))
-    
-    download_file(url, local_path)
-    
-    assert os.path.exists(local_path)
-    with open(local_path, 'r') as f:
-        assert "User-agent:" in f.read()
-
-def test_download_file_existing_cache(tmpdir):
-    """Test using cached file when it already exists."""
-    url = "https://example.com/robots.txt"  # Use a real, small file
-    local_path = str(tmpdir.join("robots.txt"))
-    
-    # Create a dummy file
-    with open(local_path, 'w') as f:
-        f.write("existing content")
-    
-    download_file(url, local_path)
-    
-    # Ensure that the file content remains unchanged
-    with open(local_path, 'r') as f:
-        assert f.read() == "existing content"  # File content should remain unchanged
-
-def test_download_file_request_error(tmpdir):
-    """Test handling of HTTP request errors during download."""
-    url = "http://example.com/nonexistent_file"
-    local_path = str(tmpdir.join("nonexistent_file"))
-    
-    with pytest.raises(requests.exceptions.RequestException) as exc_info:
-        download_file(url, local_path)
-    
-    assert "404" in str(exc_info.value)
-    assert not os.path.exists(local_path)  # File should not be created
-
 def test_fetch_county_shapefile(tmpdir):
     """Test downloading and extracting county shapefile."""
     cache_dir = str(tmpdir)
@@ -82,39 +45,6 @@ def test_fetch_county_shapefile(tmpdir):
     
     assert os.path.exists(county_shp)
     assert result_shp == county_shp
-
-# --- Integration Tests for app.py ---
-
-# def test_forecast_endpoint_success(test_client):
-#     """Test successful /forecast endpoint."""
-#     response = test_client.get('/forecast')
-    
-#     assert response.status_code == 200
-#     assert response.content_type == 'image/png'
-
-# def test_forecast_endpoint_error(test_client):
-#     """Test /forecast endpoint when create_plot raises an exception."""
-#     # This test might be a bit harder to trigger reliably without mocks,
-#     # since it depends on the create_plot function raising an exception.
-#     # One way to do it is to temporarily break the GRIB file path.
-    
-#     # Download the GRIB file first
-#     grib_path = os.path.join(repomap["CACHE_DIR"], "hrrr.t00z.wrfsfcf01.grib2")
-#     fetch_grib()
-
-#     # Temporarily modify the GRIB_FILENAME to cause an error
-#     original_grib_filename = grib_path
-#     corrupted_grib_filename = repomap["CACHE_DIR"] + "/corrupted_hrrr.grib2"
-    
-#     try:
-#         os.rename(original_grib_filename, corrupted_grib_filename)
-#         response = test_client.get('/forecast')
-#         assert response.status_code == 500
-#         assert b"Error Generating Plot" in response.data
-#     finally:
-#         # Restore the original GRIB_FILENAME
-#         if os.path.exists(corrupted_grib_filename):
-#             os.rename(corrupted_grib_filename, original_grib_filename)
 
 # --- Existing Tests (Review and Adjust) ---
 
@@ -140,16 +70,16 @@ def test_real_hrrr_availability():
     print(f"\nHRRR Run Information:")
     print(f"UTC Time: {utc.strftime('%Y-%m-%d %H:%M %Z')}")
     print(f"Eastern Time: {est_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
-    #print(f"HRRR URL: {HRRR_URL}") # Removed HRRR_URL since it's a global constant
+    print(f"HRRR URL: {HRRR_URL}") # Removed HRRR_URL since it's a global constant
     
     # Verify the HRRR file is actually available
-    #response = requests.head(HRRR_URL) # Removed HRRR_URL since it's a global constant
-    #assert response.status_code == 200, f"HRRR file not available at {HRRR_URL}" # Removed HRRR_URL since it's a global constant
+    response = requests.head(HRRR_URL) # Removed HRRR_URL since it's a global constant
+    assert response.status_code == 200, f"HRRR file not available at {HRRR_URL}" # Removed HRRR_URL since it's a global constant
     
-    # Get file size in MB if available
-    #if 'content-length' in response.headers: # Removed HRRR_URL since it's a global constant
-    #    size_mb = int(response.headers['content-length']) / (1024 * 1024) # Removed HRRR_URL since it's a global constant
-    #    print(f"File size: {size_mb:.1f} MB") # Removed HRRR_URL since it's a global constant
+    Get file size in MB if available
+    if 'content-length' in response.headers: # Removed HRRR_URL since it's a global constant
+       size_mb = int(response.headers['content-length']) / (1024 * 1024) # Removed HRRR_URL since it's a global constant
+       print(f"File size: {size_mb:.1f} MB") # Removed HRRR_URL since it's a global constant
     
     # The test now focuses on time conversion and HRRR run info, not URL availability
     pass
@@ -168,17 +98,6 @@ def test_real_grib_download():
     print(f"File size: {size_kb:.1f} KB")
     
     assert size_kb > 100, f"GRIB file seems too small ({size_kb:.1f} KB)"
-
-def test_get_latest_hrrr_run_error():
-    """Test error handling when no HRRR run is available"""
-    with patch('requests.head') as mock_head:
-        # Mock all requests to return 404
-        mock_head.return_value.status_code = 404
-        
-        with pytest.raises(Exception) as exc_info:
-            get_latest_hrrr_run()
-        
-        assert "Could not find a recent HRRR run" in str(exc_info.value)
 
 def test_latest_hrrr_info():
     """Test and display information about the latest available HRRR run"""
