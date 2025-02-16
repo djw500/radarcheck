@@ -25,7 +25,8 @@ def test_client():
     """Create a test client for the Flask app."""
     test_app = create_test_app()
     with test_app.test_client() as client:
-        yield client
+        with test_app.app_context():
+            yield client
 
 @pytest.fixture
 def mock_response():
@@ -40,7 +41,7 @@ def mock_file_download(tmpdir):
     """Mock file download and return a temporary file path."""
     def _mock_file_download(content="test content"):
         temp_file = tmpdir.join("temp_file.txt")
-        temp_file.write(content)
+        temp_file.write(content.encode('utf-8'))
         return str(temp_file)
     return _mock_file_download
 
@@ -52,6 +53,9 @@ def test_download_file_success(tmpdir, mock_response):
     local_path = str(tmpdir.join("test.txt"))
     
     with patch('requests.get', return_value=mock_response) as mock_get:
+        mock_get.return_value.__enter__.return_value = mock_response
+        mock_get.return_value.__exit__.return_value = None
+        
         download_file(url, local_path)
         
         mock_get.assert_called_once_with(url, stream=True)
@@ -107,6 +111,8 @@ def test_fetch_county_shapefile(tmpdir):
         mock_download.return_value = None
         mock_zipfile_instance = MagicMock()
         mock_zipfile.return_value = mock_zipfile_instance
+        mock_zipfile_instance.__enter__.return_value = mock_zipfile_instance
+        mock_zipfile_instance.__exit__.return_value = None
         
         # Call the function
         result_shp = fetch_county_shapefile(cache_dir)
