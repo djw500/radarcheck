@@ -1,6 +1,8 @@
 import os
+import logging
 from io import BytesIO
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 
 import requests
 import matplotlib.pyplot as plt
@@ -18,7 +20,22 @@ import pytz
 from config import repomap
 from utils import download_file, fetch_county_shapefile
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Create logs directory if it doesn't exist
+os.makedirs('logs', exist_ok=True)
+
+# Add file handler
+file_handler = RotatingFileHandler('logs/app.log', maxBytes=1024*1024, backupCount=5)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+))
+logger.addHandler(file_handler)
+
 app = Flask(__name__)
+logger.info('Application startup')
 
 def get_latest_hrrr_run():
     """Find the most recent HRRR run available."""
@@ -100,19 +117,35 @@ from plotting import create_plot, create_forecast_gif
 def get_frame(hour):
     """Serve a single forecast frame."""
     try:
+        logger.info(f'Requesting frame for hour {hour}')
+        
         if not 1 <= hour <= 24:
+            logger.warning(f'Invalid forecast hour requested: {hour}')
             return "Invalid forecast hour", 400
             
         # Format hour as two digits
         hour_str = f"{hour:02d}"
+        logger.debug(f'Formatted hour string: {hour_str}')
         
         # Get or create the frame
-        grib_path = fetch_grib(hour_str)
-        image_buffer = create_plot(grib_path, init_time, hour_str, repomap["CACHE_DIR"])
+        try:
+            grib_path = fetch_grib(hour_str)
+            logger.info(f'Successfully fetched GRIB file: {grib_path}')
+        except Exception as e:
+            logger.error(f'Error fetching GRIB file: {str(e)}', exc_info=True)
+            return f"Error fetching forecast  {str(e)}", 500
+            
+        try:
+            image_buffer = create_plot(grib_path, init_time, hour_str, repomap["CACHE_DIR"])
+            logger.info('Successfully created plot')
+        except Exception as e:
+            logger.error(f'Error creating plot: {str(e)}', exc_info=True)
+            return f"Error creating visualization: {str(e)}", 500
         
         return send_file(image_buffer, mimetype="image/png")
     except Exception as e:
-        return str(e), 500
+        logger.error(f'Unexpected error in get_frame: {str(e)}', exc_info=True)
+        return f"Internal server error: {str(e)}", 500
 
 @app.route("/forecast")
 def forecast():

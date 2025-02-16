@@ -1,7 +1,10 @@
 import os
+import logging
 import zipfile
 from io import BytesIO
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 import pytz
 import xarray as xr
@@ -36,33 +39,33 @@ def create_radar_colormap():
 
 def create_plot(grib_path, init_time, forecast_hour, cache_dir):
     """Create a plot from HRRR GRIB data."""
-    print("Starting plot creation...")
+    logger.info("Starting plot creation...")
     
     try:
         # --- Step 1: Open GRIB file ---
-        print("Attempting to open dataset with shortName filter...")
+        logger.info("Attempting to open dataset with shortName filter...")
         try:
             ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': 'refc'})
-            print("Successfully loaded dataset with filter_by_keys={'shortName': 'refc'}")
+            logger.info("Successfully loaded dataset with filter_by_keys={'shortName': 'refc'}")
         except Exception as e:
-            print(f"Error with shortName filter: {str(e)}")
-            print("Trying parameter filter...")
+            logger.warning(f"Error with shortName filter: {str(e)}")
+            logger.info("Trying parameter filter...")
             ds = xr.open_dataset(grib_path, engine="cfgrib", 
                                backend_kwargs={'filter_by_keys': {'paramId': '132'}})
-            print("Successfully loaded dataset with parameter filter")
+            logger.info("Successfully loaded dataset with parameter filter")
 
-        print("Available variables in dataset:", list(ds.data_vars.keys()))
+        logger.info(f"Available variables in dataset: {list(ds.data_vars.keys())}")
 
         # --- Step 2: Determine which variable to plot ---
         if not ds.data_vars:
             raise ValueError("No variables found in the GRIB file after filtering.")
 
         if "refc" in ds.data_vars:
-            print("Found refc variable")
+            logger.info("Found refc variable")
             data_to_plot = ds["refc"]
             var_label = "Composite Reflectivity (dBZ)"
         else:
-            print("Using first available variable")
+            logger.info("Using first available variable")
             var_label = list(ds.data_vars.keys())[0]
             data_to_plot = ds[var_label]
 
@@ -88,7 +91,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             # Convert negative longitudes to 0-360 range
             region_bounds['lon_min'] = 360 + region_bounds['lon_min']
             region_bounds['lon_max'] = 360 + region_bounds['lon_max']
-            print(f"Adjusted longitude bounds to 0-360: {region_bounds['lon_min']}, {region_bounds['lon_max']}")
+            logger.info(f"Adjusted longitude bounds to 0-360: {region_bounds['lon_min']}, {region_bounds['lon_max']}")
 
         # Create the subset with a small buffer for interpolation
         buffer = 0.1
@@ -98,7 +101,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
                   (data_to_plot.longitude <= region_bounds['lon_max'] + buffer)
         
         subset = data_to_plot.where(lat_mask & lon_mask, drop=True)
-        print(f"Subset shape: {subset.shape}")
+        logger.info(f"Subset shape: {subset.shape}")
 
         # Create the plot
         fig = plt.figure(figsize=(8, 6))
@@ -110,7 +113,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             region_bounds['lat_max']
         ], crs=ccrs.PlateCarree())
         
-        print("Creating plot...")
+        logger.info("Creating plot...")
         subset.plot.pcolormesh(
             ax=ax,
             x="longitude",
@@ -153,7 +156,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
         gl.right_labels = False
 
         # --- Step 5: Overlay county boundaries ---
-        print("Adding county boundaries...")
+        logger.info("Adding county boundaries...")
         shp_path = fetch_county_shapefile(cache_dir)
         counties = gpd.read_file(shp_path)
         
@@ -166,7 +169,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             float(subset_corrected.longitude.max()),
             float(subset_corrected.latitude.max())
         )
-        print("Plot bounding box:", bbox)
+        logger.info(f"Plot bounding box: {bbox}")
         
         counties_philly = counties[counties.intersects(bbox)]
         ax.add_geometries(
@@ -191,8 +194,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
 
     except Exception as e:
         import traceback
-        print("Error in create_plot:")
-        print(traceback.format_exc())
+        logger.error("Error in create_plot:", exc_info=True)
         raise
     
 def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
@@ -211,7 +213,7 @@ def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
     frames = []
     
     for i, grib_path in enumerate(grib_paths):
-        print(f"Processing forecast hour {i}...")
+        logger.info(f"Processing forecast hour {i}...")
         
         # Create the plot for this forecast hour and get the buffer
         plot_buffer = create_plot(grib_path, init_time, str(i+1), cache_dir)
