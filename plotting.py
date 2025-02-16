@@ -32,6 +32,9 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
         print("Available variables in dataset:", list(ds.data_vars.keys()))
 
         # --- Step 2: Determine which variable to plot ---
+        if not ds.data_vars:
+            raise ValueError("No variables found in the GRIB file after filtering.")
+
         if "t2m" in ds.data_vars:
             print("Found t2m variable")
             temp_var = "t2m"

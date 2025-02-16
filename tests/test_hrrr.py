@@ -35,7 +35,7 @@ def test_client():
 
 def test_download_file_success(tmpdir):
     """Test successful file download."""
-    url = "https://www.example.com/robots.txt"  # Use a real, small file
+    url = "https://example.com/robots.txt"  # Use a real, small file
     local_path = str(tmpdir.join("robots.txt"))
     
     download_file(url, local_path)
@@ -46,7 +46,7 @@ def test_download_file_success(tmpdir):
 
 def test_download_file_existing_cache(tmpdir):
     """Test using cached file when it already exists."""
-    url = "https://www.example.com/robots.txt"  # Use a real, small file
+    url = "https://example.com/robots.txt"  # Use a real, small file
     local_path = str(tmpdir.join("robots.txt"))
     
     # Create a dummy file
@@ -97,8 +97,12 @@ def test_forecast_endpoint_error(test_client):
     # since it depends on the create_plot function raising an exception.
     # One way to do it is to temporarily break the GRIB file path.
     
+    # Download the GRIB file first
+    grib_path = os.path.join(repomap["CACHE_DIR"], "hrrr.t00z.wrfsfcf01.grib2")
+    fetch_grib()
+
     # Temporarily modify the GRIB_FILENAME to cause an error
-    original_grib_filename = repomap["CACHE_DIR"] + "/hrrr.t00z.wrfsfcf01.grib2"
+    original_grib_filename = grib_path
     corrupted_grib_filename = repomap["CACHE_DIR"] + "/corrupted_hrrr.grib2"
     
     try:
@@ -108,7 +112,8 @@ def test_forecast_endpoint_error(test_client):
         assert b"Error Generating Plot" in response.data
     finally:
         # Restore the original GRIB_FILENAME
-        os.rename(corrupted_grib_filename, original_grib_filename)
+        if os.path.exists(corrupted_grib_filename):
+            os.rename(corrupted_grib_filename, original_grib_filename)
 
 # --- Existing Tests (Review and Adjust) ---
 
