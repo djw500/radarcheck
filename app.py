@@ -97,125 +97,31 @@ def get_local_time_text(utc_time_str):
     local_time = utc_time.astimezone(eastern_zone)
     return local_time.strftime("Forecast valid at: %Y-%m-%d %I:%M %p %Z")
 
-def create_plot():
-    # --- Step 1: Download and open GRIB file ---
-    grib_path = fetch_grib()
-    # Try using filter by shortName for 2m temperature. If that fails, fallback to surface.
-    try:
-        ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': '2t'})
-        print("Loaded dataset with filter_by_keys={'shortName': '2t'}")
-    except Exception as e:
-        print("Error with shortName filter, trying typeOfLevel filter.")
-        ds = xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'accum'}})
-    
-    # Determine temperature variable (or use snowfall variable if available)
-    if "t2m" in ds.data_vars:
-        temp_var = "t2m"
-        temp_celsius = ds[temp_var] - 273.15
-        data_to_plot = temp_celsius
-        var_label = "2-m Temperature (°C)"
-    elif "TMP" in ds.data_vars:
-        temp_var = "TMP"
-        temp_celsius = ds[temp_var] - 273.15
-        data_to_plot = temp_celsius
-        var_label = "2-m Temperature (°C)"
-    elif "sdwe" in ds.data_vars:
-        # Assume sdwe is snow water equivalent in mm; convert to cm of snow
-        sdwe = ds["sdwe"]
-        snowfall_cm = sdwe / 10.0
-        snowfall_in = snowfall_cm / 2.54  # inches
-        data_to_plot = snowfall_in
-        var_label = "Snowfall (inches)"
-    else:
-        # Fallback to first variable
-        var_label = list(ds.data_vars.keys())[0]
-        data_to_plot = ds[var_label]
-
-    # --- Step 2: Subset the data for Philadelphia region ---
-    # Desired bounds (you can adjust as needed)
-    desired_lat_min, desired_lat_max = 39.0, 40.5
-    desired_lon_min, desired_lon_max = -76, -74.0
-
-    # Check file coordinate system (convert if necessary)
-    lon = data_to_plot.longitude
-    if float(lon.min()) >= 0:
-        philly_lon_min = 360 + desired_lon_min
-        philly_lon_max = 360 + desired_lon_max
-        print("Adjusted longitude bounds to 0-360:", philly_lon_min, philly_lon_max)
-    else:
-        philly_lon_min = desired_lon_min
-        philly_lon_max = desired_lon_max
-
-    def get_subset(data):
-        return data.where(
-            (data.latitude >= desired_lat_min) & (data.latitude <= desired_lat_max) &
-            (data.longitude >= philly_lon_min) & (data.longitude <= philly_lon_max),
-            drop=True
-        )
-
-    subset = get_subset(data_to_plot)
-    print("Subset shape:", subset.shape)
-
-    # --- Step 3: Create the plot ---
-    fig = plt.figure(figsize=(8, 6))
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    subset.plot.pcolormesh(
-        ax=ax,
-        x="longitude",
-        y="latitude",
-        cmap="coolwarm",
-        add_colorbar=True,
-        transform=ccrs.PlateCarree()
-    )
-    ax.set_title(f"HRRR Forecast: {var_label}\nInit: {init_time}, fxx={forecast_hour}")
-    ax.coastlines(resolution='50m')
-    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--")
-    gl.top_labels = False
-    gl.right_labels = False
-
-    # --- Step 4: Overlay county boundaries ---
-    shp_path = fetch_county_shapefile()
-    counties = gpd.read_file(shp_path)
-    # Correct the subset longitude from 0-360 to -180 to 180 for plotting
-    subset_corrected = subset.assign_coords(
-        longitude=(((subset.longitude + 180) % 360) - 180)
-    )
-    bbox = box(
-        float(subset_corrected.longitude.min()),
-        float(subset_corrected.latitude.min()),
-        float(subset_corrected.longitude.max()),
-        float(subset_corrected.latitude.max())
-    )
-    print("Plot bounding box:", bbox)
-    counties_philly = counties[counties.intersects(bbox)]
-    ax.add_geometries(
-        counties_philly.geometry,
-        crs=ccrs.PlateCarree(),
-        edgecolor='gray',
-        facecolor='none',
-        linewidth=1.0
-    )
-
-    # Mark a specific region of interest (e.g., center of Philadelphia)
-    roi_lat = 40.04877
-    roi_lon = -75.38903
-    ax.plot(roi_lon, roi_lat, marker='*', markersize=15, color='gold', transform=ccrs.PlateCarree())
-
-    # Save plot to a BytesIO buffer
-    buf = BytesIO()
-    plt.savefig(buf, format="PNG", bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+from plotting import create_plot
 
 # --- Flask Endpoints ---
 
 @app.route("/forecast")
 def forecast():
     try:
-        img_buf = create_plot()
+        grib_path = fetch_grib()
+        img_buf = create_plot(grib_path, init_time, forecast_hour, CACHE_DIR)
     except Exception as e:
-        return f"Error generating plot: {e}", 500
+        import traceback
+        error_msg = f"""
+        <html>
+            <body>
+                <h1>Error Generating Plot</h1>
+                <pre>
+Error: {str(e)}
+
+Full Traceback:
+{traceback.format_exc()}
+                </pre>
+            </body>
+        </html>
+        """
+        return error_msg, 500
     return send_file(img_buf, mimetype="image/png")
 
 @app.route("/")
