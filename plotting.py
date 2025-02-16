@@ -10,7 +10,7 @@ import geopandas as gpd
 from shapely.geometry import box
 import requests
 
-from app import download_file, fetch_county_shapefile
+from utils import download_file, fetch_county_shapefile
 
 def create_plot(grib_path, init_time, forecast_hour, cache_dir):
     """Create a plot from HRRR GRIB data."""
