@@ -76,7 +76,7 @@ def test_real_hrrr_availability():
     response = requests.head(HRRR_URL) # Removed HRRR_URL since it's a global constant
     assert response.status_code == 200, f"HRRR file not available at {HRRR_URL}" # Removed HRRR_URL since it's a global constant
     
-    Get file size in MB if available
+    # Get file size in MB if available
     if 'content-length' in response.headers: # Removed HRRR_URL since it's a global constant
        size_mb = int(response.headers['content-length']) / (1024 * 1024) # Removed HRRR_URL since it's a global constant
        print(f"File size: {size_mb:.1f} MB") # Removed HRRR_URL since it's a global constant
@@ -108,7 +108,8 @@ def test_latest_hrrr_info():
     utc = pytz.UTC.localize(utc_time)
     eastern = pytz.timezone('America/New_York')
     est_time = utc.astimezone(eastern)
-    
+
+    # These are for me to read when I run the full command with full printing.
     print("\nLatest HRRR Run Information:")
     print(f"Date: {date_str}")
     print(f"Initialization Hour (UTC): {init_hour}Z")
