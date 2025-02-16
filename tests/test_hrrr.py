@@ -133,7 +133,7 @@ def test_create_forecast_gif_success():
         grib_filename = os.path.join(repomap["CACHE_DIR"], 
                                    f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{hour:02d}.grib2")
         if not os.path.exists(grib_filename):
-            fetch_grib(hour)
+            fetch_grib(f"{hour:02d}")
         grib_paths.append(grib_filename)
 
     # 3. Create the animated GIF
