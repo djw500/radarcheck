@@ -2,7 +2,6 @@ import os
 import pytest
 import pytz
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
 import requests
 from flask import Flask
 from io import BytesIO
@@ -31,71 +30,44 @@ def test_client():
         with test_app.app_context():
             yield client
 
-@pytest.fixture
-def mock_response():
-    """Mock successful HTTP response"""
-    mock = MagicMock()
-    mock.status_code = 200
-    mock.content = b"mock_grib_data"
-    mock.iter_content.return_value = [b"mock_grib_data"]  # Mock iter_content
-    return mock
-
-@pytest.fixture
-def mock_file_download(tmpdir):
-    """Mock file download and return a temporary file path."""
-    def _mock_file_download(content="test content"):
-        temp_file = tmpdir.join("temp_file.txt")
-        temp_file.write(content.encode('utf-8'))
-        return str(temp_file)
-    return _mock_file_download
-
 # --- Unit Tests for utils.py ---
 
-def test_download_file_success(tmpdir, mock_response):
+def test_download_file_success(tmpdir):
     """Test successful file download."""
-    url = "http://example.com/test.txt"
-    local_path = str(tmpdir.join("test.txt"))
+    url = "https://www.example.com/robots.txt"  # Use a real, small file
+    local_path = str(tmpdir.join("robots.txt"))
     
-    with patch('requests.get', return_value=mock_response) as mock_get:
-        download_file(url, local_path)
-        
-        mock_get.assert_called_once_with(url, stream=True)
-        assert os.path.exists(local_path)
-        with open(local_path, 'rb') as f:
-            assert f.read() == mock_response.content
+    download_file(url, local_path)
+    
+    assert os.path.exists(local_path)
+    with open(local_path, 'r') as f:
+        assert "User-agent:" in f.read()
 
-def test_download_file_existing_cache(tmpdir, mock_response):
+def test_download_file_existing_cache(tmpdir):
     """Test using cached file when it already exists."""
-    url = "http://example.com/test.txt"
-    local_path = str(tmpdir.join("test.txt"))
+    url = "https://www.example.com/robots.txt"  # Use a real, small file
+    local_path = str(tmpdir.join("robots.txt"))
     
     # Create a dummy file
     with open(local_path, 'w') as f:
         f.write("existing content")
     
-    with patch('requests.get', return_value=mock_response) as mock_get:
-        download_file(url, local_path)
-        
-        # Ensure that requests.get is NOT called because the file exists
-        mock_get.assert_not_called()
-        with open(local_path, 'r') as f:
-            assert f.read() == "existing content"  # File content should remain unchanged
+    download_file(url, local_path)
+    
+    # Ensure that the file content remains unchanged
+    with open(local_path, 'r') as f:
+        assert f.read() == "existing content"  # File content should remain unchanged
 
 def test_download_file_request_error(tmpdir):
     """Test handling of HTTP request errors during download."""
-    url = "http://example.com/test.txt"
-    local_path = str(tmpdir.join("test.txt"))
+    url = "http://example.com/nonexistent_file"
+    local_path = str(tmpdir.join("nonexistent_file"))
     
-    with patch('requests.get') as mock_get:
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = requests.exceptions.RequestException("Request failed")
-        mock_get.return_value = mock_response
-        
-        with pytest.raises(requests.exceptions.RequestException) as exc_info:
-            download_file(url, local_path)
-        
-        assert "Request failed" in str(exc_info.value)
-        assert not os.path.exists(local_path)  # File should not be created
+    with pytest.raises(requests.exceptions.RequestException) as exc_info:
+        download_file(url, local_path)
+    
+    assert "404" in str(exc_info.value)
+    assert not os.path.exists(local_path)  # File should not be created
 
 def test_fetch_county_shapefile(tmpdir):
     """Test downloading and extracting county shapefile."""
@@ -104,51 +76,38 @@ def test_fetch_county_shapefile(tmpdir):
     county_dir = os.path.join(cache_dir, "county_shapefile")
     county_shp = os.path.join(county_dir, "cb_2018_us_county_20m.shp")
     
-    # Mock the download_file and zipfile extraction
-    with patch('utils.download_file') as mock_download, \
-         patch('zipfile.ZipFile') as mock_zipfile:
-        
-        # Configure the mocks
-        mock_download.return_value = None
-        mock_zipfile_instance = MagicMock()
-        mock_zipfile.return_value = mock_zipfile_instance
-        mock_zipfile_instance.__enter__.return_value = mock_zipfile_instance
-        mock_zipfile_instance.__exit__.return_value = None
-        
-        # Call the function
-        result_shp = fetch_county_shapefile(cache_dir)
-        
-        # Assertions
-        mock_download.assert_called_once_with(
-            "https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_20m.zip",
-            county_zip
-        )
-        mock_zipfile.assert_called_once_with(county_zip, "r")
-        mock_zipfile_instance.extractall.assert_called_once_with(county_dir)
-        assert result_shp == county_shp
+    result_shp = fetch_county_shapefile(cache_dir)
+    
+    assert os.path.exists(county_shp)
+    assert result_shp == county_shp
 
 # --- Integration Tests for app.py ---
 
-def test_forecast_endpoint_success(test_client, mock_file_download):
+def test_forecast_endpoint_success(test_client):
     """Test successful /forecast endpoint."""
-    # Mock the fetch_grib and create_plot functions
-    with patch('app.fetch_grib', return_value=mock_file_download()) as mock_fetch_grib, \
-         patch('app.create_plot', return_value=MagicMock(spec=BytesIO)) as mock_create_plot:
-        
-        response = test_client.get('/forecast')
-        
-        assert response.status_code == 200
-        assert response.content_type == 'image/png'
-        mock_fetch_grib.assert_called_once()
-        mock_create_plot.assert_called_once()
+    response = test_client.get('/forecast')
+    
+    assert response.status_code == 200
+    assert response.content_type == 'image/png'
 
 def test_forecast_endpoint_error(test_client):
     """Test /forecast endpoint when create_plot raises an exception."""
-    with patch('app.fetch_grib', side_effect=Exception("Plotting error")):
+    # This test might be a bit harder to trigger reliably without mocks,
+    # since it depends on the create_plot function raising an exception.
+    # One way to do it is to temporarily break the GRIB file path.
+    
+    # Temporarily modify the GRIB_FILENAME to cause an error
+    original_grib_filename = repomap["CACHE_DIR"] + "/hrrr.t00z.wrfsfcf01.grib2"
+    corrupted_grib_filename = repomap["CACHE_DIR"] + "/corrupted_hrrr.grib2"
+    
+    try:
+        os.rename(original_grib_filename, corrupted_grib_filename)
         response = test_client.get('/forecast')
-        
         assert response.status_code == 500
         assert b"Error Generating Plot" in response.data
+    finally:
+        # Restore the original GRIB_FILENAME
+        os.rename(corrupted_grib_filename, original_grib_filename)
 
 # --- Existing Tests (Review and Adjust) ---
 
