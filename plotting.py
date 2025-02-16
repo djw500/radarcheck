@@ -158,6 +158,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
         )
 
         # Mark center of Philadelphia
+        # Use this as the center of the lat/lng region, and make the region have a zoom factor that's easy to control zoom in/out. AI!
         roi_lat = 40.04877
         roi_lon = -75.38903
         ax.plot(roi_lon, roi_lat, marker='*', markersize=15, color='gold', 
