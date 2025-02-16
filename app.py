@@ -72,7 +72,7 @@ COUNTY_SHP = os.path.join(COUNTY_DIR, repomap["COUNTY_SHP_NAME"])
 def fetch_grib(forecast_hour):
     """Download and cache the HRRR GRIB file for a specific forecast hour."""
     url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-           f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour:02d}.grib2&"
+           f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{int(forecast_hour):02d}.grib2&"
            f"dir=%2Fhrrr.{date_str}%2Fconus&"
            f"{repomap['HRRR_VARS']}"
            f"leftlon={repomap['HRRR_LON_MIN']}&rightlon={repomap['HRRR_LON_MAX']}&toplat={repomap['HRRR_LAT_MAX']}&bottomlat={repomap['HRRR_LAT_MIN']}&")

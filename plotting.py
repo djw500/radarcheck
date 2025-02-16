@@ -213,17 +213,14 @@ def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
     for i, grib_path in enumerate(grib_paths):
         print(f"Processing forecast hour {i}...")
         
-        # Create the plot for this forecast hour
-        fig = create_plot(grib_path, init_time, i, cache_dir)
-        
-        # Convert matplotlib figure to PIL Image
-        buf = BytesIO()
-        fig.savefig(buf, format='PNG', bbox_inches='tight')
-        plt.close(fig)
-        buf.seek(0)
-        img = Image.open(buf)
+        # Create the plot for this forecast hour and get the buffer
+        plot_buffer = create_plot(grib_path, init_time, str(i+1), cache_dir)
+            
+        # Convert buffer to PIL Image
+        plot_buffer.seek(0)
+        img = Image.open(plot_buffer)
         frames.append(img.copy())
-        buf.close()
+        plot_buffer.close()
     
     # Save the animation to a buffer
     gif_buffer = BytesIO()
