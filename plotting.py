@@ -182,7 +182,12 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
                 marker='*', markersize=15, color='gold', 
                 transform=ccrs.PlateCarree())
 
-        return fig
+        # Convert figure to BytesIO buffer
+        buf = BytesIO()
+        fig.savefig(buf, format='PNG', bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        return buf
 
     except Exception as e:
         import traceback

@@ -86,7 +86,8 @@ def test_real_hrrr_availability():
 def test_real_grib_download():
     """Test actual GRIB file downloading and verification"""
     # Fetch the GRIB file
-    grib_path = fetch_grib()
+    forecast_hour = "01"  # Use 1-hour forecast
+    grib_path = fetch_grib(forecast_hour)
     
     # Verify the file exists
     assert os.path.exists(grib_path), f"GRIB file not found at {grib_path}"
