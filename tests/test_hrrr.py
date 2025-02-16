@@ -74,3 +74,25 @@ def test_get_latest_hrrr_run_error():
             get_latest_hrrr_run()
         
         assert "Could not find a recent HRRR run" in str(exc_info.value)
+
+def test_latest_hrrr_info():
+    """Test and display information about the latest available HRRR run"""
+    date_str, init_hour, init_time = get_latest_hrrr_run()
+    
+    # Convert to Eastern Time for display
+    utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M")
+    utc = pytz.UTC.localize(utc_time)
+    eastern = pytz.timezone('America/New_York')
+    est_time = utc.astimezone(eastern)
+    
+    print("\nLatest HRRR Run Information:")
+    print(f"Date: {date_str}")
+    print(f"Initialization Hour (UTC): {init_hour}Z")
+    print(f"UTC Time: {utc.strftime('%Y-%m-%d %H:%M %Z')}")
+    print(f"Eastern Time: {est_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
+    
+    # Verify the format and values
+    assert len(date_str) == 8, "Date string should be 8 characters (YYYYMMDD)"
+    assert date_str.isdigit(), "Date string should be all digits"
+    assert len(init_hour) == 2, "Init hour should be 2 characters (HH)"
+    assert 0 <= int(init_hour) <= 23, "Init hour should be between 00 and 23"
