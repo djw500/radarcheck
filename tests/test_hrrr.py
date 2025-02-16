@@ -8,7 +8,7 @@ from io import BytesIO
 from unittest.mock import patch  # Import patch
 
 # Import the functions we want to test
-from app import get_latest_hrrr_run, fetch_grib, forecast, app, index
+from app import get_latest_hrrr_run, fetch_grib, forecast, app, index, HRRR_URL
 from utils import download_file, fetch_county_shapefile
 from config import repomap
 from plotting import create_plot
