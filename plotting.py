@@ -20,14 +20,14 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
         # --- Step 1: Open GRIB file ---
         print("Attempting to open dataset with shortName filter...")
         try:
-            ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': '2t'})
-            print("Successfully loaded dataset with filter_by_keys={'shortName': '2t'}")
+            ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': 'refc'})
+            print("Successfully loaded dataset with filter_by_keys={'shortName': 'refc'}")
         except Exception as e:
             print(f"Error with shortName filter: {str(e)}")
-            print("Trying typeOfLevel filter...")
+            print("Trying parameter filter...")
             ds = xr.open_dataset(grib_path, engine="cfgrib", 
-                               backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'accum'}})
-            print("Successfully loaded dataset with typeOfLevel filter")
+                               backend_kwargs={'filter_by_keys': {'paramId': '132'}})
+            print("Successfully loaded dataset with parameter filter")
 
         print("Available variables in dataset:", list(ds.data_vars.keys()))
 
@@ -35,25 +35,10 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
         if not ds.data_vars:
             raise ValueError("No variables found in the GRIB file after filtering.")
 
-        if "t2m" in ds.data_vars:
-            print("Found t2m variable")
-            temp_var = "t2m"
-            temp_celsius = ds[temp_var] - 273.15
-            data_to_plot = temp_celsius
-            var_label = "2-m Temperature (°C)"
-        elif "TMP" in ds.data_vars:
-            print("Found TMP variable")
-            temp_var = "TMP"
-            temp_celsius = ds[temp_var] - 273.15
-            data_to_plot = temp_celsius
-            var_label = "2-m Temperature (°C)"
-        elif "sdwe" in ds.data_vars:
-            print("Found sdwe variable")
-            sdwe = ds["sdwe"]
-            snowfall_cm = sdwe / 10.0
-            snowfall_in = snowfall_cm / 2.54
-            data_to_plot = snowfall_in
-            var_label = "Snowfall (inches)"
+        if "refc" in ds.data_vars:
+            print("Found refc variable")
+            data_to_plot = ds["refc"]
+            var_label = "Composite Reflectivity (dBZ)"
         else:
             print("Using first available variable")
             var_label = list(ds.data_vars.keys())[0]
@@ -91,7 +76,9 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             ax=ax,
             x="longitude",
             y="latitude",
-            cmap="coolwarm",
+            cmap="gist_ncar",
+            vmin=0,
+            vmax=70,
             add_colorbar=True,
             transform=ccrs.PlateCarree()
         )

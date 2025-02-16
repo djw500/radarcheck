@@ -4,7 +4,7 @@ repomap = {
     "CACHE_DIR": "cache",
     "HRRR_FILE_PREFIX": "hrrr.t",
     "HRRR_FILE_SUFFIX": "z.wrfsfcf",
-    "HRRR_VARS": "var_REFC=on&var_TMP=on&var_HGT=on&var_UGRD=on&var_VGRD=on&",
+    "HRRR_VARS": "var_REFC=on&",
     "HRRR_LAT_MIN": "39.0",
     "HRRR_LAT_MAX": "40.5",
     "HRRR_LON_MIN": "-76",
