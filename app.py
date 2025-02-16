@@ -48,7 +48,8 @@ forecast_hour = "01"  # Use 1-hour forecast for most recent data
 HRRR_URL = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
             f"file=hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2&"
             f"dir=%2Fhrrr.{date_str}%2Fconus&"
-            f"var_REFC=on")  # Requesting composite reflectivity
+            f"var_REFC=on&var_TMP=on&var_HGT=on&var_UGRD=on&var_VGRD=on&"  # Request multiple variables
+            f"leftlon=-76&rightlon=-74&toplat=40.5&bottomlat=39.0&")  # Specify region
 
 # Local cache filenames
 GRIB_FILENAME = os.path.join(CACHE_DIR, f"hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2")

@@ -57,12 +57,12 @@ def test_real_grib_download():
     # Verify the file exists
     assert os.path.exists(grib_path), f"GRIB file not found at {grib_path}"
     
-    # Check file size (should be at least 1MB for a valid GRIB2 file)
-    size_mb = os.path.getsize(grib_path) / (1024 * 1024)
+    # Check file size (should be at least 100KB for a filtered GRIB2 file)
+    size_kb = os.path.getsize(grib_path) / 1024
     print(f"\nDownloaded GRIB file: {grib_path}")
-    print(f"File size: {size_mb:.1f} MB")
+    print(f"File size: {size_kb:.1f} KB")
     
-    assert size_mb > 1, f"GRIB file seems too small ({size_mb:.1f} MB)"
+    assert size_kb > 100, f"GRIB file seems too small ({size_kb:.1f} KB)"
 
 def test_get_latest_hrrr_run_error():
     """Test error handling when no HRRR run is available"""
