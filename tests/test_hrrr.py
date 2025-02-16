@@ -8,7 +8,7 @@ from flask import Flask
 from io import BytesIO
 
 # Import the functions we want to test
-from app import get_latest_hrrr_run, fetch_grib, forecast, app
+from app import get_latest_hrrr_run, fetch_grib, forecast, app, index
 from utils import download_file, fetch_county_shapefile
 from config import repomap
 
@@ -18,6 +18,9 @@ def create_test_app():
     """Create a test Flask app."""
     test_app = Flask(__name__)
     test_app.config['TESTING'] = True
+    # Import routes
+    test_app.add_url_rule('/', view_func=index)
+    test_app.add_url_rule('/forecast', view_func=forecast)
     return test_app
 
 @pytest.fixture
@@ -53,9 +56,6 @@ def test_download_file_success(tmpdir, mock_response):
     local_path = str(tmpdir.join("test.txt"))
     
     with patch('requests.get', return_value=mock_response) as mock_get:
-        mock_get.return_value.__enter__.return_value = mock_response
-        mock_get.return_value.__exit__.return_value = None
-        
         download_file(url, local_path)
         
         mock_get.assert_called_once_with(url, stream=True)
