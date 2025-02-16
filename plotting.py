@@ -12,6 +12,7 @@ import cartopy.crs as ccrs
 import geopandas as gpd
 from shapely.geometry import box
 import requests
+from PIL import Image
 
 from utils import download_file, fetch_county_shapefile
 
@@ -33,7 +34,6 @@ def create_radar_colormap():
     
     return LinearSegmentedColormap.from_list('radar', list(zip(positions, colors)))
 
-# Create a GIF of the next 12 forecast hours instead of a single one. AI!
 def create_plot(grib_path, init_time, forecast_hour, cache_dir):
     """Create a plot from HRRR GRIB data."""
     print("Starting plot creation...")
@@ -170,16 +170,54 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
                 marker='*', markersize=15, color='gold', 
                 transform=ccrs.PlateCarree())
 
-        # Save plot to buffer
-        print("Saving plot to buffer...")
-        buf = BytesIO()
-        plt.savefig(buf, format="PNG", bbox_inches="tight")
-        plt.close(fig)
-        buf.seek(0)
-        return buf
+        return fig
 
     except Exception as e:
         import traceback
         print("Error in create_plot:")
         print(traceback.format_exc())
         raise
+def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
+    """
+    Create an animated GIF from multiple HRRR forecast hours.
+    
+    Args:
+        grib_paths: List of paths to GRIB files for different forecast hours
+        init_time: Initial model run time
+        cache_dir: Directory for caching files
+        duration: Duration for each frame in milliseconds (default 500ms)
+    
+    Returns:
+        BytesIO object containing the animated GIF
+    """
+    frames = []
+    
+    for i, grib_path in enumerate(grib_paths):
+        print(f"Processing forecast hour {i}...")
+        
+        # Create the plot for this forecast hour
+        fig = create_plot(grib_path, init_time, i, cache_dir)
+        
+        # Convert matplotlib figure to PIL Image
+        buf = BytesIO()
+        fig.savefig(buf, format='PNG', bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        img = Image.open(buf)
+        frames.append(img.copy())
+        buf.close()
+    
+    # Save the animation to a buffer
+    gif_buffer = BytesIO()
+    frames[0].save(
+        gif_buffer,
+        format='GIF',
+        save_all=True,
+        append_images=frames[1:],
+        duration=duration,
+        loop=0,
+        optimize=False
+    )
+    gif_buffer.seek(0)
+    
+    return gif_buffer
