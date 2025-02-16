@@ -66,8 +66,8 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             data_to_plot = ds[var_label]
 
         # --- Step 3: Subset the data for Philadelphia region ---
-        desired_lat_min, desired_lat_max = 38.5, 41.0
-        desired_lon_min, desired_lon_max = -77.0, -73.0
+        desired_lat_min, desired_lat_max = 38.8, 40.7
+        desired_lon_min, desired_lon_max = -76.5, -73.5
 
         lon = data_to_plot.longitude
         if float(lon.min()) >= 0:
