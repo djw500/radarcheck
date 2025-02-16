@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 import requests
 from flask import Flask
+from io import BytesIO
 
 # Import the functions we want to test
 from app import get_latest_hrrr_run, fetch_grib, forecast, app
