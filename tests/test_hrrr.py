@@ -1,14 +1,15 @@
 import os
 import pytest
+import pytz
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 import requests
 
 # Import the functions we want to test
-from app import get_latest_hrrr_run, fetch_grib, CACHE_DIR
+from app import get_latest_hrrr_run, fetch_grib, CACHE_DIR, HRRR_URL
 
-def test_get_latest_hrrr_run():
-    """Test that get_latest_hrrr_run returns valid data format"""
+def test_real_hrrr_availability():
+    """Test actual HRRR server availability and time conversion"""
     date_str, init_hour, init_time = get_latest_hrrr_run()
     
     # Check date string format (YYYYMMDD)
@@ -20,8 +21,25 @@ def test_get_latest_hrrr_run():
     assert init_hour.isdigit()
     assert 0 <= int(init_hour) <= 23
     
-    # Check init time format
-    datetime.strptime(init_time, "%Y-%m-%d %H:%M")
+    # Convert UTC time to Eastern Time
+    utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M")
+    utc = pytz.UTC.localize(utc_time)
+    eastern = pytz.timezone('America/New_York')
+    est_time = utc.astimezone(eastern)
+    
+    print(f"\nHRRR Run Information:")
+    print(f"UTC Time: {utc.strftime('%Y-%m-%d %H:%M %Z')}")
+    print(f"Eastern Time: {est_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
+    print(f"HRRR URL: {HRRR_URL}")
+    
+    # Verify the HRRR file is actually available
+    response = requests.head(HRRR_URL)
+    assert response.status_code == 200, f"HRRR file not available at {HRRR_URL}"
+    
+    # Get file size in MB if available
+    if 'content-length' in response.headers:
+        size_mb = int(response.headers['content-length']) / (1024 * 1024)
+        print(f"File size: {size_mb:.1f} MB")
 
 @pytest.fixture
 def mock_response():
@@ -31,24 +49,20 @@ def mock_response():
     mock.content = b"mock_grib_data"
     return mock
 
-def test_fetch_grib(mock_response):
-    """Test GRIB file fetching with mocked HTTP response"""
-    with patch('requests.get', return_value=mock_response):
-        with patch('builtins.open', create=True) as mock_open:
-            # Clear cache if exists
-            test_grib = os.path.join(CACHE_DIR, "test.grib2")
-            if os.path.exists(test_grib):
-                os.remove(test_grib)
-                
-            # Test the fetch
-            result = fetch_grib()
-            
-            # Verify the file would have been downloaded
-            assert mock_open.called
-            
-            # Verify the result is a path string
-            assert isinstance(result, str)
-            assert result.endswith('.grib2')
+def test_real_grib_download():
+    """Test actual GRIB file downloading and verification"""
+    # Fetch the GRIB file
+    grib_path = fetch_grib()
+    
+    # Verify the file exists
+    assert os.path.exists(grib_path), f"GRIB file not found at {grib_path}"
+    
+    # Check file size (should be at least 1MB for a valid GRIB2 file)
+    size_mb = os.path.getsize(grib_path) / (1024 * 1024)
+    print(f"\nDownloaded GRIB file: {grib_path}")
+    print(f"File size: {size_mb:.1f} MB")
+    
+    assert size_mb > 1, f"GRIB file seems too small ({size_mb:.1f} MB)"
 
 def test_get_latest_hrrr_run_error():
     """Test error handling when no HRRR run is available"""
