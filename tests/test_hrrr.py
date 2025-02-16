@@ -70,7 +70,6 @@ def test_real_hrrr_availability():
     print(f"\nHRRR Run Information:")
     print(f"UTC Time: {utc.strftime('%Y-%m-%d %H:%M %Z')}")
     print(f"Eastern Time: {est_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
-    print(f"HRRR URL: {HRRR_URL}") # Removed HRRR_URL since it's a global constant
     
     # Verify the HRRR file is actually available
     response = requests.head(HRRR_URL) # Removed HRRR_URL since it's a global constant
