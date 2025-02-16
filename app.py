@@ -60,10 +60,16 @@ COUNTY_SHP = os.path.join(COUNTY_DIR, repomap["COUNTY_SHP_NAME"])
 # --- Utility Functions ---
 
 
-def fetch_grib():
-    """Download and cache the HRRR GRIB file."""
-    download_file(HRRR_URL, GRIB_FILENAME)
-    return GRIB_FILENAME
+def fetch_grib(forecast_hour):
+    """Download and cache the HRRR GRIB file for a specific forecast hour."""
+    url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
+           f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour:02d}.grib2&"
+           f"dir=%2Fhrrr.{date_str}%2Fconus&"
+           f"{repomap['HRRR_VARS']}"
+           f"leftlon={repomap['HRRR_LON_MIN']}&rightlon={repomap['HRRR_LON_MAX']}&toplat={repomap['HRRR_LAT_MAX']}&bottomlat={repomap['HRRR_LAT_MIN']}&")
+    filename = os.path.join(repomap["CACHE_DIR"], f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour:02d}.grib2")
+    download_file(url, filename)
+    return filename
 
 def fetch_county_shapefile():
     """Wrapper to maintain compatibility with existing code"""
@@ -84,13 +90,14 @@ from plotting import create_plot
 @app.route("/forecast")
 def forecast():
     try:
-        grib_path = fetch_grib()
-        fig = create_plot(grib_path, init_time, forecast_hour, repomap["CACHE_DIR"])
-        # Convert figure to buffer
-        img_buf = BytesIO()
-        fig.savefig(img_buf, format="PNG", bbox_inches="tight")
-        plt.close(fig)
-        img_buf.seek(0)
+        # Fetch GRIB files for the next 12 hours
+        grib_paths = []
+        for hour in range(1, 13):
+            grib_path = fetch_grib(hour)
+            grib_paths.append(grib_path)
+        
+        # Create animated GIF
+        gif_buf = create_forecast_gif(grib_paths, init_time, repomap["CACHE_DIR"], duration=750)
     except Exception as e:
         import traceback
         error_msg = f"""
@@ -107,7 +114,7 @@ Full Traceback:
         </html>
         """
         return error_msg, 500
-    return send_file(img_buf, mimetype="image/png")
+    return send_file(gif_buf, mimetype="image/gif")
 
 @app.route("/")
 def index():
