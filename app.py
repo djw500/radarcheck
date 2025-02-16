@@ -144,9 +144,8 @@ def fetch_grib(forecast_hour):
             
             # Try to open with xarray to verify it's valid
             ds = xr.open_dataset(temp_filename, engine="cfgrib", chunks={'time': 1})
-            # Force load a small part to verify file integrity
-            # Fix this, just refc and no isel. AI!
-            ds['unknown'].isel(time=0).load()
+            # Force load reflectivity to verify file integrity
+            ds['refc'].load()
             ds.close()
             
             # If verification passed, move the file into place atomically
