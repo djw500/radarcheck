@@ -79,18 +79,16 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             philly_lon_max = desired_lon_max
 
         print(f"Subsetting data with bounds: lat({desired_lat_min}, {desired_lat_max}), lon({philly_lon_min}, {philly_lon_max})")
-        subset = data_to_plot.where(
-            (data_to_plot.latitude >= desired_lat_min) & 
-            (data_to_plot.latitude <= desired_lat_max) &
-            (data_to_plot.longitude >= philly_lon_min) & 
-            (data_to_plot.longitude <= philly_lon_max),
-            drop=True
-        )
+        # Get the nearest grid points to our desired boundaries
+        lat_mask = (data_to_plot.latitude >= desired_lat_min - 0.1) & (data_to_plot.latitude <= desired_lat_max + 0.1)
+        lon_mask = (data_to_plot.longitude >= philly_lon_min - 0.1) & (data_to_plot.longitude <= philly_lon_max + 0.1)
+        subset = data_to_plot.where(lat_mask & lon_mask, drop=True)
         print("Subset shape:", subset.shape)
 
         # --- Step 4: Create the plot ---
         fig = plt.figure(figsize=(8, 6))
         ax = plt.axes(projection=ccrs.PlateCarree())
+        ax.set_extent([philly_lon_min, philly_lon_max, desired_lat_min, desired_lat_max], crs=ccrs.PlateCarree())
         
         print("Creating plot...")
         subset.plot.pcolormesh(
