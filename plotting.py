@@ -65,12 +65,19 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             var_label = list(ds.data_vars.keys())[0]
             data_to_plot = ds[var_label]
 
-        # --- Step 3: Define region bounds ---
+        # --- Step 3: Define region center and zoom ---
+        center_point = {
+            'lat': 40.04877,
+            'lon': -75.38903
+        }
+        zoom_degrees = 1.5  # Controls the size of the view (smaller = more zoomed in)
+        
+        # Calculate region bounds from center and zoom
         region_bounds = {
-            'lat_min': 38.8,
-            'lat_max': 40.7,
-            'lon_min': -76.5,
-            'lon_max': -73.5
+            'lat_min': center_point['lat'] - zoom_degrees,
+            'lat_max': center_point['lat'] + zoom_degrees,
+            'lon_min': center_point['lon'] - zoom_degrees * 1.3,  # Adjust for longitude projection
+            'lon_max': center_point['lon'] + zoom_degrees * 1.3
         }
 
         # --- Step 4: Subset and plot the data ---
@@ -157,11 +164,9 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             linewidth=1.0
         )
 
-        # Mark center of Philadelphia
-        # Use this as the center of the lat/lng region, and make the region have a zoom factor that's easy to control zoom in/out. AI!
-        roi_lat = 40.04877
-        roi_lon = -75.38903
-        ax.plot(roi_lon, roi_lat, marker='*', markersize=15, color='gold', 
+        # Mark region center point
+        ax.plot(center_point['lon'], center_point['lat'], 
+                marker='*', markersize=15, color='gold', 
                 transform=ccrs.PlateCarree())
 
         # Save plot to buffer
