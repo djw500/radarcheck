@@ -177,6 +177,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
         print("Error in create_plot:")
         print(traceback.format_exc())
         raise
+    
 def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
     """
     Create an animated GIF from multiple HRRR forecast hours.
