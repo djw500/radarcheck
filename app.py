@@ -3,7 +3,7 @@ import logging
 from io import BytesIO
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
-from utils.filelock import file_lock, FileLockException
+from filelock import FileLock
 
 import requests
 import matplotlib.pyplot as plt
@@ -102,19 +102,16 @@ def fetch_grib(forecast_hour):
         if not os.path.exists(filename) or os.path.getsize(filename) < 1000:
             return False
         try:
-            with file_lock(filename):
+            with FileLock(f"{filename}.lock"):
                 ds = xr.open_dataset(filename, engine="cfgrib")
                 ds.close()
                 return True
         except Exception as e:
             logger.warning(f"GRIB file invalid: {filename}, Error: {str(e)}")
-            try:
-                with file_lock(filename):
-                    if os.path.exists(filename):
-                        os.remove(filename)
-                        logger.info(f"Deleted invalid file: {filename}")
-            except Exception as lock_e:
-                logger.error(f"Failed to acquire lock to delete invalid file: {str(lock_e)}")
+            with FileLock(f"{filename}.lock"):
+                if os.path.exists(filename):
+                    os.remove(filename)
+                    logger.info(f"Deleted invalid file: {filename}")
             return False
 
     # Try to use cached file
@@ -138,7 +135,7 @@ def fetch_grib(forecast_hour):
             ds.close()
             
             # If verification passed, move the file into place atomically
-            with file_lock(filename):
+            with FileLock(f"{filename}.lock"):
                 os.replace(temp_filename, filename)
                 logger.info(f"Successfully downloaded and verified GRIB file: {filename}")
                 return filename
