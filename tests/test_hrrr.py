@@ -62,7 +62,7 @@ def test_real_hrrr_availability():
     assert 0 <= int(init_hour) <= 23
     
     # Convert UTC time to Eastern Time
-    utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M")
+    utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M:%S")
     utc = pytz.UTC.localize(utc_time)
     eastern = pytz.timezone('America/New_York')
     est_time = utc.astimezone(eastern)
@@ -103,7 +103,7 @@ def test_latest_hrrr_info():
     date_str, init_hour, init_time = get_latest_hrrr_run()
     
     # Convert to Eastern Time for display
-    utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M")
+    utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M:%S")
     utc = pytz.UTC.localize(utc_time)
     eastern = pytz.timezone('America/New_York')
     est_time = utc.astimezone(eastern)
@@ -170,7 +170,7 @@ def test_create_plot_success():
 
     # 3. Download the GRIB file (if it doesn't exist)
     if not os.path.exists(grib_filename):
-        fetch_grib()
+        fetch_grib(forecast_hour)
 
     # 4. Call create_plot
     image_buffer = create_plot(grib_filename, init_time, forecast_hour, repomap["CACHE_DIR"])
