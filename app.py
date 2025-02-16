@@ -106,7 +106,7 @@ def fetch_grib(forecast_hour):
                 # Try to open the file without chunks first
                 ds = xr.open_dataset(filename, engine="cfgrib")
                 # Force load reflectivity to verify file integrity
-                ds['refc'].isel(time=0).values
+                ds['refc'].values
                 ds.close()
                 return True
         except (OSError, ValueError, RuntimeError) as e:
