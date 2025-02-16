@@ -16,9 +16,22 @@ import pytz
 app = Flask(__name__)
 
 # --- Configuration ---
-CACHE_DIR = "cache"
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
+repomap = {
+    "CACHE_DIR": "cache",
+    "HRRR_FILE_PREFIX": "hrrr.t",
+    "HRRR_FILE_SUFFIX": "z.wrfsfcf",
+    "HRRR_VARS": "var_REFC=on&var_TMP=on&var_HGT=on&var_UGRD=on&var_VGRD=on&",
+    "HRRR_LAT_MIN": "39.0",
+    "HRRR_LAT_MAX": "40.5",
+    "HRRR_LON_MIN": "-76",
+    "HRRR_LON_MAX": "-74",
+    "COUNTY_ZIP_NAME": "cb_2018_us_county_20m.zip",
+    "COUNTY_DIR_NAME": "county_shapefile",
+    "COUNTY_SHP_NAME": "cb_2018_us_county_20m.shp"
+}
+
+if not os.path.exists(repomap["CACHE_DIR"]):
+    os.makedirs(repomap["CACHE_DIR"])
 
 from utils import download_file, fetch_county_shapefile
 
@@ -33,7 +46,7 @@ def get_latest_hrrr_run():
         
         # Check if the file exists using the filter URL
         url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-               f"file=hrrr.t{init_hour}z.wrfsfcf01.grib2&"
+               f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}z.wrfsfcf01.grib2&"
                f"dir=%2Fhrrr.{date_str}%2Fconus&"
                f"var_REFC=on")
         response = requests.head(url)
@@ -48,16 +61,16 @@ forecast_hour = "01"  # Use 1-hour forecast for most recent data
 
 # Construct URL for HRRR surface forecast file
 HRRR_URL = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-            f"file=hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2&"
+            f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2&"
             f"dir=%2Fhrrr.{date_str}%2Fconus&"
-            f"var_REFC=on&var_TMP=on&var_HGT=on&var_UGRD=on&var_VGRD=on&"  # Request multiple variables
-            f"leftlon=-76&rightlon=-74&toplat=40.5&bottomlat=39.0&")  # Specify region
+            f"{repomap['HRRR_VARS']}"  # Request multiple variables
+            f"leftlon={repomap['HRRR_LON_MIN']}&rightlon={repomap['HRRR_LON_MAX']}&toplat={repomap['HRRR_LAT_MAX']}&bottomlat={repomap['HRRR_LAT_MIN']}&")  # Specify region
 
 # Local cache filenames
-GRIB_FILENAME = os.path.join(CACHE_DIR, f"hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2")
-COUNTY_ZIP = os.path.join(CACHE_DIR, "cb_2018_us_county_20m.zip")
-COUNTY_DIR = os.path.join(CACHE_DIR, "county_shapefile")
-COUNTY_SHP = os.path.join(COUNTY_DIR, "cb_2018_us_county_20m.shp")
+GRIB_FILENAME = os.path.join(repomap["CACHE_DIR"], f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2")
+COUNTY_ZIP = os.path.join(repomap["CACHE_DIR"], repomap["COUNTY_ZIP_NAME"])
+COUNTY_DIR = os.path.join(repomap["CACHE_DIR"], repomap["COUNTY_DIR_NAME"])
+COUNTY_SHP = os.path.join(COUNTY_DIR, repomap["COUNTY_SHP_NAME"])
 
 # --- Utility Functions ---
 
@@ -69,7 +82,7 @@ def fetch_grib():
 
 def fetch_county_shapefile():
     """Wrapper to maintain compatibility with existing code"""
-    return fetch_county_shapefile(CACHE_DIR)
+    return fetch_county_shapefile(repomap["CACHE_DIR"])
 
 def get_local_time_text(utc_time_str):
     utc_time = datetime.strptime(utc_time_str, "%Y-%m-%d %H:%M:%S")
@@ -87,7 +100,7 @@ from plotting import create_plot
 def forecast():
     try:
         grib_path = fetch_grib()
-        img_buf = create_plot(grib_path, init_time, forecast_hour, CACHE_DIR)
+        img_buf = create_plot(grib_path, init_time, forecast_hour, repomap["CACHE_DIR"])
     except Exception as e:
         import traceback
         error_msg = f"""
