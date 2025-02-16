@@ -131,7 +131,9 @@ def fetch_grib(forecast_hour):
                 raise ValueError(f"Downloaded file is missing or too small: {temp_filename}")
             
             # Try to open with xarray to verify it's valid
-            ds = xr.open_dataset(temp_filename, engine="cfgrib")
+            ds = xr.open_dataset(temp_filename, engine="cfgrib", chunks={'time': 1})
+            # Force load a small part to verify file integrity
+            ds['unknown'].isel(time=0).load()
             ds.close()
             
             # If verification passed, move the file into place atomically
