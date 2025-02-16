@@ -83,7 +83,7 @@ def get_local_time_text(utc_time_str):
     local_time = utc_time.astimezone(eastern_zone)
     return local_time.strftime("Forecast valid at: %Y-%m-%d %I:%M %p %Z")
 
-from plotting import create_plot
+from plotting import create_plot, create_forecast_gif
 
 # --- Flask Endpoints ---
 
