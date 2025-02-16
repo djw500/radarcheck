@@ -85,7 +85,12 @@ from plotting import create_plot
 def forecast():
     try:
         grib_path = fetch_grib()
-        img_buf = create_plot(grib_path, init_time, forecast_hour, repomap["CACHE_DIR"])
+        fig = create_plot(grib_path, init_time, forecast_hour, repomap["CACHE_DIR"])
+        # Convert figure to buffer
+        img_buf = BytesIO()
+        fig.savefig(img_buf, format="PNG", bbox_inches="tight")
+        plt.close(fig)
+        img_buf.seek(0)
     except Exception as e:
         import traceback
         error_msg = f"""
