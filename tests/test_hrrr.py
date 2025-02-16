@@ -11,7 +11,7 @@ from unittest.mock import patch  # Import patch
 from app import get_latest_hrrr_run, fetch_grib, forecast, app, index, HRRR_URL
 from utils import download_file, fetch_county_shapefile
 from config import repomap
-from plotting import create_plot
+from plotting import create_plot, create_forecast_gif
 
 # --- Utility Functions ---
 
@@ -120,6 +120,44 @@ def test_latest_hrrr_info():
     assert date_str.isdigit(), "Date string should be all digits"
     assert len(init_hour) == 2, "Init hour should be 2 characters (HH)"
     assert 0 <= int(init_hour) <= 23, "Init hour should be between 00 and 23"
+
+def test_create_forecast_gif_success():
+    """Test successful creation of an animated forecast GIF."""
+    # 1. Get the latest HRRR run information
+    date_str, init_hour, init_time = get_latest_hrrr_run()
+    
+    # 2. Get GRIB files for multiple forecast hours
+    grib_paths = []
+    for hour in range(1, 4):  # Test with 3 hours instead of 12 for speed
+        grib_filename = os.path.join(repomap["CACHE_DIR"], 
+                                   f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{hour:02d}.grib2")
+        if not os.path.exists(grib_filename):
+            fetch_grib(hour)
+        grib_paths.append(grib_filename)
+
+    # 3. Create the animated GIF
+    gif_buffer = create_forecast_gif(grib_paths, init_time, repomap["CACHE_DIR"], duration=500)
+
+    # 4. Verify the result is a BytesIO object
+    assert isinstance(gif_buffer, BytesIO)
+
+    # 5. Verify it contains a valid GIF
+    gif_buffer.seek(0)
+    try:
+        from PIL import Image
+        img = Image.open(gif_buffer)
+        assert img.format == 'GIF'
+        # Count frames
+        frames = 0
+        try:
+            while True:
+                img.seek(img.tell() + 1)
+                frames += 1
+        except EOFError:
+            pass
+        assert frames == len(grib_paths) - 1, f"Expected {len(grib_paths)} frames, got {frames + 1}"
+    except Exception as e:
+        pytest.fail(f"Failed to verify GIF: {e}")
 
 def test_create_plot_success():
     """Test successful creation of a plot using real data."""
