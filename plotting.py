@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 
 import pytz
 import xarray as xr
+import numpy as np
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import geopandas as gpd
@@ -12,6 +14,24 @@ from shapely.geometry import box
 import requests
 
 from utils import download_file, fetch_county_shapefile
+
+def create_radar_colormap():
+    """Create a colormap matching NWS radar reflectivity standards."""
+    # Define colors for different dBZ ranges
+    colors = [
+        (0.6, 0.6, 0.6, 0.0),  # Transparent for < 5 dBZ
+        (0.7, 0.7, 0.9, 1.0),  # Light blue for 5-15 dBZ
+        (0.0, 0.8, 0.0, 1.0),  # Green for 15-25 dBZ
+        (1.0, 1.0, 0.0, 1.0),  # Yellow for 25-35 dBZ
+        (1.0, 0.5, 0.0, 1.0),  # Orange for 35-45 dBZ
+        (1.0, 0.0, 0.0, 1.0),  # Red for 45-55 dBZ
+        (0.6, 0.0, 0.6, 1.0),  # Purple for > 55 dBZ
+    ]
+    
+    # Create positions for the color transitions
+    positions = [0.0, 0.133, 0.267, 0.4, 0.533, 0.667, 1.0]
+    
+    return LinearSegmentedColormap.from_list('radar', list(zip(positions, colors)))
 
 def create_plot(grib_path, init_time, forecast_hour, cache_dir):
     """Create a plot from HRRR GRIB data."""
@@ -77,9 +97,9 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             ax=ax,
             x="longitude",
             y="latitude",
-            cmap="gist_ncar",
-            vmin=0,
-            vmax=70,
+            cmap=create_radar_colormap(),
+            vmin=5,
+            vmax=75,
             add_colorbar=True,
             transform=ccrs.PlateCarree()
         )
