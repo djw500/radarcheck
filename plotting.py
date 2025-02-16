@@ -33,6 +33,7 @@ def create_radar_colormap():
     
     return LinearSegmentedColormap.from_list('radar', list(zip(positions, colors)))
 
+# Create a GIF of the next 12 forecast hours instead of a single one. AI!
 def create_plot(grib_path, init_time, forecast_hour, cache_dir):
     """Create a plot from HRRR GRIB data."""
     print("Starting plot creation...")
