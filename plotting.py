@@ -65,6 +65,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
             var_label = list(ds.data_vars.keys())[0]
             data_to_plot = ds[var_label]
 
+        # Refactor this and step 4 to be easier to understand and more concise. AI!
         # --- Step 3: Subset the data for Philadelphia region ---
         desired_lat_min, desired_lat_max = 38.8, 40.7
         desired_lon_min, desired_lon_max = -76.5, -73.5
