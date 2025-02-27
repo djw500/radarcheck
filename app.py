@@ -223,7 +223,7 @@ def location_view(location_id):
     
     # Get metadata for the selected run
     metadata = get_run_metadata(location_id, run_id)
-    if not metadata:
+    if not meta
         return "Selected forecast run not available", 404
     
     location_name = repomap["LOCATIONS"][location_id]["name"]
@@ -231,6 +231,11 @@ def location_view(location_id):
     
     # Get valid times for this run
     valid_times = get_run_valid_times(location_id, run_id)
+    
+    # Pre-fetch all valid times for all runs to avoid API calls
+    all_valid_times = {}
+    for run in runs:
+        all_valid_times[run['run_id']] = get_run_valid_times(location_id, run['run_id'])
     
     html = """
     <!DOCTYPE html>
