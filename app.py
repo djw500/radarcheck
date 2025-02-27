@@ -237,14 +237,17 @@ def location_view(location_id):
     for run in runs:
         all_valid_times[run['run_id']] = get_run_valid_times(location_id, run['run_id'])
     
-    html = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{{ location_name }} - HRRR Forecast</title>
-        <style>
+    # Get all available locations for the navigation
+    locations = get_available_locations()
+    
+    return render_template('location.html', 
+                          location_id=location_id,
+                          location_name=location_name,
+                          init_time=init_time,
+                          run_id=run_id,
+                          runs=runs,
+                          locations=locations,
+                          all_valid_times=all_valid_times)
             body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
             .container { max-width: 1200px; margin: 0 auto; }
             header { background: #004080; color: white; padding: 1em; margin-bottom: 20px; border-radius: 5px; }
