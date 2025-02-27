@@ -8,6 +8,7 @@ repomap = {
     "COUNTY_ZIP_NAME": "cb_2018_us_county_20m.zip",
     "COUNTY_DIR_NAME": "county_shapefile",
     "COUNTY_SHP_NAME": "cb_2018_us_county_20m.shp",
+    "MAX_RUNS_TO_KEEP": 5,  # Number of model runs to keep in cache
     
     # Location configurations
     "LOCATIONS": {
