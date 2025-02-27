@@ -187,7 +187,7 @@ function createSpaghettiPlot() {
         // Create dataset
         datasets.push({
             label: new Date(run.init_time).toLocaleString(),
-            data: runValidTimes.map(vt => ({
+             runValidTimes.map(vt => ({
                 x: new Date(vt.valid_time),
                 y: Math.random() * 100  // Placeholder for actual precipitation data
             })),
