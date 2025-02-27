@@ -4,7 +4,7 @@ from io import BytesIO
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
-from flask import Flask, send_file, render_template_string, redirect, url_for, request, abort
+from flask import Flask, send_file, render_template_string, redirect, url_for, request, abort, jsonify
 import pytz
 
 from config import repomap
