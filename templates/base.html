@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}HRRR Forecast Visualization{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>HRRR Forecast Visualization</h1>
+            {% block header_content %}{% endblock %}
+        </header>
+        
+        {% block navigation %}
+        <div class="location-nav">
+            <a href="/">Home</a>
+            {% for loc in locations %}
+            <a href="/location/{{ loc.id }}" {% if loc.id == location_id %}class="active"{% endif %}>{{ loc.name }}</a>
+            {% endfor %}
+        </div>
+        {% endblock %}
+        
+        <div class="{% block main_container_class %}forecast-container{% endblock %}">
+            {% block content %}{% endblock %}
+        </div>
+        
+        <footer>&copy; 2025 Weather App</footer>
+    </div>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

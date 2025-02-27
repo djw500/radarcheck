@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}HRRR Forecast Visualization{% endblock %}
+
+{% block main_container_class %}locations-container{% endblock %}
+
+{% block content %}
+<h2>Available Locations</h2>
+
+{% if locations %}
+    {% for location in locations %}
+    <div class="location-card">
+        <h3>{{ location.name }}</h3>
+        <p>Model initialized: {{ location.init_time }}</p>
+        <a href="/location/{{ location.id }}">View Forecast</a>
+    </div>
+    {% endfor %}
+{% else %}
+    <p>No forecast data is currently available. Please check back later.</p>
+{% endif %}
+{% endblock %}

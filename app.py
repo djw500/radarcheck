@@ -4,7 +4,7 @@ from io import BytesIO
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
-from flask import Flask, send_file, render_template_string, redirect, url_for, request, abort, jsonify
+from flask import Flask, send_file, render_template, redirect, url_for, request, abort, jsonify
 import pytz
 
 from config import repomap
@@ -23,7 +23,7 @@ file_handler.setFormatter(logging.Formatter(
 ))
 logger.addHandler(file_handler)
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', template_folder='templates')
 logger.info('Application startup')
 
 def get_available_locations():
@@ -791,79 +791,17 @@ def api_runs(location_id):
     runs = get_location_runs(location_id)
     return jsonify(runs)
 
+@app.route("/api/valid_times/<location_id>/<run_id>")
+def api_valid_times(location_id, run_id):
+    """API endpoint to get valid times for a specific run"""
+    valid_times = get_run_valid_times(location_id, run_id)
+    return jsonify(valid_times)
+
 @app.route("/")
 def index():
     """Home page showing available locations"""
     locations = get_available_locations()
-    
-    html = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>HRRR Forecast Visualization</title>
-        <style>
-            body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
-            .container { max-width: 1200px; margin: 0 auto; }
-            header { background: #004080; color: white; padding: 1em; margin-bottom: 20px; border-radius: 5px; }
-            .locations-container { 
-                background: white;
-                padding: 20px;
-                border-radius: 5px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .location-card {
-                margin-bottom: 15px;
-                padding: 15px;
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                background: #f9f9f9;
-            }
-            .location-card h3 {
-                margin-top: 0;
-            }
-            .location-card a {
-                display: inline-block;
-                margin-top: 10px;
-                padding: 5px 15px;
-                background: #004080;
-                color: white;
-                text-decoration: none;
-                border-radius: 3px;
-            }
-            footer { margin-top: 20px; text-align: center; color: #666; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <header>
-                <h1>HRRR Forecast Visualization</h1>
-            </header>
-            
-            <div class="locations-container">
-                <h2>Available Locations</h2>
-                
-                {% if locations %}
-                    {% for location in locations %}
-                    <div class="location-card">
-                        <h3>{{ location.name }}</h3>
-                        <p>Model initialized: {{ location.init_time }}</p>
-                        <a href="/location/{{ location.id }}">View Forecast</a>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <p>No forecast data is currently available. Please check back later.</p>
-                {% endif %}
-            </div>
-            
-            <footer>&copy; 2025 Weather App</footer>
-        </div>
-    </body>
-    </html>
-    """
-    
-    return render_template_string(html, locations=locations)
+    return render_template('index.html', locations=locations)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
