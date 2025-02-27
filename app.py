@@ -521,7 +521,6 @@ def location_view(location_id):
                     };
                     img.onerror = reject;
                     img.src = `/frame/${locationId}/${runId}/${hour}`;
-                });
             }
             
             // Preload first few frames immediately
