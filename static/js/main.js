@@ -21,7 +21,6 @@ function initSingleRunView() {
             img.onerror = reject;
             img.src = `/frame/${locationId}/${runId}/${hour}`;
         });
-        });
     }
     
     // Preload first few frames immediately

@@ -161,6 +161,16 @@ def get_local_time_text(utc_time_str):
     local_time = utc_time.astimezone(eastern_zone)
     return local_time.strftime("Forecast valid at: %Y-%m-%d %I:%M %p %Z")
 
+def handle_error(error_message, status_code=500):
+    """Standardized error handling function"""
+    logger.error(error_message)
+    if request.headers.get('Accept') == 'application/json':
+        return jsonify({
+            "error": error_message,
+            "status": status_code
+        }), status_code
+    return f"Error: {error_message}", status_code
+
 # --- Flask Endpoints ---
 
 @app.route("/frame/<location_id>/<run_id>/<int:hour>")
@@ -211,12 +221,12 @@ def get_latest_frame(location_id, hour):
 def location_view(location_id):
     """Show forecast for a specific location"""
     if location_id not in repomap["LOCATIONS"]:
-        abort(404)
+        return handle_error(f"Location '{location_id}' not found", 404)
     
     # Get all runs for this location
     runs = get_location_runs(location_id)
     if not runs:
-        return "Forecast data not available for this location", 404
+        return handle_error("Forecast data not available for this location", 404)
     
     # Default to the latest run
     run_id = request.args.get('run', runs[0]['run_id'])
@@ -266,6 +276,21 @@ def api_valid_times(location_id, run_id):
     """API endpoint to get valid times for a specific run"""
     valid_times = get_run_valid_times(location_id, run_id)
     return jsonify(valid_times)
+
+@app.route("/api/locations")
+def api_locations():
+    """API endpoint to get all available locations"""
+    locations = get_available_locations()
+    return jsonify(locations)
+
+@app.route("/health")
+def health_check():
+    """Health check endpoint for monitoring"""
+    return jsonify({
+        "status": "ok",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "locations_count": len(get_available_locations())
+    })
 
 @app.route("/")
 def index():
