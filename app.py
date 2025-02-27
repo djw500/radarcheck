@@ -1,25 +1,13 @@
 import os
 import logging
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from filelock import FileLock
 
-import requests
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-from flask import Flask, send_file, render_template_string, redirect, url_for
-from PIL import Image, ImageDraw, ImageFont
-import xarray as xr
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-from flask import Flask, send_file, render_template_string
-import geopandas as gpd
-from shapely.geometry import box
+from flask import Flask, send_file, render_template_string, redirect, url_for, request, abort
 import pytz
 
 from config import repomap
-from utils import download_file, fetch_county_shapefile
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -38,135 +26,52 @@ logger.addHandler(file_handler)
 app = Flask(__name__)
 logger.info('Application startup')
 
-def get_latest_hrrr_run():
-    """Find the most recent HRRR run available."""
-    now = datetime.utcnow()
-    # HRRR runs every hour but has ~2 hour delay, so start checking 3 hours ago
-    for hours_ago in range(3, 6):
-        check_time = now - timedelta(hours=hours_ago)
-        date_str = check_time.strftime("%Y%m%d")
-        init_hour = check_time.strftime("%H")
+def get_available_locations():
+    """Get list of locations with available forecast data"""
+    locations = []
+    for location_id, location_config in repomap["LOCATIONS"].items():
+        location_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id)
+        metadata_path = os.path.join(location_cache_dir, "metadata.txt")
         
-        # Check if the file exists using the filter URL
-        url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-               f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}z.wrfsfcf01.grib2&"
-               f"dir=%2Fhrrr.{date_str}%2Fconus&"
-               f"var_REFC=on")
-        response = requests.head(url)
-        if response.status_code == 200:
-            model_time = datetime(
-                year=check_time.year,
-                month=check_time.month,
-                day=check_time.day,
-                hour=int(init_hour),
-                minute=0,
-                second=0,
-                tzinfo=pytz.UTC
-            )
-            return date_str, init_hour, model_time.strftime("%Y-%m-%d %H:%M:%S")
-    
-    raise Exception("Could not find a recent HRRR run")
-
-# Get the most recent HRRR run
-date_str, init_hour, init_time = get_latest_hrrr_run()
-forecast_hour = "01"  # Use 1-hour forecast for most recent data
-
-# Construct URL for HRRR surface forecast file
-HRRR_URL = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-            f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2&"
-            f"dir=%2Fhrrr.{date_str}%2Fconus&"
-            f"{repomap['HRRR_VARS']}"  # Request multiple variables
-            f"leftlon={repomap['HRRR_LON_MIN']}&rightlon={repomap['HRRR_LON_MAX']}&toplat={repomap['HRRR_LAT_MAX']}&bottomlat={repomap['HRRR_LAT_MIN']}&")  # Specify region
-
-# Local cache filenames
-GRIB_FILENAME = os.path.join(repomap["CACHE_DIR"], f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2")
-COUNTY_ZIP = os.path.join(repomap["CACHE_DIR"], repomap["COUNTY_ZIP_NAME"])
-COUNTY_DIR = os.path.join(repomap["CACHE_DIR"], repomap["COUNTY_DIR_NAME"])
-COUNTY_SHP = os.path.join(COUNTY_DIR, repomap["COUNTY_SHP_NAME"])
-
-# --- Utility Functions ---
-
-
-def fetch_grib(forecast_hour):
-    """Download and cache the HRRR GRIB file for a specific forecast hour."""
-    url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-           f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2&"
-           f"dir=%2Fhrrr.{date_str}%2Fconus&"
-           f"{repomap['HRRR_VARS']}"
-           f"leftlon={repomap['HRRR_LON_MIN']}&rightlon={repomap['HRRR_LON_MAX']}&toplat={repomap['HRRR_LAT_MAX']}&bottomlat={repomap['HRRR_LAT_MIN']}&")
-    
-    filename = os.path.join(repomap["CACHE_DIR"], f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2")
-    
-    def try_load_grib(filename):
-        """Try to load and validate a GRIB file"""
-        if not os.path.exists(filename) or os.path.getsize(filename) < 1000:
-            return False
-        try:
-            with FileLock(f"{filename}.lock"):
-                # Try to open the file without chunks first
-                ds = xr.open_dataset(filename, engine="cfgrib")
-                # Force load reflectivity to verify file integrity
-                ds['refc'].values
-                ds.close()
-                return True
-        except (OSError, ValueError, RuntimeError) as e:
-            if "End of resource reached when reading message" in str(e):
-                logger.error(f"GRIB file corrupted (premature EOF): {filename}")
-            else:
-                logger.warning(f"GRIB file invalid: {filename}, Error: {str(e)}")
-            with FileLock(f"{filename}.lock"):
-                try:
-                    if os.path.exists(filename):
-                        os.remove(filename)
-                        logger.info(f"Deleted invalid file: {filename}")
-                    # Also clean up any partial downloads
-                    if os.path.exists(f"{filename}.tmp"):
-                        os.remove(f"{filename}.tmp")
-                except OSError as e:
-                    logger.error(f"Error cleaning up invalid files: {str(e)}")
-            return False
-
-    # Try to use cached file
-    if try_load_grib(filename):
-        logger.info(f"Using cached valid GRIB file: {filename}")
-        return filename
-
-    # Try downloading up to 3 times
-    for attempt in range(3):
-        logger.info(f"Downloading GRIB file from: {url} (attempt {attempt + 1}/3)")
-        try:
-            temp_filename = f"{filename}.tmp"
-            download_file(url, temp_filename)
+        if os.path.exists(metadata_path):
+            # Read metadata
+            metadata = {}
+            with open(metadata_path, "r") as f:
+                for line in f:
+                    key, value = line.strip().split("=", 1)
+                    metadata[key] = value
             
-            # Verify the temporary file
-            if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) < 1000:
-                raise ValueError(f"Downloaded file is missing or too small: {temp_filename}")
+            # Check if forecast frames exist
+            has_frames = any(os.path.exists(os.path.join(location_cache_dir, f"frame_{hour:02d}.png")) 
+                            for hour in range(1, 25))
             
-            # Try to open with xarray to verify it's valid
-            ds = xr.open_dataset(temp_filename, engine="cfgrib", chunks={'time': 1})
-            # Force load reflectivity to verify file integrity
-            ds['refc'].load()
-            ds.close()
-            
-            # If verification passed, move the file into place atomically
-            with FileLock(f"{filename}.lock"):
-                os.replace(temp_filename, filename)
-                logger.info(f"Successfully downloaded and verified GRIB file: {filename}")
-                return filename
-                
-        except Exception as e:
-            logger.error(f"Download attempt {attempt + 1} failed: {str(e)}", exc_info=True)
-            if os.path.exists(temp_filename):
-                try:
-                    os.remove(temp_filename)
-                except Exception:
-                    pass
+            if has_frames:
+                locations.append({
+                    "id": location_id,
+                    "name": location_config["name"],
+                    "init_time": metadata.get("init_time", "Unknown")
+                })
     
-    raise ValueError("Failed to obtain valid GRIB file after 3 attempts")
+    return locations
 
-def fetch_county_shapefile():
-    """Wrapper to maintain compatibility with existing code"""
-    return fetch_county_shapefile(repomap["CACHE_DIR"])
+def get_location_metadata(location_id):
+    """Get metadata for a specific location"""
+    if location_id not in repomap["LOCATIONS"]:
+        return None
+        
+    location_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id)
+    metadata_path = os.path.join(location_cache_dir, "metadata.txt")
+    
+    if not os.path.exists(metadata_path):
+        return None
+        
+    metadata = {}
+    with open(metadata_path, "r") as f:
+        for line in f:
+            key, value = line.strip().split("=", 1)
+            metadata[key] = value
+            
+    return metadata
 
 def get_local_time_text(utc_time_str):
     utc_time = datetime.strptime(utc_time_str, "%Y-%m-%d %H:%M:%S")
@@ -176,58 +81,58 @@ def get_local_time_text(utc_time_str):
     local_time = utc_time.astimezone(eastern_zone)
     return local_time.strftime("Forecast valid at: %Y-%m-%d %I:%M %p %Z")
 
-from plotting import create_plot, create_forecast_gif
-
 # --- Flask Endpoints ---
 
-@app.route("/frame/<int:hour>")
-def get_frame(hour):
-    """Serve a single forecast frame."""
+@app.route("/frame/<location_id>/<int:hour>")
+def get_frame(location_id, hour):
+    """Serve a single forecast frame for a specific location."""
     try:
-        logger.info(f'Requesting frame for hour {hour}')
+        logger.info(f'Requesting frame for location {location_id}, hour {hour}')
         
+        if location_id not in repomap["LOCATIONS"]:
+            logger.warning(f'Invalid location requested: {location_id}')
+            return "Invalid location", 400
+            
         if not 1 <= hour <= 24:
             logger.warning(f'Invalid forecast hour requested: {hour}')
             return "Invalid forecast hour", 400
             
         # Format hour as two digits
         hour_str = f"{hour:02d}"
-        logger.debug(f'Formatted hour string: {hour_str}')
         
-        # Get or create the frame
-        try:
-            grib_path = fetch_grib(hour_str)
-            logger.info(f'Successfully fetched GRIB file: {grib_path}')
-        except Exception as e:
-            logger.error(f'Error fetching GRIB file: {str(e)}', exc_info=True)
-            return f"Error fetching forecast  {str(e)}", 500
+        # Check if the frame exists in cache
+        location_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id)
+        frame_path = os.path.join(location_cache_dir, f"frame_{hour_str}.png")
+        
+        if not os.path.exists(frame_path):
+            logger.warning(f'Frame not found in cache: {frame_path}')
+            return "Forecast frame not available", 404
             
-        try:
-            image_buffer = create_plot(grib_path, init_time, hour_str, repomap["CACHE_DIR"])
-            logger.info('Successfully created plot')
-        except Exception as e:
-            logger.error(f'Error creating plot: {str(e)}', exc_info=True)
-            return f"Error creating visualization: {str(e)}", 500
-        
-        return send_file(image_buffer, mimetype="image/png")
+        return send_file(frame_path, mimetype="image/png")
     except Exception as e:
         logger.error(f'Unexpected error in get_frame: {str(e)}', exc_info=True)
         return f"Internal server error: {str(e)}", 500
 
-@app.route("/forecast")
-def forecast():
-    """Legacy endpoint for GIF - redirect to main page"""
-    return redirect(url_for('index'))
-
-@app.route("/")
-def index():
+@app.route("/location/<location_id>")
+def location_view(location_id):
+    """Show forecast for a specific location"""
+    if location_id not in repomap["LOCATIONS"]:
+        abort(404)
+        
+    metadata = get_location_metadata(location_id)
+    if not metadata:
+        return "Forecast data not available for this location", 404
+        
+    location_name = repomap["LOCATIONS"][location_id]["name"]
+    init_time = metadata.get("init_time", "Unknown")
+    
     html = """
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>HRRR Forecast Visualization</title>
+        <title>{{ location_name }} - HRRR Forecast</title>
         <style>
             body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
             .container { max-width: 1200px; margin: 0 auto; }
@@ -258,6 +163,22 @@ def index():
                 border-radius: 5px;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.2);
             }
+            .location-nav {
+                margin-bottom: 20px;
+            }
+            .location-nav a {
+                display: inline-block;
+                margin-right: 10px;
+                padding: 5px 10px;
+                background: #e0e0e0;
+                border-radius: 3px;
+                text-decoration: none;
+                color: #333;
+            }
+            .location-nav a.active {
+                background: #004080;
+                color: white;
+            }
             footer { margin-top: 20px; text-align: center; color: #666; }
         </style>
     </head>
@@ -265,15 +186,25 @@ def index():
         <div class="container">
             <header>
                 <h1>HRRR Forecast Visualization</h1>
+                <p>Model initialized: {{ init_time }}</p>
             </header>
+            
+            <div class="location-nav">
+                <a href="/">Home</a>
+                {% for loc in locations %}
+                <a href="/location/{{ loc.id }}" {% if loc.id == location_id %}class="active"{% endif %}>{{ loc.name }}</a>
+                {% endfor %}
+            </div>
+            
             <div class="forecast-container">
+                <h2>{{ location_name }}</h2>
                 <div class="controls">
                     <button id="playButton">Play</button>
                     <input type="range" id="timeSlider" min="1" max="24" value="1">
                     <span id="timeDisplay">Hour +1</span>
                 </div>
                 <div style="position: relative;">
-                    <img id="forecastImage" src="/frame/1" alt="HRRR Forecast Plot" style="width: 100%; height: auto;">
+                    <img id="forecastImage" src="/frame/{{ location_id }}/1" alt="HRRR Forecast Plot" style="width: 100%; height: auto;">
                     <div id="loading" class="loading">Loading...</div>
                 </div>
             </div>
@@ -286,6 +217,7 @@ def index():
             const forecastImage = document.getElementById('forecastImage');
             const loading = document.getElementById('loading');
             const playButton = document.getElementById('playButton');
+            const locationId = "{{ location_id }}";
             
             let isPlaying = false;
             let playInterval;
@@ -300,7 +232,7 @@ def index():
                         resolve();
                     };
                     img.onerror = reject;
-                    img.src = `/frame/${hour}`;
+                    img.src = `/frame/${locationId}/${hour}`;
                 });
             }
             
@@ -317,7 +249,7 @@ def index():
                 if (images[hour-1]) {
                     forecastImage.src = images[hour-1].src;
                 } else {
-                    forecastImage.src = `/frame/${hour}`;
+                    forecastImage.src = `/frame/${locationId}/${hour}`;
                 }
             }
             
@@ -345,7 +277,94 @@ def index():
     </body>
     </html>
     """
-    return render_template_string(html)
+    
+    # Get all available locations for the navigation
+    locations = get_available_locations()
+    
+    return render_template_string(html, 
+                                 location_id=location_id,
+                                 location_name=location_name,
+                                 init_time=init_time,
+                                 locations=locations)
+
+@app.route("/forecast")
+def forecast():
+    """Legacy endpoint for GIF - redirect to main page"""
+    return redirect(url_for('index'))
+
+@app.route("/")
+def index():
+    """Home page showing available locations"""
+    locations = get_available_locations()
+    
+    html = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>HRRR Forecast Visualization</title>
+        <style>
+            body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
+            .container { max-width: 1200px; margin: 0 auto; }
+            header { background: #004080; color: white; padding: 1em; margin-bottom: 20px; border-radius: 5px; }
+            .locations-container { 
+                background: white;
+                padding: 20px;
+                border-radius: 5px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .location-card {
+                margin-bottom: 15px;
+                padding: 15px;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                background: #f9f9f9;
+            }
+            .location-card h3 {
+                margin-top: 0;
+            }
+            .location-card a {
+                display: inline-block;
+                margin-top: 10px;
+                padding: 5px 15px;
+                background: #004080;
+                color: white;
+                text-decoration: none;
+                border-radius: 3px;
+            }
+            footer { margin-top: 20px; text-align: center; color: #666; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <header>
+                <h1>HRRR Forecast Visualization</h1>
+            </header>
+            
+            <div class="locations-container">
+                <h2>Available Locations</h2>
+                
+                {% if locations %}
+                    {% for location in locations %}
+                    <div class="location-card">
+                        <h3>{{ location.name }}</h3>
+                        <p>Model initialized: {{ location.init_time }}</p>
+                        <a href="/location/{{ location.id }}">View Forecast</a>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p>No forecast data is currently available. Please check back later.</p>
+                {% endif %}
+            </div>
+            
+            <footer>&copy; 2025 Weather App</footer>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return render_template_string(html, locations=locations)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

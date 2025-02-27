@@ -37,7 +37,7 @@ def create_radar_colormap():
     
     return LinearSegmentedColormap.from_list('radar', list(zip(positions, colors)))
 
-def create_plot(grib_path, init_time, forecast_hour, cache_dir):
+def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None, center_lon=None, zoom=None):
     """Create a plot from HRRR GRIB data."""
     logger.info("Starting plot creation...")
     
@@ -71,10 +71,10 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir):
 
         # --- Step 3: Define region center and zoom ---
         center_point = {
-            'lat': 40.04877,
-            'lon': -75.38903
+            'lat': center_lat if center_lat is not None else 40.04877,
+            'lon': center_lon if center_lon is not None else -75.38903
         }
-        zoom_degrees = 1.5  # Controls the size of the view (smaller = more zoomed in)
+        zoom_degrees = zoom if zoom is not None else 1.5  # Controls the size of the view (smaller = more zoomed in)
         
         # Calculate region bounds from center and zoom
         region_bounds = {
