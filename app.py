@@ -569,22 +569,21 @@ def location_view(location_id):
                 // Create a set of all valid times across all runs
                 const allValidTimes = new Set();
                 
-                // Fetch valid times for each run
-                const fetchPromises = timelineData.map(run => {
-                    return fetch(`/api/valid_times/${locationId}/${run.run_id}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            validTimes[run.run_id] = data;
-                            data.forEach(vt => {
-                                // Create a simplified time key (just date and hour)
-                                const validTime = new Date(vt.valid_time);
-                                const timeKey = `${validTime.getFullYear()}-${(validTime.getMonth()+1).toString().padStart(2, '0')}-${validTime.getDate().toString().padStart(2, '0')} ${validTime.getHours().toString().padStart(2, '0')}:00`;
-                                allValidTimes.add(timeKey);
-                            });
-                        });
+                // Use pre-loaded valid times data
+                const validTimes = {{ all_valid_times|tojson }};
+            
+                // Process the pre-loaded data
+                Object.values(validTimes).forEach(runData => {
+                    runData.forEach(vt => {
+                        // Create a simplified time key (just date and hour)
+                        const validTime = new Date(vt.valid_time);
+                        const timeKey = `${validTime.getFullYear()}-${(validTime.getMonth()+1).toString().padStart(2, '0')}-${validTime.getDate().toString().padStart(2, '0')} ${validTime.getHours().toString().padStart(2, '0')}:00`;
+                        allValidTimes.add(timeKey);
+                    });
                 });
-                
-                Promise.all(fetchPromises).then(() => {
+            
+                // Now create the timeline with the data we already have
+                {
                     // Sort valid times
                     const sortedTimes = Array.from(allValidTimes).sort();
                     
@@ -670,6 +669,12 @@ def location_view(location_id):
             
             // Initialize timeline when the timeline view is shown
             document.getElementById('timelineViewBtn').addEventListener('click', createTimeline);
+            
+            // Pre-create the timeline structure when the page loads
+            window.addEventListener('load', function() {
+                // Create the timeline structure but don't show it yet
+                setTimeout(createTimeline, 100);
+            });
             
             // Spaghetti Plot
             let spaghettiChart = null;
@@ -770,18 +775,14 @@ def location_view(location_id):
                                  init_time=init_time,
                                  run_id=run_id,
                                  runs=runs,
-                                 locations=locations)
+                                 locations=locations,
+                                 all_valid_times=all_valid_times)
 
 @app.route("/forecast")
 def forecast():
     """Legacy endpoint for GIF - redirect to main page"""
     return redirect(url_for('index'))
 
-@app.route("/api/valid_times/<location_id>/<run_id>")
-def api_valid_times(location_id, run_id):
-    """API endpoint to get valid times for a specific run"""
-    valid_times = get_run_valid_times(location_id, run_id)
-    return jsonify(valid_times)
 
 @app.route("/api/runs/<location_id>")
 def api_runs(location_id):
