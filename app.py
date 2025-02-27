@@ -248,9 +248,6 @@ def location_view(location_id):
                           runs=runs,
                           locations=locations,
                           all_valid_times=all_valid_times)
-            body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
-            .container { max-width: 1200px; margin: 0 auto; }
-            header { background: #004080; color: white; padding: 1em; margin-bottom: 20px; border-radius: 5px; }
             .forecast-container { 
                 background: white;
                 padding: 20px;
