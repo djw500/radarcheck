@@ -223,7 +223,7 @@ def location_view(location_id):
     
     # Get metadata for the selected run
     metadata = get_run_metadata(location_id, run_id)
-    if not metadata:
+    if not meta
         return "Selected forecast run not available", 404
     
     location_name = repomap["LOCATIONS"][location_id]["name"]
