@@ -84,6 +84,11 @@
 
 {% block scripts %}
 <script>
+    // Get API key from URL if present
+    const urlParams = new URLSearchParams(window.location.search);
+    const apiKey = urlParams.get('api_key') || '';
+    const apiKeyParam = apiKey ? `?api_key=${apiKey}` : '';
+    
     // Pass data from Flask to JavaScript
     const locationId = "{{ location_id }}";
     const runId = "{{ run_id }}";
