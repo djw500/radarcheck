@@ -90,5 +90,9 @@
     const timelineData = {{ runs|tojson }};
     const validTimes = {{ all_valid_times|tojson }};
 </script>
+<script src="{{ url_for('static', filename='js/viewSwitching.js') }}"></script>
+<script src="{{ url_for('static', filename='js/singleRunView.js') }}"></script>
+<script src="{{ url_for('static', filename='js/timelineView.js') }}"></script>
+<script src="{{ url_for('static', filename='js/spaghettiPlot.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 {% endblock %}

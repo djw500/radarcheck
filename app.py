@@ -13,6 +13,26 @@ from config import repomap
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def parse_metadata_file(filepath):
+    """Safely parse a metadata file with key=value format."""
+    metadata = {}
+    try:
+        with open(filepath, "r") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    metadata[key] = value
+    except (IOError, OSError) as e:
+        logger.warning(f"Error reading metadata file {filepath}: {e}")
+    return metadata
+
+def is_safe_path(base_dir, user_path):
+    """Check if the user-provided path is within the base directory (prevent path traversal)."""
+    base = os.path.realpath(base_dir)
+    target = os.path.realpath(os.path.join(base_dir, user_path))
+    return target.startswith(base + os.sep) or target == base
+
 # Create logs directory if it doesn't exist
 os.makedirs('logs', exist_ok=True)
 
@@ -45,13 +65,9 @@ def get_available_locations():
                 metadata_path = os.path.join(run_dir, "metadata.txt")
                 
                 if os.path.exists(metadata_path):
-                    # Read metadata
-                    metadata = {}
-                    with open(metadata_path, "r") as f:
-                        for line in f:
-                            key, value = line.strip().split("=", 1)
-                            metadata[key] = value
-                    
+                    # Read metadata safely
+                    metadata = parse_metadata_file(metadata_path)
+
                     # Check if forecast frames exist
                     has_frames = any(os.path.exists(os.path.join(run_dir, f"frame_{hour:02d}.png")) 
                                     for hour in range(1, 25))
@@ -82,12 +98,8 @@ def get_location_runs(location_id):
             metadata_path = os.path.join(run_dir, "metadata.txt")
             
             if os.path.exists(metadata_path):
-                metadata = {}
-                with open(metadata_path, "r") as f:
-                    for line in f:
-                        key, value = line.strip().split("=", 1)
-                        metadata[key] = value
-                
+                metadata = parse_metadata_file(metadata_path)
+
                 # Check if this run has frames
                 has_frames = any(os.path.exists(os.path.join(run_dir, f"frame_{hour:02d}.png")) 
                                 for hour in range(1, 25))
@@ -108,26 +120,30 @@ def get_run_metadata(location_id, run_id):
     """Get metadata for a specific run"""
     if location_id not in repomap["LOCATIONS"]:
         return None
-        
+
+    # Validate run_id to prevent path traversal
+    if not is_safe_path(os.path.join(repomap["CACHE_DIR"], location_id), run_id):
+        logger.warning(f"Potential path traversal attempt with run_id: {run_id}")
+        return None
+
     run_dir = os.path.join(repomap["CACHE_DIR"], location_id, run_id)
     metadata_path = os.path.join(run_dir, "metadata.txt")
-    
+
     if not os.path.exists(metadata_path):
         return None
-        
-    metadata = {}
-    with open(metadata_path, "r") as f:
-        for line in f:
-            key, value = line.strip().split("=", 1)
-            metadata[key] = value
-            
-    return metadata
+
+    return parse_metadata_file(metadata_path)
 
 def get_run_valid_times(location_id, run_id):
     """Get valid times for a specific run"""
     if location_id not in repomap["LOCATIONS"]:
         return []
-        
+
+    # Validate run_id to prevent path traversal
+    if not is_safe_path(os.path.join(repomap["CACHE_DIR"], location_id), run_id):
+        logger.warning(f"Potential path traversal attempt with run_id: {run_id}")
+        return []
+
     run_dir = os.path.join(repomap["CACHE_DIR"], location_id, run_id)
     valid_times_path = os.path.join(run_dir, "valid_times.txt")
     
@@ -198,9 +214,15 @@ def get_frame(location_id, run_id, hour):
             else:
                 logger.warning(f'No latest run available for location: {location_id}')
                 return "No latest run available", 404
-        
+
+        # Validate run_id to prevent path traversal
+        location_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id)
+        if not is_safe_path(location_cache_dir, run_id):
+            logger.warning(f'Potential path traversal attempt with run_id: {run_id}')
+            return "Invalid run ID", 400
+
         # Check if the frame exists in cache
-        run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, run_id)
+        run_cache_dir = os.path.join(location_cache_dir, run_id)
         frame_path = os.path.join(run_cache_dir, f"frame_{hour_str}.png")
         
         if not os.path.exists(frame_path):
