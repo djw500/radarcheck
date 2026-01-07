@@ -8,7 +8,11 @@ import tempfile
 from filelock import FileLock
 import xarray as xr
 import requests
+
 from io import BytesIO
+import geopandas as gpd
+import psutil
+import gc
 
 from config import repomap
 from utils import download_file, fetch_county_shapefile
@@ -19,7 +23,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create logs directory if it doesn't exist
+# Create logs directory if it doesn't exist
 os.makedirs('logs', exist_ok=True)
+
+def log_memory_usage(context=""):
+    """Log current memory usage."""
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    # Convert to MB
+    rss_mb = mem_info.rss / 1024 / 1024
+    logger.info(f"Memory Usage [{context}]: {rss_mb:.2f} MB")
 
 def get_available_hrrr_runs(max_runs=5):
     """Find multiple recent HRRR runs available, from newest to oldest."""
@@ -27,7 +40,7 @@ def get_available_hrrr_runs(max_runs=5):
     available_runs = []
     
     # Check the last 24 hours of potential runs
-    for hours_ago in range(3, 27):
+    for hours_ago in range(0, 27):
         # Stop once we have enough runs
         if len(available_runs) >= max_runs:
             break
@@ -162,7 +175,7 @@ def fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id):
     
     raise ValueError("Failed to obtain valid GRIB file after 3 attempts")
 
-def generate_forecast_images(location_config, run_info=None):
+def generate_forecast_images(location_config, counties, run_info=None):
     """Generate forecast images for a specific location and model run."""
     try:
         location_id = location_config['id']
@@ -212,21 +225,29 @@ def generate_forecast_images(location_config, run_info=None):
                 valid_time = init_dt + timedelta(hours=hour)
                 valid_time_str = valid_time.strftime("%Y-%m-%d %H:%M:%S")
                 
-                # Generate plot
-                image_buffer = create_plot(
-                    grib_path, 
-                    init_time, 
-                    hour_str, 
-                    repomap["CACHE_DIR"],
-                    center_lat=location_config['center_lat'],
-                    center_lon=location_config['center_lon'],
-                    zoom=location_config['zoom']
-                )
-                
                 # Save image to cache
                 image_path = os.path.join(run_cache_dir, f"frame_{hour_str}.png")
-                with open(image_path, "wb") as f:
-                    f.write(image_buffer.getvalue())
+                
+                # Check if image already exists and is valid
+                if os.path.exists(image_path) and os.path.getsize(image_path) > 1000:
+                    logger.info(f"Skipping existing frame: {image_path}")
+                else:
+                    # Generate plot
+                    image_buffer = create_plot(
+                        grib_path, 
+                        init_time, 
+                        hour_str, 
+                        repomap["CACHE_DIR"],
+                        center_lat=location_config['center_lat'],
+                        center_lon=location_config['center_lon'],
+                        zoom=location_config['zoom'],
+                        counties=counties
+                    )
+                    
+                    with open(image_path, "wb") as f:
+                        f.write(image_buffer.getvalue())
+                    
+                    logger.info(f"Saved forecast image for hour {hour_str} to {image_path}")
                 
                 # Record valid time mapping
                 valid_times.append({
@@ -235,7 +256,6 @@ def generate_forecast_images(location_config, run_info=None):
                     "frame_path": f"frame_{hour_str}.png"
                 })
                 
-                logger.info(f"Saved forecast image for hour {hour_str} to {image_path}")
                 
             except Exception as e:
                 logger.error(f"Error processing hour {hour_str}: {str(e)}")
@@ -307,7 +327,10 @@ def main():
     os.makedirs(repomap["CACHE_DIR"], exist_ok=True)
     
     # Get county shapefile (shared resource)
-    fetch_county_shapefile(repomap["CACHE_DIR"])
+    shp_path = fetch_county_shapefile(repomap["CACHE_DIR"])
+    logger.info("Loading county shapefile into memory...")
+    counties = gpd.read_file(shp_path)
+    log_memory_usage("after_shapefile_load")
     
     # Get available HRRR runs
     if args.latest_only:
@@ -327,7 +350,9 @@ def main():
             logger.info(f"Processing single location: {location_config['name']}")
 
             for run_info in available_runs:
-                generate_forecast_images(location_config, run_info)
+                generate_forecast_images(location_config, counties, run_info)
+                log_memory_usage(f"after_run_{run_info['run_id']}")
+                gc.collect()
 
             # Clean up old runs
             cleanup_old_runs(args.location)
@@ -342,7 +367,8 @@ def main():
             location_config['id'] = location_id
 
             for run_info in available_runs:
-                generate_forecast_images(location_config, run_info)
+                generate_forecast_images(location_config, counties, run_info)
+                log_memory_usage(f"after_run_{run_info['run_id']}")
 
             # Clean up old runs
             cleanup_old_runs(location_id)

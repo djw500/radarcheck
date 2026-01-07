@@ -2,6 +2,7 @@ import os
 import logging
 import zipfile
 from io import BytesIO
+import gc
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -37,9 +38,12 @@ def create_radar_colormap():
     
     return LinearSegmentedColormap.from_list('radar', list(zip(positions, colors)))
 
-def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None, center_lon=None, zoom=None):
+def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None, center_lon=None, zoom=None, counties=None):
     """Create a plot from HRRR GRIB data."""
     logger.info("Starting plot creation...")
+    
+    ds = None
+    fig = None
     
     try:
         # --- Step 1: Open GRIB file ---
@@ -156,9 +160,11 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None,
         gl.right_labels = False
 
         # --- Step 5: Overlay county boundaries ---
+        # --- Step 5: Overlay county boundaries ---
         logger.info("Adding county boundaries...")
-        shp_path = fetch_county_shapefile(cache_dir)
-        counties = gpd.read_file(shp_path)
+        if counties is None:
+             shp_path = fetch_county_shapefile(cache_dir)
+             counties = gpd.read_file(shp_path)
         
         subset_corrected = subset.assign_coords(
             longitude=(((subset.longitude + 180) % 360) - 180)
@@ -196,6 +202,14 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None,
         import traceback
         logger.error("Error in create_plot:", exc_info=True)
         raise
+    finally:
+        # Cleanup resources
+        if fig is not None:
+            plt.close(fig)
+        if ds is not None:
+            ds.close()
+        # Force garbage collection to free up memory from large arrays
+        gc.collect()
     
 def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
     """

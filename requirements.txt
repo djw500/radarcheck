@@ -16,3 +16,4 @@ cartopy
 geopandas
 shapely
 filelock
+psutil
