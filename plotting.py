@@ -11,6 +11,8 @@ import pytz
 import xarray as xr
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import geopandas as gpd
@@ -208,6 +210,10 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None,
             plt.close(fig)
         if ds is not None:
             ds.close()
+        
+        # Close all figures to be safe
+        plt.close('all')
+        
         # Force garbage collection to free up memory from large arrays
         gc.collect()
     

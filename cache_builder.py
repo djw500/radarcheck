@@ -369,6 +369,7 @@ def main():
             for run_info in available_runs:
                 generate_forecast_images(location_config, counties, run_info)
                 log_memory_usage(f"after_run_{run_info['run_id']}")
+                gc.collect()
 
             # Clean up old runs
             cleanup_old_runs(location_id)
