@@ -141,7 +141,7 @@ def fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id):
                 raise ValueError(f"Downloaded file is missing or too small: {temp_filename}")
             
             # Try to open with xarray to verify it's valid
-            ds = xr.open_dataset(temp_filename, engine="cfgrib", chunks={'time': 1})
+            ds = xr.open_dataset(temp_filename, engine="cfgrib")
             # Force load reflectivity to verify file integrity
             ds['refc'].load()
             ds.close()

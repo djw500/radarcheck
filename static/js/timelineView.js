@@ -18,8 +18,9 @@ function createTimeline() {
 
     // Sort valid times
     const sortedTimes = Array.from(allValidTimes).sort();
-    
-    // Create header
+
+    // Clear existing rows and header
+    timeline.querySelectorAll('.timeline-row').forEach(row => row.remove());
     timelineHeader.innerHTML = '';
     sortedTimes.forEach(timeKey => {
         const cell = document.createElement('div');
