@@ -1,0 +1,16 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local data cache
+cache/
+
+# Server logs
+logs/
+
+# IDE settings
+.vscode/
+
+# Virtual environment
+venv/
