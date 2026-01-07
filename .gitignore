@@ -14,3 +14,12 @@ logs/
 
 # Virtual environment
 venv/
+
+# Fly.io
+.fly/
+
+# iOS / Xcode
+ios/*/xcuserdata/
+ios/*/.build/
+ios/*/DerivedData/
+*.xcworkspace/xcuserdata/

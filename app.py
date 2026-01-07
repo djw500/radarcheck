@@ -3,6 +3,7 @@ import logging
 from io import BytesIO
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+from functools import wraps
 
 from flask import Flask, send_file, render_template, redirect, url_for, request, abort, jsonify
 import pytz
@@ -12,6 +13,27 @@ from config import repomap
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# API Key authentication for production
+# In production: set via `fly secrets set RADARCHECK_API_KEY=...`
+# In development: defaults to allowing all requests
+API_KEY = os.environ.get("RADARCHECK_API_KEY")
+
+def require_api_key(f):
+    """Decorator to require API key for endpoints."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Skip auth in development (when no key is configured)
+        if API_KEY is None:
+            return f(*args, **kwargs)
+        
+        # Check the header
+        provided_key = request.headers.get("X-API-Key")
+        if provided_key != API_KEY:
+            logger.warning(f"Invalid or missing API key attempt from {request.remote_addr}")
+            return jsonify({"error": "Invalid or missing API key"}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 def parse_metadata_file(filepath):
     """Safely parse a metadata file with key=value format."""
@@ -190,6 +212,7 @@ def handle_error(error_message, status_code=500):
 # --- Flask Endpoints ---
 
 @app.route("/frame/<location_id>/<run_id>/<int:hour>")
+@require_api_key
 def get_frame(location_id, run_id, hour):
     """Serve a single forecast frame for a specific location and run."""
     try:
@@ -288,18 +311,21 @@ def forecast():
 
 
 @app.route("/api/runs/<location_id>")
+@require_api_key
 def api_runs(location_id):
     """API endpoint to get all runs for a location"""
     runs = get_location_runs(location_id)
     return jsonify(runs)
 
 @app.route("/api/valid_times/<location_id>/<run_id>")
+@require_api_key
 def api_valid_times(location_id, run_id):
     """API endpoint to get valid times for a specific run"""
     valid_times = get_run_valid_times(location_id, run_id)
     return jsonify(valid_times)
 
 @app.route("/api/locations")
+@require_api_key
 def api_locations():
     """API endpoint to get all available locations"""
     locations = get_available_locations()

@@ -1,5 +1,18 @@
+# Web framework
 flask
+gunicorn
+
+# Data fetching
 requests
 pillow
 pytz
-gunicorn
+
+# Scientific/GRIB processing
+numpy
+xarray
+cfgrib
+scipy
+cartopy
+geopandas
+shapely
+filelock
