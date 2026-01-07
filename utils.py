@@ -5,16 +5,24 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def download_file(url, local_path):
-    """Download a file if it doesn't exist in cache."""
+def download_file(url, local_path, timeout=60):
+    """Download a file if it doesn't exist in cache.
+
+    Args:
+        url: The URL to download from
+        local_path: The local path to save the file
+        timeout: Request timeout in seconds (default 60)
+    """
     if not os.path.exists(local_path):
         logger.info(f"Downloading from: {url}")
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, timeout=timeout)
         response.raise_for_status()
-        
+
         # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        
+        dir_path = os.path.dirname(local_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
         with open(local_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)

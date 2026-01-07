@@ -8,7 +8,8 @@ from io import BytesIO
 from unittest.mock import patch  # Import patch
 
 # Import the functions we want to test
-from app import get_latest_hrrr_run, fetch_grib, forecast, app, index, HRRR_URL
+from app import app, index
+from cache_builder import get_latest_hrrr_run, fetch_grib, get_available_hrrr_runs
 from utils import download_file, fetch_county_shapefile
 from config import repomap
 from plotting import create_plot, create_forecast_gif
@@ -51,52 +52,62 @@ def test_fetch_county_shapefile(tmpdir):
 def test_real_hrrr_availability():
     """Test actual HRRR server availability and time conversion"""
     date_str, init_hour, init_time = get_latest_hrrr_run()
-    
+
     # Check date string format (YYYYMMDD)
     assert len(date_str) == 8
     assert date_str.isdigit()
-    
+
     # Check init hour format (HH)
     assert len(init_hour) == 2
     assert init_hour.isdigit()
     assert 0 <= int(init_hour) <= 23
-    
+
     # Convert UTC time to Eastern Time
     utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M:%S")
     utc = pytz.UTC.localize(utc_time)
     eastern = pytz.timezone('America/New_York')
     est_time = utc.astimezone(eastern)
-    
+
     print(f"\nHRRR Run Information:")
     print(f"UTC Time: {utc.strftime('%Y-%m-%d %H:%M %Z')}")
     print(f"Eastern Time: {est_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
-    
-    # Verify the HRRR file is actually available
-    response = requests.head(HRRR_URL) # Removed HRRR_URL since it's a global constant
-    assert response.status_code == 200, f"HRRR file not available at {HRRR_URL}" # Removed HRRR_URL since it's a global constant
-    
+
+    # Verify the HRRR file is actually available by constructing the URL
+    hrrr_url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
+                f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}z.wrfsfcf01.grib2&"
+                f"dir=%2Fhrrr.{date_str}%2Fconus&"
+                f"var_REFC=on")
+    response = requests.head(hrrr_url, timeout=10)
+    assert response.status_code == 200, f"HRRR file not available at {hrrr_url}"
+
     # Get file size in MB if available
-    if 'content-length' in response.headers: # Removed HRRR_URL since it's a global constant
-       size_mb = int(response.headers['content-length']) / (1024 * 1024) # Removed HRRR_URL since it's a global constant
-       print(f"File size: {size_mb:.1f} MB") # Removed HRRR_URL since it's a global constant
-    
-    # The test now focuses on time conversion and HRRR run info, not URL availability
-    pass
+    if 'content-length' in response.headers:
+       size_mb = int(response.headers['content-length']) / (1024 * 1024)
+       print(f"File size: {size_mb:.1f} MB")
 
 def test_real_grib_download():
     """Test actual GRIB file downloading and verification"""
+    # Get the latest run info
+    date_str, init_hour, init_time = get_latest_hrrr_run()
+    run_id = f"run_{date_str}_{init_hour}"
+
+    # Get the first location config
+    location_id = list(repomap["LOCATIONS"].keys())[0]
+    location_config = repomap["LOCATIONS"][location_id].copy()
+    location_config['id'] = location_id
+
     # Fetch the GRIB file
     forecast_hour = "01"  # Use 1-hour forecast
-    grib_path = fetch_grib(forecast_hour)
-    
+    grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
+
     # Verify the file exists
     assert os.path.exists(grib_path), f"GRIB file not found at {grib_path}"
-    
+
     # Check file size (should be at least 100KB for a filtered GRIB2 file)
     size_kb = os.path.getsize(grib_path) / 1024
     print(f"\nDownloaded GRIB file: {grib_path}")
     print(f"File size: {size_kb:.1f} KB")
-    
+
     assert size_kb > 100, f"GRIB file seems too small ({size_kb:.1f} KB)"
 
 def test_latest_hrrr_info():
@@ -126,15 +137,19 @@ def test_create_forecast_gif_success():
     """Test successful creation of an animated forecast GIF."""
     # 1. Get the latest HRRR run information
     date_str, init_hour, init_time = get_latest_hrrr_run()
-    
+    run_id = f"run_{date_str}_{init_hour}"
+
+    # Get the first location config
+    location_id = list(repomap["LOCATIONS"].keys())[0]
+    location_config = repomap["LOCATIONS"][location_id].copy()
+    location_config['id'] = location_id
+
     # 2. Get GRIB files for multiple forecast hours
     grib_paths = []
     for hour in range(1, 4):  # Test with 3 hours instead of 12 for speed
-        grib_filename = os.path.join(repomap["CACHE_DIR"], 
-                                   f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{hour:02d}.grib2")
-        if not os.path.exists(grib_filename):
-            fetch_grib(f"{hour:02d}")
-        grib_paths.append(grib_filename)
+        hour_str = f"{hour:02d}"
+        grib_path = fetch_grib(date_str, init_hour, hour_str, location_config, run_id)
+        grib_paths.append(grib_path)
 
     # 3. Create the animated GIF
     gif_buffer = create_forecast_gif(grib_paths, init_time, repomap["CACHE_DIR"], duration=500)
@@ -164,22 +179,24 @@ def test_create_plot_success():
     """Test successful creation of a plot using real data."""
     # 1. Get the latest HRRR run information
     date_str, init_hour, init_time = get_latest_hrrr_run()
+    run_id = f"run_{date_str}_{init_hour}"
     forecast_hour = "01"  # Use 1-hour forecast
 
-    # 2. Construct the GRIB filename
-    grib_filename = os.path.join(repomap["CACHE_DIR"], f"{repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2")
+    # Get the first location config
+    location_id = list(repomap["LOCATIONS"].keys())[0]
+    location_config = repomap["LOCATIONS"][location_id].copy()
+    location_config['id'] = location_id
 
-    # 3. Download the GRIB file (if it doesn't exist)
-    if not os.path.exists(grib_filename):
-        fetch_grib(forecast_hour)
+    # 2. Download the GRIB file
+    grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
 
-    # 4. Call create_plot
-    image_buffer = create_plot(grib_filename, init_time, forecast_hour, repomap["CACHE_DIR"])
+    # 3. Call create_plot
+    image_buffer = create_plot(grib_path, init_time, forecast_hour, repomap["CACHE_DIR"])
 
-    # 5. Assert that the result is a BytesIO object (i.e., a PNG image)
+    # 4. Assert that the result is a BytesIO object (i.e., a PNG image)
     assert isinstance(image_buffer, BytesIO)
 
-    # 6. Optionally, you can add more checks to validate the image content
+    # 5. Optionally, you can add more checks to validate the image content
     #    For example, check the file size or try to open it as an image
     image_buffer.seek(0)  # Reset the buffer position to the beginning
     try:

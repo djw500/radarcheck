@@ -2,8 +2,9 @@ import os
 import logging
 import argparse
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pytz
+import tempfile
 from filelock import FileLock
 import xarray as xr
 import requests
@@ -22,7 +23,7 @@ os.makedirs('logs', exist_ok=True)
 
 def get_available_hrrr_runs(max_runs=5):
     """Find multiple recent HRRR runs available, from newest to oldest."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     available_runs = []
     
     # Check the last 24 hours of potential runs
@@ -246,11 +247,20 @@ def generate_forecast_images(location_config, run_info=None):
             for vt in valid_times:
                 f.write(f"{vt['forecast_hour']}={vt['valid_time']}={vt['frame_path']}\n")
         
-        # Create a symlink to the latest run
+        # Create a symlink to the latest run (atomic replacement)
         latest_link = os.path.join(repomap["CACHE_DIR"], location_id, "latest")
-        if os.path.exists(latest_link) or os.path.islink(latest_link):
-            os.unlink(latest_link)
-        os.symlink(run_id, latest_link)
+        # Create temp symlink and atomically rename to avoid race conditions
+        temp_link = os.path.join(repomap["CACHE_DIR"], location_id, f".latest_tmp_{os.getpid()}")
+        try:
+            os.symlink(run_id, temp_link)
+            os.replace(temp_link, latest_link)
+        except OSError:
+            # Fallback for systems that don't support atomic replace of symlinks
+            if os.path.exists(temp_link):
+                os.unlink(temp_link)
+            if os.path.exists(latest_link) or os.path.islink(latest_link):
+                os.unlink(latest_link)
+            os.symlink(run_id, latest_link)
         
         logger.info(f"Completed forecast image generation for {location_config['name']} (run {run_id})")
         return True
@@ -311,13 +321,14 @@ def main():
     if args.location:
         # Process single location
         if args.location in repomap["LOCATIONS"]:
-            location_config = repomap["LOCATIONS"][args.location]
+            # Create a copy to avoid mutating the global config
+            location_config = repomap["LOCATIONS"][args.location].copy()
             location_config['id'] = args.location
             logger.info(f"Processing single location: {location_config['name']}")
-            
+
             for run_info in available_runs:
                 generate_forecast_images(location_config, run_info)
-                
+
             # Clean up old runs
             cleanup_old_runs(args.location)
         else:
@@ -325,12 +336,14 @@ def main():
     else:
         # Process all locations
         logger.info(f"Processing all {len(repomap['LOCATIONS'])} configured locations")
-        for location_id, location_config in repomap["LOCATIONS"].items():
+        for location_id, location_config_orig in repomap["LOCATIONS"].items():
+            # Create a copy to avoid mutating the global config
+            location_config = location_config_orig.copy()
             location_config['id'] = location_id
-            
+
             for run_info in available_runs:
                 generate_forecast_images(location_config, run_info)
-                
+
             # Clean up old runs
             cleanup_old_runs(location_id)
     
