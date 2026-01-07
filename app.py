@@ -27,8 +27,8 @@ def require_api_key(f):
         if API_KEY is None:
             return f(*args, **kwargs)
         
-        # Check the header
-        provided_key = request.headers.get("X-API-Key")
+        # Check header first, then query parameter (for browser testing)
+        provided_key = request.headers.get("X-API-Key") or request.args.get("api_key")
         if provided_key != API_KEY:
             logger.warning(f"Invalid or missing API key attempt from {request.remote_addr}")
             return jsonify({"error": "Invalid or missing API key"}), 401
@@ -263,6 +263,7 @@ def get_latest_frame(location_id, hour):
     return get_frame(location_id, "latest", hour)
 
 @app.route("/location/<location_id>")
+@require_api_key
 def location_view(location_id):
     """Show forecast for a specific location"""
     if location_id not in repomap["LOCATIONS"]:
@@ -341,6 +342,7 @@ def health_check():
     })
 
 @app.route("/")
+@require_api_key
 def index():
     """Home page showing available locations"""
     locations = get_available_locations()

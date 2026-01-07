@@ -348,6 +348,13 @@ def main():
             cleanup_old_runs(location_id)
     
     logger.info("Cache building complete")
+    
+    # In production (supervisord), sleep before exiting so we don't hammer NOAA
+    # HRRR updates hourly, so checking every 15 minutes is sufficient
+    import time
+    sleep_minutes = int(os.environ.get("CACHE_REFRESH_INTERVAL", 15))
+    logger.info(f"Sleeping for {sleep_minutes} minutes before next refresh...")
+    time.sleep(sleep_minutes * 60)
 
 if __name__ == "__main__":
     main()
