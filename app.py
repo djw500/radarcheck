@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from io import BytesIO
 from datetime import datetime
@@ -191,6 +192,27 @@ def get_run_valid_times(location_id, run_id):
     valid_times.sort(key=lambda x: x["forecast_hour"])
     return valid_times
 
+def get_run_center_values(location_id, run_id):
+    """Get center-point forecast values for a specific run."""
+    if location_id not in repomap["LOCATIONS"]:
+        return None
+
+    if not is_safe_path(os.path.join(repomap["CACHE_DIR"], location_id), run_id):
+        logger.warning(f"Potential path traversal attempt with run_id: {run_id}")
+        return None
+
+    run_dir = os.path.join(repomap["CACHE_DIR"], location_id, run_id)
+    values_path = os.path.join(run_dir, "center_values.json")
+    if not os.path.exists(values_path):
+        return None
+
+    try:
+        with open(values_path, "r") as f:
+            return json.load(f)
+    except (IOError, json.JSONDecodeError) as e:
+        logger.warning(f"Error reading center values file {values_path}: {e}")
+        return None
+
 def get_local_time_text(utc_time_str):
     utc_time = datetime.strptime(utc_time_str, "%Y-%m-%d %H:%M:%S")
     utc_zone = pytz.timezone("UTC")
@@ -324,6 +346,31 @@ def api_valid_times(location_id, run_id):
     """API endpoint to get valid times for a specific run"""
     valid_times = get_run_valid_times(location_id, run_id)
     return jsonify(valid_times)
+
+@app.route("/api/center_values/<location_id>")
+@require_api_key
+def api_center_values(location_id):
+    """API endpoint to get center-point values for all runs for a location."""
+    runs = get_location_runs(location_id)
+    if not runs:
+        return jsonify([])
+
+    response = []
+    for run in runs:
+        run_id = run["run_id"]
+        center_values = get_run_center_values(location_id, run_id)
+        if center_values:
+            response.append(center_values)
+    return jsonify(response)
+
+@app.route("/api/center_values/<location_id>/<run_id>")
+@require_api_key
+def api_center_values_run(location_id, run_id):
+    """API endpoint to get center-point values for a specific run."""
+    center_values = get_run_center_values(location_id, run_id)
+    if not center_values:
+        return handle_error("Center values not available for this run", 404)
+    return jsonify(center_values)
 
 @app.route("/api/locations")
 @require_api_key

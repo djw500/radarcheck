@@ -8,10 +8,13 @@ Tests the API contract for the iOS client, including:
 - API key authentication
 """
 
+import json
 import os
 import pytest
+from pathlib import Path
 from unittest.mock import patch
 
+import app as app_module
 from app import app
 
 
@@ -234,3 +237,94 @@ def test_health_no_auth_required(client_with_api_key):
     """Test /health is accessible without API key (for monitoring)."""
     response = client_with_api_key.get('/health')
     assert response.status_code == 200
+
+
+def _build_center_values_cache(tmp_path: Path):
+    cache_dir = tmp_path / "cache"
+    run_dir = cache_dir / "test-location" / "run_20240101_00"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    (run_dir / "metadata.txt").write_text(
+        "date_str=20240101\n"
+        "init_hour=00\n"
+        "init_time=2024-01-01 00:00:00\n"
+        "run_id=run_20240101_00\n"
+        "location_name=Test Location\n"
+        "center_lat=40.0\n"
+        "center_lon=-75.0\n"
+        "zoom=1.5\n"
+    )
+    (run_dir / "frame_01.png").write_bytes(b"fakepng")
+
+    center_values = {
+        "location_id": "test-location",
+        "run_id": "run_20240101_00",
+        "init_time": "2024-01-01 00:00:00",
+        "center_lat": 40.0,
+        "center_lon": -75.0,
+        "units": "dBZ",
+        "values": [
+            {"forecast_hour": 1, "valid_time": "2024-01-01 01:00:00", "value": 12.3},
+            {"forecast_hour": 2, "valid_time": "2024-01-01 02:00:00", "value": 15.7},
+        ],
+    }
+    (run_dir / "center_values.json").write_text(json.dumps(center_values))
+    return cache_dir
+
+
+def test_api_center_values_for_run(client, tmp_path, monkeypatch):
+    """Test /api/center_values/<location>/<run> returns center values."""
+    cache_dir = _build_center_values_cache(tmp_path)
+    monkeypatch.setitem(app_module.repomap, "CACHE_DIR", str(cache_dir))
+    monkeypatch.setitem(
+        app_module.repomap,
+        "LOCATIONS",
+        {
+            "test-location": {
+                "name": "Test Location",
+                "center_lat": 40.0,
+                "center_lon": -75.0,
+                "zoom": 1.5,
+                "lat_min": 39.0,
+                "lat_max": 41.0,
+                "lon_min": -76.0,
+                "lon_max": -74.0,
+            }
+        },
+    )
+    monkeypatch.setattr(app_module, "API_KEY", None)
+
+    response = client.get("/api/center_values/test-location/run_20240101_00")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["run_id"] == "run_20240101_00"
+    assert data["values"][0]["forecast_hour"] == 1
+
+
+def test_api_center_values_for_location(client, tmp_path, monkeypatch):
+    """Test /api/center_values/<location> returns a list of run payloads."""
+    cache_dir = _build_center_values_cache(tmp_path)
+    monkeypatch.setitem(app_module.repomap, "CACHE_DIR", str(cache_dir))
+    monkeypatch.setitem(
+        app_module.repomap,
+        "LOCATIONS",
+        {
+            "test-location": {
+                "name": "Test Location",
+                "center_lat": 40.0,
+                "center_lon": -75.0,
+                "zoom": 1.5,
+                "lat_min": 39.0,
+                "lat_max": 41.0,
+                "lon_min": -76.0,
+                "lon_max": -74.0,
+            }
+        },
+    )
+    monkeypatch.setattr(app_module, "API_KEY", None)
+
+    response = client.get("/api/center_values/test-location")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert isinstance(data, list)
+    assert data[0]["run_id"] == "run_20240101_00"

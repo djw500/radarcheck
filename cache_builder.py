@@ -1,6 +1,7 @@
 import os
 import logging
 import argparse
+import json
 import shutil
 from datetime import datetime, timedelta, timezone
 import pytz
@@ -13,6 +14,7 @@ from io import BytesIO
 import geopandas as gpd
 import psutil
 import gc
+import numpy as np
 
 from config import repomap
 from utils import download_file, fetch_county_shapefile
@@ -175,6 +177,50 @@ def fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id):
     
     raise ValueError("Failed to obtain valid GRIB file after 3 attempts")
 
+def extract_center_value(grib_path, center_lat, center_lon):
+    """Extract the forecast value at the center point from a GRIB file."""
+    ds = None
+    try:
+        try:
+            ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': 'refc'})
+        except Exception as e:
+            logger.warning(f"Error with shortName filter: {str(e)}")
+            ds = xr.open_dataset(
+                grib_path,
+                engine="cfgrib",
+                backend_kwargs={'filter_by_keys': {'paramId': '132'}}
+            )
+
+        if not ds.data_vars:
+            raise ValueError("No variables found in GRIB file")
+
+        if "refc" in ds.data_vars:
+            data = ds["refc"]
+        else:
+            data = ds[list(ds.data_vars.keys())[0]]
+
+        target_lon = center_lon
+        lon_min = float(data.longitude.min())
+        lon_max = float(data.longitude.max())
+        if lon_min >= 0 and center_lon < 0:
+            target_lon = center_lon + 360
+        elif lon_max > 180 and center_lon < 0:
+            target_lon = center_lon + 360
+
+        center_value = data.sel(
+            latitude=center_lat,
+            longitude=target_lon,
+            method="nearest"
+        ).values
+
+        value = float(center_value)
+        if np.isnan(value):
+            return None, data.attrs.get("units")
+        return value, data.attrs.get("units")
+    finally:
+        if ds is not None:
+            ds.close()
+
 def generate_forecast_images(location_config, counties, run_info=None):
     """Generate forecast images for a specific location and model run."""
     try:
@@ -210,6 +256,8 @@ def generate_forecast_images(location_config, counties, run_info=None):
         
         # Download and process each forecast hour
         valid_times = []
+        center_values = []
+        center_units = None
         for hour in range(1, 25):
             hour_str = f"{hour:02d}"
             logger.info(f"Processing forecast hour {hour_str} for {location_config['name']} (run {run_id})")
@@ -248,12 +296,25 @@ def generate_forecast_images(location_config, counties, run_info=None):
                         f.write(image_buffer.getvalue())
                     
                     logger.info(f"Saved forecast image for hour {hour_str} to {image_path}")
-                
+
+                center_value, units = extract_center_value(
+                    grib_path,
+                    location_config['center_lat'],
+                    location_config['center_lon']
+                )
+                if center_units is None:
+                    center_units = units
+
                 # Record valid time mapping
                 valid_times.append({
                     "forecast_hour": hour,
                     "valid_time": valid_time_str,
                     "frame_path": f"frame_{hour_str}.png"
+                })
+                center_values.append({
+                    "forecast_hour": hour,
+                    "valid_time": valid_time_str,
+                    "value": center_value
                 })
                 
                 
@@ -266,6 +327,18 @@ def generate_forecast_images(location_config, counties, run_info=None):
         with open(valid_times_path, "w") as f:
             for vt in valid_times:
                 f.write(f"{vt['forecast_hour']}={vt['valid_time']}={vt['frame_path']}\n")
+
+        center_values_path = os.path.join(run_cache_dir, "center_values.json")
+        with open(center_values_path, "w") as f:
+            json.dump({
+                "location_id": location_id,
+                "run_id": run_id,
+                "init_time": init_time,
+                "center_lat": location_config['center_lat'],
+                "center_lon": location_config['center_lon'],
+                "units": center_units,
+                "values": center_values
+            }, f, indent=2)
         
         # Create a symlink to the latest run (atomic replacement)
         latest_link = os.path.join(repomap["CACHE_DIR"], location_id, "latest")
