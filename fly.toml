@@ -12,7 +12,6 @@ primary_region = 'ewr'
 [mounts]
   source = 'radar_cache'
   destination = '/app/cache'
-  processes = ['app']
 
 [http_service]
   internal_port = 5000
