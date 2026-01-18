@@ -6,7 +6,10 @@ A comprehensive plan to enhance the Radarcheck weather visualization application
 
 ## Executive Summary
 
-Radarcheck is a well-structured Flask application for HRRR weather radar visualization. Recent commits have added multi-variable and multi-model support. This plan identifies improvements across 8 key areas organized into 4 phases, prioritized by impact and effort.
+Radarcheck is a well-structured Flask application for HRRR weather radar visualization. Recent commits have added multi-variable and multi-model support. This plan identifies improvements across 8 key areas organized into 5 phases, prioritized by impact and effort.
+
+**Highlight: Interactive Map Visualization (Phase 3B)**
+The highest-impact improvement is replacing static PNG images with interactive Leaflet/Mapbox maps. This enables pan/zoom, click-for-values, layer toggling, and base map switching - transforming the app from a simple image viewer into a modern weather visualization platform.
 
 **Current State:**
 - 2,374 lines of Python across 5 main modules
@@ -463,6 +466,448 @@ def api_alerts(location_id):
 
 ---
 
+## Phase 3B: Interactive Map Visualization (Major Feature)
+
+This is a significant architectural enhancement that replaces static PNG images with interactive web map overlays. This enables pan/zoom, click-for-values, layer toggling, and a much richer user experience.
+
+### Current Architecture (Static Images)
+
+```
+GRIB2 → matplotlib/cartopy → PNG → Flask serves image → <img> tag displays
+```
+
+**Limitations:**
+- Fixed zoom level per location
+- No pan/zoom interaction
+- No click-to-query values
+- No layer toggling
+- Large file sizes for high-resolution images
+- New image required for any view change
+
+### Proposed Architecture (Interactive Maps)
+
+```
+GRIB2 → Data Processing → Tile/Vector Generation → Map Library renders in browser
+```
+
+**Benefits:**
+- Infinite pan/zoom within data bounds
+- Click anywhere for exact forecast values
+- Toggle multiple variables as layers
+- Smooth animations between forecast hours
+- Smaller data transfer (tiles loaded on demand)
+- Base map customization (satellite, terrain, streets)
+
+### 3B.1 Technology Selection
+
+| Option | Pros | Cons | Recommendation |
+|--------|------|------|----------------|
+| **Leaflet + GeoTIFF tiles** | Simple, lightweight, good plugin ecosystem | Limited WebGL support | Good for MVP |
+| **Mapbox GL JS** | Beautiful, fast WebGL rendering, great mobile | Requires API key, usage limits | Best UX |
+| **OpenLayers** | Most powerful, no vendor lock-in | Steeper learning curve | Enterprise choice |
+| **Deck.gl** | Excellent for large datasets, WebGL | Complex setup, React-focused | Best performance |
+
+**Recommended: Leaflet for MVP, migrate to Mapbox GL JS for production**
+
+### 3B.2 Data Pipeline Changes
+
+**New module `tile_generator.py`:**
+
+```python
+import numpy as np
+import xarray as xr
+from PIL import Image
+import mercantile
+from rio_tiler.io import XarrayReader
+
+def grib_to_geotiff(grib_path: str, output_path: str, variable_config: dict) -> str:
+    """Convert GRIB2 to Cloud-Optimized GeoTIFF for efficient tiling."""
+    ds = xr.open_dataset(grib_path, engine="cfgrib")
+    data = select_variable_from_dataset(ds, variable_config)
+
+    # Apply unit conversion
+    if variable_config.get("conversion"):
+        data = convert_units(data, variable_config["conversion"])
+
+    # Write as COG (Cloud Optimized GeoTIFF)
+    data.rio.to_raster(
+        output_path,
+        driver="COG",
+        compress="deflate"
+    )
+    return output_path
+
+
+def generate_tiles(geotiff_path: str, output_dir: str,
+                   min_zoom: int = 4, max_zoom: int = 10) -> None:
+    """Generate XYZ tile pyramid from GeoTIFF."""
+    with XarrayReader(geotiff_path) as src:
+        for zoom in range(min_zoom, max_zoom + 1):
+            tiles = list(mercantile.tiles(*src.bounds, zooms=zoom))
+            for tile in tiles:
+                img, mask = src.tile(tile.x, tile.y, tile.z)
+                tile_path = f"{output_dir}/{zoom}/{tile.x}/{tile.y}.png"
+                save_tile(img, mask, tile_path, variable_config)
+
+
+def generate_vector_contours(grib_path: str, variable_config: dict) -> dict:
+    """Generate GeoJSON contours for vector rendering."""
+    import rasterio
+    from rasterio import features
+
+    ds = xr.open_dataset(grib_path, engine="cfgrib")
+    data = select_variable_from_dataset(ds, variable_config)
+
+    # Generate contour levels
+    vmin, vmax = variable_config["vmin"], variable_config["vmax"]
+    levels = np.linspace(vmin, vmax, 10)
+
+    contours = []
+    for level in levels:
+        mask = data.values >= level
+        shapes = features.shapes(mask.astype(np.uint8), transform=data.rio.transform())
+        for shape, value in shapes:
+            if value == 1:
+                contours.append({
+                    "type": "Feature",
+                    "properties": {"value": float(level)},
+                    "geometry": shape
+                })
+
+    return {"type": "FeatureCollection", "features": contours}
+```
+
+### 3B.3 New API Endpoints
+
+```python
+# Tile serving endpoint
+@app.route("/tiles/<location_id>/<model_id>/<run_id>/<variable_id>/<int:hour>/<int:z>/<int:x>/<int:y>.png")
+def get_tile(location_id, model_id, run_id, variable_id, hour, z, x, y):
+    """Serve map tiles for interactive display."""
+    tile_path = os.path.join(
+        repomap["CACHE_DIR"], location_id, model_id, run_id,
+        variable_id, "tiles", str(hour), str(z), str(x), f"{y}.png"
+    )
+    if not os.path.exists(tile_path):
+        return "", 204  # No content for missing tiles
+    return send_file(tile_path, mimetype="image/png")
+
+
+# GeoJSON endpoint for vector overlays
+@app.route("/api/geojson/<location_id>/<model_id>/<run_id>/<variable_id>/<int:hour>")
+def get_geojson(location_id, model_id, run_id, variable_id, hour):
+    """Serve GeoJSON contours for vector rendering."""
+    geojson_path = os.path.join(
+        repomap["CACHE_DIR"], location_id, model_id, run_id,
+        variable_id, f"contours_{hour:02d}.geojson"
+    )
+    if not os.path.exists(geojson_path):
+        return jsonify({"error": "Data not available"}), 404
+    return send_file(geojson_path, mimetype="application/geo+json")
+
+
+# Point query endpoint
+@app.route("/api/value/<location_id>/<model_id>/<run_id>/<variable_id>/<int:hour>")
+def get_point_value(location_id, model_id, run_id, variable_id, hour):
+    """Get forecast value at a specific lat/lon point."""
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+
+    if lat is None or lon is None:
+        return jsonify({"error": "lat and lon required"}), 400
+
+    grib_path = get_grib_path(location_id, model_id, run_id, variable_id, hour)
+    value, units = extract_point_value(grib_path, lat, lon, variable_config)
+
+    return jsonify({
+        "lat": lat,
+        "lon": lon,
+        "value": value,
+        "units": units,
+        "variable": variable_id,
+        "forecast_hour": hour
+    })
+```
+
+### 3B.4 Frontend Implementation
+
+**New file `static/js/interactiveMap.js`:**
+
+```javascript
+class WeatherMap {
+    constructor(containerId, options = {}) {
+        this.map = L.map(containerId, {
+            center: [options.centerLat || 40.0, options.centerLon || -75.0],
+            zoom: options.zoom || 8,
+            maxBounds: options.bounds
+        });
+
+        // Base layer options
+        this.baseLayers = {
+            'Streets': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),
+            'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
+            'Terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png')
+        };
+        this.baseLayers['Streets'].addTo(this.map);
+
+        // Weather overlay layer
+        this.weatherLayer = null;
+        this.currentHour = 1;
+
+        // County boundaries
+        this.countyLayer = null;
+
+        // Click handler for point queries
+        this.map.on('click', (e) => this.onMapClick(e));
+
+        // Layer control
+        L.control.layers(this.baseLayers, {}, {position: 'topright'}).addTo(this.map);
+    }
+
+    setWeatherLayer(locationId, modelId, runId, variableId, hour) {
+        // Remove existing weather layer
+        if (this.weatherLayer) {
+            this.map.removeLayer(this.weatherLayer);
+        }
+
+        // Add new tile layer
+        const tileUrl = `/tiles/${locationId}/${modelId}/${runId}/${variableId}/${hour}/{z}/{x}/{y}.png`;
+        this.weatherLayer = L.tileLayer(tileUrl, {
+            opacity: 0.7,
+            maxZoom: 12,
+            minZoom: 4
+        }).addTo(this.map);
+
+        this.currentHour = hour;
+    }
+
+    async onMapClick(e) {
+        const {lat, lng} = e.latlng;
+
+        // Query the forecast value at this point
+        const response = await fetch(
+            `/api/value/${this.locationId}/${this.modelId}/${this.runId}/${this.variableId}/${this.currentHour}?lat=${lat}&lon=${lng}`
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+            L.popup()
+                .setLatLng(e.latlng)
+                .setContent(`
+                    <strong>${data.variable}</strong><br>
+                    Value: ${data.value?.toFixed(1) ?? 'N/A'} ${data.units}<br>
+                    Hour +${data.forecast_hour}
+                `)
+                .openOn(this.map);
+        }
+    }
+
+    animateHours(startHour, endHour, interval = 500) {
+        let hour = startHour;
+        this.animationTimer = setInterval(() => {
+            this.setWeatherLayer(this.locationId, this.modelId, this.runId, this.variableId, hour);
+            hour++;
+            if (hour > endHour) hour = startHour;
+        }, interval);
+    }
+
+    stopAnimation() {
+        if (this.animationTimer) {
+            clearInterval(this.animationTimer);
+            this.animationTimer = null;
+        }
+    }
+
+    addCountyBoundaries(geojsonUrl) {
+        fetch(geojsonUrl)
+            .then(r => r.json())
+            .then(data => {
+                this.countyLayer = L.geoJSON(data, {
+                    style: {
+                        color: '#666',
+                        weight: 1,
+                        fillOpacity: 0
+                    }
+                }).addTo(this.map);
+            });
+    }
+
+    setOpacity(opacity) {
+        if (this.weatherLayer) {
+            this.weatherLayer.setOpacity(opacity);
+        }
+    }
+}
+
+// Color legend control
+L.Control.Legend = L.Control.extend({
+    onAdd: function(map) {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = this.options.content;
+        return div;
+    }
+});
+
+function createLegend(variableConfig) {
+    const {vmin, vmax, units, display_name} = variableConfig;
+    // Generate gradient legend HTML
+    return `
+        <div class="legend-title">${display_name}</div>
+        <div class="legend-gradient"></div>
+        <div class="legend-labels">
+            <span>${vmin}</span>
+            <span>${vmax} ${units}</span>
+        </div>
+    `;
+}
+```
+
+### 3B.5 Updated HTML Template
+
+**Replace image display in `location.html`:**
+
+```html
+<div id="singleView" class="view active">
+    <p>Model initialized: {{ init_time }}</p>
+    <div class="controls">
+        <button id="playButton">Play</button>
+        <input type="range" id="timeSlider" min="1" max="{{ models[model_id].max_forecast_hours }}" value="1">
+        <span id="timeDisplay">Hour +1</span>
+        <label>
+            Opacity: <input type="range" id="opacitySlider" min="0" max="100" value="70">
+        </label>
+    </div>
+
+    <!-- Interactive map container -->
+    <div id="weatherMap" style="width: 100%; height: 500px;"></div>
+
+    <!-- Fallback static image for older browsers -->
+    <noscript>
+        <img src="/frame/{{ location_id }}/{{ model_id }}/{{ run_id }}/{{ variable_id }}/1"
+             alt="Forecast Plot" style="width: 100%;">
+    </noscript>
+</div>
+
+<script>
+    const weatherMap = new WeatherMap('weatherMap', {
+        centerLat: {{ location.center_lat }},
+        centerLon: {{ location.center_lon }},
+        zoom: 8
+    });
+
+    weatherMap.locationId = '{{ location_id }}';
+    weatherMap.modelId = '{{ model_id }}';
+    weatherMap.runId = '{{ run_id }}';
+    weatherMap.variableId = '{{ variable_id }}';
+
+    // Initial layer
+    weatherMap.setWeatherLayer(
+        '{{ location_id }}', '{{ model_id }}', '{{ run_id }}',
+        '{{ variable_id }}', 1
+    );
+
+    // Slider updates map
+    document.getElementById('timeSlider').addEventListener('input', (e) => {
+        weatherMap.setWeatherLayer(
+            weatherMap.locationId, weatherMap.modelId,
+            weatherMap.runId, weatherMap.variableId,
+            parseInt(e.target.value)
+        );
+    });
+
+    // Opacity control
+    document.getElementById('opacitySlider').addEventListener('input', (e) => {
+        weatherMap.setOpacity(e.target.value / 100);
+    });
+</script>
+```
+
+### 3B.6 Cache Builder Updates
+
+**Update `cache_builder.py` to generate tiles:**
+
+```python
+def generate_forecast_images(location_config, counties, model_id, run_info=None, variable_ids=None):
+    # ... existing code ...
+
+    for variable_id in variable_ids:
+        for hour in range(1, max_hours + 1):
+            # Existing: Generate static PNG
+            if GENERATE_STATIC_IMAGES:
+                image_buffer = create_plot(...)
+                save_image(image_buffer, image_path)
+
+            # New: Generate tiles for interactive map
+            if GENERATE_MAP_TILES:
+                geotiff_path = grib_to_geotiff(grib_path, temp_geotiff, variable_config)
+                tile_dir = os.path.join(variable_cache_dir, "tiles", f"{hour:02d}")
+                generate_tiles(geotiff_path, tile_dir, min_zoom=4, max_zoom=10)
+
+            # New: Generate GeoJSON contours (optional, for vector rendering)
+            if GENERATE_VECTOR_CONTOURS:
+                contours = generate_vector_contours(grib_path, variable_config)
+                with open(contour_path, 'w') as f:
+                    json.dump(contours, f)
+```
+
+### 3B.7 New Dependencies
+
+```txt
+# requirements.txt additions
+leaflet  # via CDN, no pip package needed
+rioxarray  # xarray + rasterio integration
+rio-tiler  # Efficient tile generation
+mercantile  # Tile math utilities
+rio-cogeo  # Cloud Optimized GeoTIFF support
+```
+
+### 3B.8 Migration Strategy
+
+**Phase A: Parallel Implementation**
+1. Keep existing static image generation
+2. Add tile generation as opt-in feature (`GENERATE_MAP_TILES=true`)
+3. Create new `/map/<location_id>` route for interactive view
+4. Users can switch between static and interactive views
+
+**Phase B: Interactive as Default**
+1. Make interactive map the default view
+2. Keep static images as fallback/API option
+3. Add "Download Image" button that uses existing PNG generation
+
+**Phase C: Optimize**
+1. Generate tiles on-demand instead of pre-generating
+2. Add tile caching with Redis/CDN
+3. Consider vector tiles (MVT) for even better performance
+
+### 3B.9 Storage Considerations
+
+**Tile Storage Estimate (per forecast hour, per variable):**
+- Zoom 4-10 = ~1,400 tiles per location
+- ~5KB average per tile (PNG with transparency)
+- ~7MB per hour × 24 hours × 15 variables = ~2.5GB per run
+
+**Optimization Options:**
+1. Generate tiles on-demand (lazy generation)
+2. Use WebP instead of PNG (50% size reduction)
+3. Limit zoom levels (4-8 instead of 4-10)
+4. Store only most recent 2-3 runs with tiles
+
+### 3B.10 Comparison: Static vs Interactive
+
+| Feature | Static Images | Interactive Map |
+|---------|--------------|-----------------|
+| Pan/Zoom | Fixed | Unlimited |
+| Click for values | No | Yes |
+| Multiple base maps | No | Yes |
+| Layer toggling | No | Yes |
+| Storage per hour | ~200KB | ~7MB (tiles) |
+| Initial load time | Fast | Medium |
+| Mobile experience | Limited | Excellent |
+| Offline support | Easy | Complex |
+| Browser support | Universal | Modern only |
+
+---
+
 ## Phase 4: Performance & Infrastructure
 
 ### 4.1 Parallel GRIB Downloads
@@ -681,9 +1126,21 @@ def api_locations():
 | 3.1 More Locations | High | Low | High |
 | 3.2 User Preferences | Medium | Low | Medium |
 | 3.6 Mobile Responsive | Medium | Low | High |
+| **3B Interactive Maps** | **High** | **High** | **Very High** |
 | 4.1 Parallel Downloads | Medium | Medium | High |
 | 4.2 Cache Headers | High | Low | Medium |
 | 4.4 Metrics | Medium | Medium | High |
+
+### Interactive Map Implementation Phases
+
+| Sub-phase | Effort | Dependencies |
+|-----------|--------|--------------|
+| 3B.1 Leaflet MVP | Medium | None |
+| 3B.2 Tile generation | High | rioxarray, rio-tiler |
+| 3B.3 Point query API | Low | Existing GRIB reading |
+| 3B.4 Animation controls | Low | 3B.1 |
+| 3B.5 Multiple base maps | Low | 3B.1 |
+| 3B.6 On-demand tiles | High | 3B.2 |
 
 ---
 
@@ -709,10 +1166,28 @@ black
 isort
 flake8
 
-# requirements.txt (new)
+# requirements.txt additions
 prometheus-client
 flask-limiter
 flasgger
+
+# Interactive maps (Phase 3B)
+rioxarray          # xarray + rasterio integration
+rio-tiler          # Efficient tile generation from raster data
+mercantile         # XYZ tile coordinate utilities
+rio-cogeo          # Cloud Optimized GeoTIFF support
+rasterio           # Core raster I/O (dependency of above)
+```
+
+**Frontend dependencies (via CDN):**
+```html
+<!-- Leaflet CSS/JS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Optional: Mapbox GL JS for WebGL rendering -->
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.0.0/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.0.0/mapbox-gl.css" rel="stylesheet" />
 ```
 
 ---
