@@ -14,9 +14,33 @@
 <h2>{{ location_name }}</h2>
 
 <div class="run-selector">
+    <strong>Select Model:</strong>
+    <select id="modelSelect">
+        {% for model_key, model in models.items() %}
+        <option value="{{ model_key }}" {% if model_key == model_id %}selected{% endif %}>
+            {{ model.name }}
+        </option>
+        {% endfor %}
+    </select>
+
+    <strong>Select Variable:</strong>
+    <select id="variableSelect">
+        {% for category_id, category in variables.categories.items() %}
+        <optgroup label="{{ category.name }}">
+            {% for var_id in category.variables %}
+            <option value="{{ var_id }}" {% if var_id == variable_id %}selected{% endif %}>
+                {{ variables.variables[var_id].display_name }}
+            </option>
+            {% endfor %}
+        </optgroup>
+        {% endfor %}
+    </select>
+</div>
+
+<div class="run-selector">
     <strong>Select Model Run:</strong>
     {% for run in runs %}
-    <a href="/location/{{ location_id }}?run={{ run.run_id }}" 
+    <a href="/location/{{ location_id }}?run={{ run.run_id }}&model={{ model_id }}&variable={{ variable_id }}" 
        {% if run.run_id == run_id %}class="active"{% endif %}>
        {{ run.init_time }}
     </a>
@@ -33,11 +57,11 @@
     <p>Model initialized: {{ init_time }}</p>
     <div class="controls">
         <button id="playButton">Play</button>
-        <input type="range" id="timeSlider" min="1" max="24" value="1">
+        <input type="range" id="timeSlider" min="1" max="{{ models[model_id].max_forecast_hours }}" value="1">
         <span id="timeDisplay">Hour +1</span>
     </div>
     <div style="position: relative;">
-        <img id="forecastImage" src="/frame/{{ location_id }}/{{ run_id }}/1" alt="HRRR Forecast Plot" style="width: 100%; height: auto;">
+        <img id="forecastImage" src="/frame/{{ location_id }}/{{ model_id }}/{{ run_id }}/{{ variable_id }}/1" alt="Forecast Plot" style="width: 100%; height: auto;">
         <div id="loading" class="loading">Loading...</div>
     </div>
 </div>
@@ -92,6 +116,9 @@
     // Pass data from Flask to JavaScript
     const locationId = "{{ location_id }}";
     const runId = "{{ run_id }}";
+    const modelId = "{{ model_id }}";
+    const variableId = "{{ variable_id }}";
+    const maxForecastHours = {{ models[model_id].max_forecast_hours }};
     const timelineData = {{ runs|tojson }};
     const validTimes = {{ all_valid_times|tojson }};
 </script>

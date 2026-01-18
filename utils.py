@@ -3,6 +3,8 @@ import requests
 import zipfile
 import logging
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 def download_file(url, local_path, timeout=60):
@@ -45,3 +47,27 @@ def fetch_county_shapefile(cache_dir):
     else:
         logger.info("County shapefile already extracted.")
     return county_shp
+
+
+def convert_units(data, conversion):
+    """Convert data arrays to display units."""
+    if conversion is None:
+        return data
+    if conversion == "k_to_f":
+        return (data - 273.15) * 9 / 5 + 32
+    if conversion == "m_s_to_mph":
+        return data * 2.23694
+    if conversion == "kg_m2_to_in":
+        return data * 0.0393701
+    if conversion == "kg_m2_s_to_in_hr":
+        return data * 0.0393701 * 3600
+    if conversion == "m_to_in":
+        return data * 39.3701
+    if conversion == "m_to_mi":
+        return data * 0.000621371
+    return data
+
+
+def compute_wind_speed(u_component, v_component):
+    """Compute wind speed magnitude from u/v components."""
+    return np.sqrt(u_component ** 2 + v_component ** 2)

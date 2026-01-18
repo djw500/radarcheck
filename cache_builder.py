@@ -17,8 +17,8 @@ import gc
 import numpy as np
 
 from config import repomap
-from utils import download_file, fetch_county_shapefile
-from plotting import create_plot
+from utils import download_file, fetch_county_shapefile, convert_units
+from plotting import create_plot, select_variable_from_dataset
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -36,8 +36,34 @@ def log_memory_usage(context=""):
     rss_mb = mem_info.rss / 1024 / 1024
     logger.info(f"Memory Usage [{context}]: {rss_mb:.2f} MB")
 
-def get_available_hrrr_runs(max_runs=5):
-    """Find multiple recent HRRR runs available, from newest to oldest."""
+def build_variable_query(variable_config):
+    params = [f"{param}=on" for param in variable_config.get("nomads_params", [])]
+    levels = variable_config.get("level_params", [])
+    query = "&".join(params + levels)
+    if query:
+        return f"{query}&"
+    return ""
+
+
+def build_model_url(model_config, date_str, init_hour, forecast_hour, variable_query, location_config):
+    file_name = model_config["file_pattern"].format(
+        init_hour=init_hour,
+        forecast_hour=forecast_hour,
+    )
+    dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+    return (
+        f"{model_config['nomads_url']}?"
+        f"file={file_name}&"
+        f"dir={dir_path}&"
+        f"{variable_query}"
+        f"leftlon={location_config['lon_min']}&rightlon={location_config['lon_max']}&"
+        f"toplat={location_config['lat_max']}&bottomlat={location_config['lat_min']}&"
+    )
+
+
+def get_available_model_runs(model_id, max_runs=5):
+    """Find multiple recent model runs available, from newest to oldest."""
+    model_config = repomap["MODELS"][model_id]
     now = datetime.now(timezone.utc)
     available_runs = []
     
@@ -52,10 +78,17 @@ def get_available_hrrr_runs(max_runs=5):
         init_hour = check_time.strftime("%H")
         
         # Check if the file exists using the filter URL
-        url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-               f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}z.wrfsfcf01.grib2&"
-               f"dir=%2Fhrrr.{date_str}%2Fconus&"
-               f"var_REFC=on")
+        file_name = model_config["file_pattern"].format(
+            init_hour=init_hour,
+            forecast_hour="01",
+        )
+        dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+        url = (
+            f"{model_config['nomads_url']}?"
+            f"file={file_name}&"
+            f"dir={dir_path}&"
+            f"{model_config['availability_check_var']}=on"
+        )
         
         try:
             response = requests.head(url, timeout=10)
@@ -78,36 +111,58 @@ def get_available_hrrr_runs(max_runs=5):
                 }
                 
                 available_runs.append(run_info)
-                logger.info(f"Found available HRRR run: {run_info['run_id']}")
+                logger.info(f"Found available {model_id} run: {run_info['run_id']}")
         except Exception as e:
             logger.warning(f"Error checking run from {hours_ago} hours ago: {str(e)}")
     
     if not available_runs:
-        raise Exception("Could not find any recent HRRR runs")
+        raise Exception(f"Could not find any recent {model_id} runs")
         
     return available_runs
 
-def get_latest_hrrr_run():
-    """Find the most recent HRRR run available."""
-    runs = get_available_hrrr_runs(max_runs=1)
+def get_latest_model_run(model_id):
+    """Find the most recent model run available."""
+    runs = get_available_model_runs(model_id, max_runs=1)
     if runs:
         run = runs[0]
         return run['date_str'], run['init_hour'], run['init_time']
-    raise Exception("Could not find a recent HRRR run")
+    raise Exception(f"Could not find a recent {model_id} run")
 
-def fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id):
-    """Download and cache the HRRR GRIB file for a specific forecast hour and location."""
-    url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-           f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}{repomap['HRRR_FILE_SUFFIX']}{forecast_hour}.grib2&"
-           f"dir=%2Fhrrr.{date_str}%2Fconus&"
-           f"{repomap['HRRR_VARS']}"
-           f"leftlon={location_config['lon_min']}&rightlon={location_config['lon_max']}&"
-           f"toplat={location_config['lat_max']}&bottomlat={location_config['lat_min']}&")
-    
+
+def get_available_hrrr_runs(max_runs=5):
+    """Backward-compatible wrapper for HRRR runs."""
+    return get_available_model_runs("hrrr", max_runs=max_runs)
+
+
+def get_latest_hrrr_run():
+    """Backward-compatible wrapper for the latest HRRR run."""
+    return get_latest_model_run("hrrr")
+
+def fetch_grib(*args, **kwargs):
+    """Download and cache the GRIB file for a specific forecast hour and location."""
+    if len(args) == 5 and not kwargs:
+        date_str, init_hour, forecast_hour, location_config, run_id = args
+        model_id = repomap["DEFAULT_MODEL"]
+        variable_id = repomap["DEFAULT_VARIABLE"]
+    else:
+        model_id, variable_id, date_str, init_hour, forecast_hour, location_config, run_id = args
+
+    model_config = repomap["MODELS"][model_id]
+    variable_config = repomap["WEATHER_VARIABLES"][variable_id]
+    variable_query = build_variable_query(variable_config)
+    url = build_model_url(
+        model_config,
+        date_str,
+        init_hour,
+        forecast_hour,
+        variable_query,
+        location_config,
+    )
+
     location_id = location_config['id']
-    run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, run_id)
+    run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id, run_id, variable_id)
     os.makedirs(run_cache_dir, exist_ok=True)
-    
+
     filename = os.path.join(run_cache_dir, f"grib_{forecast_hour}.grib2")
     
     def try_load_grib(filename):
@@ -118,8 +173,8 @@ def fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id):
             with FileLock(f"{filename}.lock"):
                 # Try to open the file without chunks first
                 ds = xr.open_dataset(filename, engine="cfgrib")
-                # Force load reflectivity to verify file integrity
-                ds['refc'].values
+                data_to_plot = select_variable_from_dataset(ds, variable_config)
+                data_to_plot.values
                 ds.close()
                 return True
         except (OSError, ValueError, RuntimeError) as e:
@@ -157,8 +212,8 @@ def fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id):
             
             # Try to open with xarray to verify it's valid
             ds = xr.open_dataset(temp_filename, engine="cfgrib")
-            # Force load reflectivity to verify file integrity
-            ds['refc'].load()
+            data_to_plot = select_variable_from_dataset(ds, variable_config)
+            data_to_plot.load()
             ds.close()
             
             # If verification passed, move the file into place atomically
@@ -177,27 +232,15 @@ def fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id):
     
     raise ValueError("Failed to obtain valid GRIB file after 3 attempts")
 
-def extract_center_value(grib_path, center_lat, center_lon):
+def extract_center_value(grib_path, center_lat, center_lon, variable_config):
     """Extract the forecast value at the center point from a GRIB file."""
     ds = None
     try:
-        try:
-            ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': 'refc'})
-        except Exception as e:
-            logger.warning(f"Error with shortName filter: {str(e)}")
-            ds = xr.open_dataset(
-                grib_path,
-                engine="cfgrib",
-                backend_kwargs={'filter_by_keys': {'paramId': '132'}}
-            )
-
-        if not ds.data_vars:
-            raise ValueError("No variables found in GRIB file")
-
-        if "refc" in ds.data_vars:
-            data = ds["refc"]
-        else:
-            data = ds[list(ds.data_vars.keys())[0]]
+        ds = xr.open_dataset(grib_path, engine="cfgrib")
+        data = select_variable_from_dataset(ds, variable_config)
+        conversion = variable_config.get("conversion")
+        if conversion:
+            data = convert_units(data, conversion)
 
         target_lon = center_lon
         lon_min = float(data.longitude.min())
@@ -216,19 +259,21 @@ def extract_center_value(grib_path, center_lat, center_lon):
         value = float(center_value)
         if np.isnan(value):
             return None, data.attrs.get("units")
-        return value, data.attrs.get("units")
+        return value, variable_config.get("units") or data.attrs.get("units")
     finally:
         if ds is not None:
             ds.close()
 
-def generate_forecast_images(location_config, counties, run_info=None):
+def generate_forecast_images(location_config, counties, model_id, run_info=None, variable_ids=None):
     """Generate forecast images for a specific location and model run."""
     try:
         location_id = location_config['id']
+        model_config = repomap["MODELS"][model_id]
+        variable_ids = variable_ids or list(repomap["WEATHER_VARIABLES"].keys())
         
         # If no specific run provided, get the latest
         if run_info is None:
-            date_str, init_hour, init_time = get_latest_hrrr_run()
+            date_str, init_hour, init_time = get_latest_model_run(model_id)
             run_id = f"run_{date_str}_{init_hour}"
         else:
             date_str = run_info['date_str']
@@ -236,10 +281,10 @@ def generate_forecast_images(location_config, counties, run_info=None):
             init_time = run_info['init_time']
             run_id = run_info['run_id']
             
-        logger.info(f"Processing HRRR run {run_id} for {location_config['name']}")
+        logger.info(f"Processing {model_id} run {run_id} for {location_config['name']}")
         
         # Create run-specific cache directory
-        run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, run_id)
+        run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id, run_id)
         os.makedirs(run_cache_dir, exist_ok=True)
         
         # Create metadata file with run information
@@ -249,101 +294,118 @@ def generate_forecast_images(location_config, counties, run_info=None):
             f.write(f"init_hour={init_hour}\n")
             f.write(f"init_time={init_time}\n")
             f.write(f"run_id={run_id}\n")
+            f.write(f"model_id={model_id}\n")
+            f.write(f"model_name={model_config['name']}\n")
             f.write(f"location_name={location_config['name']}\n")
             f.write(f"center_lat={location_config['center_lat']}\n")
             f.write(f"center_lon={location_config['center_lon']}\n")
             f.write(f"zoom={location_config['zoom']}\n")
-        
+
         # Download and process each forecast hour
-        valid_times = []
-        center_values = []
-        center_units = None
-        for hour in range(1, 25):
-            hour_str = f"{hour:02d}"
-            logger.info(f"Processing forecast hour {hour_str} for {location_config['name']} (run {run_id})")
-            
-            try:
-                # Fetch GRIB file
-                grib_path = fetch_grib(date_str, init_hour, hour_str, location_config, run_id)
-                
-                # Calculate valid time
-                init_dt = datetime.strptime(init_time, "%Y-%m-%d %H:%M:%S")
-                if not init_dt.tzinfo:
-                    init_dt = pytz.UTC.localize(init_dt)
-                valid_time = init_dt + timedelta(hours=hour)
-                valid_time_str = valid_time.strftime("%Y-%m-%d %H:%M:%S")
-                
-                # Save image to cache
-                image_path = os.path.join(run_cache_dir, f"frame_{hour_str}.png")
-                
-                # Check if image already exists and is valid
-                if os.path.exists(image_path) and os.path.getsize(image_path) > 1000:
-                    logger.info(f"Skipping existing frame: {image_path}")
-                else:
-                    # Generate plot
-                    image_buffer = create_plot(
-                        grib_path, 
-                        init_time, 
-                        hour_str, 
-                        repomap["CACHE_DIR"],
-                        center_lat=location_config['center_lat'],
-                        center_lon=location_config['center_lon'],
-                        zoom=location_config['zoom'],
-                        counties=counties
-                    )
-                    
-                    with open(image_path, "wb") as f:
-                        f.write(image_buffer.getvalue())
-                    
-                    logger.info(f"Saved forecast image for hour {hour_str} to {image_path}")
-
-                center_value, units = extract_center_value(
-                    grib_path,
-                    location_config['center_lat'],
-                    location_config['center_lon']
+        max_hours = model_config["max_forecast_hours"]
+        for variable_id in variable_ids:
+            variable_config = repomap["WEATHER_VARIABLES"][variable_id]
+            valid_times = []
+            center_values = []
+            for hour in range(1, max_hours + 1):
+                hour_str = f"{hour:02d}"
+                logger.info(
+                    f"Processing {variable_id} hour {hour_str} for {location_config['name']} (run {run_id})"
                 )
-                if center_units is None:
-                    center_units = units
 
-                # Record valid time mapping
-                valid_times.append({
-                    "forecast_hour": hour,
-                    "valid_time": valid_time_str,
-                    "frame_path": f"frame_{hour_str}.png"
-                })
-                center_values.append({
-                    "forecast_hour": hour,
-                    "valid_time": valid_time_str,
-                    "value": center_value
-                })
-                
-                
-            except Exception as e:
-                logger.error(f"Error processing hour {hour_str}: {str(e)}")
-                # Continue with next hour
-        
-        # Save valid time mapping
-        valid_times_path = os.path.join(run_cache_dir, "valid_times.txt")
-        with open(valid_times_path, "w") as f:
-            for vt in valid_times:
-                f.write(f"{vt['forecast_hour']}={vt['valid_time']}={vt['frame_path']}\n")
+                try:
+                    # Fetch GRIB file
+                    grib_path = fetch_grib(
+                        model_id,
+                        variable_id,
+                        date_str,
+                        init_hour,
+                        hour_str,
+                        location_config,
+                        run_id,
+                    )
 
-        center_values_path = os.path.join(run_cache_dir, "center_values.json")
-        with open(center_values_path, "w") as f:
-            json.dump({
-                "location_id": location_id,
-                "run_id": run_id,
-                "init_time": init_time,
-                "center_lat": location_config['center_lat'],
-                "center_lon": location_config['center_lon'],
-                "units": center_units,
-                "values": center_values
-            }, f, indent=2)
+                    # Calculate valid time
+                    init_dt = datetime.strptime(init_time, "%Y-%m-%d %H:%M:%S")
+                    if not init_dt.tzinfo:
+                        init_dt = pytz.UTC.localize(init_dt)
+                    valid_time = init_dt + timedelta(hours=hour)
+                    valid_time_str = valid_time.strftime("%Y-%m-%d %H:%M:%S")
+
+                    variable_cache_dir = os.path.join(run_cache_dir, variable_id)
+                    os.makedirs(variable_cache_dir, exist_ok=True)
+                    image_path = os.path.join(variable_cache_dir, f"frame_{hour_str}.png")
+
+                    # Check if image already exists and is valid
+                    if os.path.exists(image_path) and os.path.getsize(image_path) > 1000:
+                        logger.info(f"Skipping existing frame: {image_path}")
+                    else:
+                        # Generate plot
+                        image_buffer = create_plot(
+                            grib_path,
+                            init_time,
+                            hour_str,
+                            repomap["CACHE_DIR"],
+                            variable_config=variable_config,
+                            model_name=model_config["name"],
+                            center_lat=location_config['center_lat'],
+                            center_lon=location_config['center_lon'],
+                            zoom=location_config['zoom'],
+                            counties=counties,
+                        )
+
+                        with open(image_path, "wb") as f:
+                            f.write(image_buffer.getvalue())
+
+                        logger.info(f"Saved forecast image for hour {hour_str} to {image_path}")
+
+                    center_value, units = extract_center_value(
+                        grib_path,
+                        location_config['center_lat'],
+                        location_config['center_lon'],
+                        variable_config,
+                    )
+
+                    # Record valid time mapping
+                    valid_times.append({
+                        "forecast_hour": hour,
+                        "valid_time": valid_time_str,
+                        "frame_path": f"{variable_id}/frame_{hour_str}.png",
+                    })
+                    center_values.append({
+                        "forecast_hour": hour,
+                        "valid_time": valid_time_str,
+                        "value": center_value,
+                    })
+
+                except Exception as e:
+                    logger.error(f"Error processing hour {hour_str}: {str(e)}")
+                    # Continue with next hour
+
+            # Save valid time mapping
+            valid_times_path = os.path.join(run_cache_dir, variable_id, "valid_times.txt")
+            with open(valid_times_path, "w") as f:
+                for vt in valid_times:
+                    f.write(f"{vt['forecast_hour']}={vt['valid_time']}={vt['frame_path']}\n")
+
+            center_values_path = os.path.join(run_cache_dir, variable_id, "center_values.json")
+            with open(center_values_path, "w") as f:
+                json.dump({
+                    "location_id": location_id,
+                    "run_id": run_id,
+                    "model_id": model_id,
+                    "variable_id": variable_id,
+                    "init_time": init_time,
+                    "center_lat": location_config['center_lat'],
+                    "center_lon": location_config['center_lon'],
+                    "units": units,
+                    "values": center_values,
+                }, f, indent=2)
         
         # Create a symlink to the latest run (atomic replacement)
-        latest_link = os.path.join(repomap["CACHE_DIR"], location_id, "latest")
+        latest_link = os.path.join(repomap["CACHE_DIR"], location_id, model_id, "latest")
         # Create temp symlink and atomically rename to avoid race conditions
-        temp_link = os.path.join(repomap["CACHE_DIR"], location_id, f".latest_tmp_{os.getpid()}")
+        temp_link = os.path.join(repomap["CACHE_DIR"], location_id, model_id, f".latest_tmp_{os.getpid()}")
         try:
             os.symlink(run_id, temp_link)
             os.replace(temp_link, latest_link)
@@ -362,10 +424,10 @@ def generate_forecast_images(location_config, counties, run_info=None):
         logger.error(f"Error generating forecast images for {location_config['name']}: {str(e)}", exc_info=True)
         return False
 
-def cleanup_old_runs(location_id):
+def cleanup_old_runs(location_id, model_id):
     """Remove old runs to save disk space, keeping only the most recent N runs."""
     try:
-        location_dir = os.path.join(repomap["CACHE_DIR"], location_id)
+        location_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id)
         if not os.path.exists(location_dir):
             return
             
@@ -394,6 +456,8 @@ def main():
     parser.add_argument("--location", help="Specific location ID to process (default: all)")
     parser.add_argument("--runs", type=int, default=5, help="Number of model runs to process (default: 5)")
     parser.add_argument("--latest-only", action="store_true", help="Process only the latest run")
+    parser.add_argument("--model", default=repomap["DEFAULT_MODEL"], help="Model ID to process")
+    parser.add_argument("--variables", nargs="*", help="Variable IDs to process (default: all)")
     args = parser.parse_args()
     
     # Ensure cache directory exists
@@ -405,13 +469,14 @@ def main():
     counties = gpd.read_file(shp_path)
     log_memory_usage("after_shapefile_load")
     
-    # Get available HRRR runs
+    # Get available model runs
     if args.latest_only:
-        available_runs = get_available_hrrr_runs(max_runs=1)
+        available_runs = get_available_model_runs(args.model, max_runs=1)
     else:
-        available_runs = get_available_hrrr_runs(max_runs=args.runs)
+        available_runs = get_available_model_runs(args.model, max_runs=args.runs)
     
-    logger.info(f"Found {len(available_runs)} available HRRR runs")
+    logger.info(f"Found {len(available_runs)} available {args.model} runs")
+    variable_ids = args.variables or list(repomap["WEATHER_VARIABLES"].keys())
     
     # Process locations
     if args.location:
@@ -423,12 +488,18 @@ def main():
             logger.info(f"Processing single location: {location_config['name']}")
 
             for run_info in available_runs:
-                generate_forecast_images(location_config, counties, run_info)
+                generate_forecast_images(
+                    location_config,
+                    counties,
+                    args.model,
+                    run_info,
+                    variable_ids=variable_ids,
+                )
                 log_memory_usage(f"after_run_{run_info['run_id']}")
                 gc.collect()
 
             # Clean up old runs
-            cleanup_old_runs(args.location)
+            cleanup_old_runs(args.location, args.model)
         else:
             logger.error(f"Location ID '{args.location}' not found in configuration")
     else:
@@ -440,12 +511,18 @@ def main():
             location_config['id'] = location_id
 
             for run_info in available_runs:
-                generate_forecast_images(location_config, counties, run_info)
+                generate_forecast_images(
+                    location_config,
+                    counties,
+                    args.model,
+                    run_info,
+                    variable_ids=variable_ids,
+                )
                 log_memory_usage(f"after_run_{run_info['run_id']}")
                 gc.collect()
 
             # Clean up old runs
-            cleanup_old_runs(location_id)
+            cleanup_old_runs(location_id, args.model)
     
     logger.info("Cache building complete")
     

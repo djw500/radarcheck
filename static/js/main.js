@@ -16,6 +16,27 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    const modelSelect = document.getElementById('modelSelect');
+    const variableSelect = document.getElementById('variableSelect');
+
+    function updateLocationParams(param, value) {
+        const url = new URL(window.location.href);
+        url.searchParams.set(param, value);
+        window.location.href = url.toString();
+    }
+
+    if (modelSelect) {
+        modelSelect.addEventListener('change', () => {
+            updateLocationParams('model', modelSelect.value);
+        });
+    }
+
+    if (variableSelect) {
+        variableSelect.addEventListener('change', () => {
+            updateLocationParams('variable', variableSelect.value);
+        });
+    }
+
     initViewSwitching();
     initSingleRunView();
 

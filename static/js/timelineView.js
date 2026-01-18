@@ -94,7 +94,7 @@ function selectTimelineCell(cell) {
         const timelineImage = document.getElementById('timelineImage');
 
         selectedForecast.textContent = `Run: ${new Date(timelineData.find(r => r.run_id === runId).init_time).toLocaleString()}, Valid: ${timeKey}, Forecast Hour: +${hour}`;
-        timelineImage.src = `/frame/${locationId}/${runId}/${hour}${apiKeyParam}`;
+        timelineImage.src = `/frame/${locationId}/${modelId}/${runId}/${variableId}/${hour}${apiKeyParam}`;
         timelineImage.style.display = 'block';
     }
 }
