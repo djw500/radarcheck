@@ -4,6 +4,9 @@
 
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 {% endblock %}
 
 {% block header_content %}
@@ -59,11 +62,19 @@
         <button id="playButton">Play</button>
         <input type="range" id="timeSlider" min="1" max="{{ models[model_id].max_forecast_hours }}" value="1">
         <span id="timeDisplay">Hour +1</span>
+        <label class="opacity-control">
+            Opacity
+            <input type="range" id="opacitySlider" min="0" max="100" value="70">
+        </label>
     </div>
-    <div style="position: relative;">
-        <img id="forecastImage" src="/frame/{{ location_id }}/{{ model_id }}/{{ run_id }}/{{ variable_id }}/1" alt="Forecast Plot" style="width: 100%; height: auto;">
+    <div class="map-wrapper">
+        <div id="weatherMap" class="weather-map"></div>
+        <img id="forecastImage" src="/frame/{{ location_id }}/{{ model_id }}/{{ run_id }}/{{ variable_id }}/1" alt="Forecast Plot" class="fallback-image">
         <div id="loading" class="loading">Loading...</div>
     </div>
+    <noscript>
+        <img id="forecastImage" src="/frame/{{ location_id }}/{{ model_id }}/{{ run_id }}/{{ variable_id }}/1" alt="Forecast Plot" style="width: 100%; height: auto;">
+    </noscript>
 </div>
 
 <div id="timelineView" class="view">
@@ -96,10 +107,11 @@
 <div id="spaghettiView" class="view">
     <h3>Spaghetti Plot</h3>
     <p>Compare precipitation forecasts across different model runs</p>
-    
+    <div id="spaghettiControls" class="spaghetti-controls"></div>
     <div class="spaghetti-container">
         <canvas id="spaghettiChart"></canvas>
     </div>
+    <div class="spaghetti-stats" id="spaghettiStats"></div>
     <div style="margin-top: 10px; text-align: center; font-style: italic;">
         Note: This is a simplified visualization. Each line represents a different model run.
     </div>
@@ -121,7 +133,14 @@
     const maxForecastHours = {{ models[model_id].max_forecast_hours }};
     const timelineData = {{ runs|tojson }};
     const validTimes = {{ all_valid_times|tojson }};
+    const mapCenter = {
+        lat: {{ map_center_lat }},
+        lon: {{ map_center_lon }},
+        zoom: {{ map_zoom }}
+    };
 </script>
+<script src="{{ url_for('static', filename='js/preferences.js') }}"></script>
+<script src="{{ url_for('static', filename='js/interactiveMap.js') }}"></script>
 <script src="{{ url_for('static', filename='js/viewSwitching.js') }}"></script>
 <script src="{{ url_for('static', filename='js/singleRunView.js') }}"></script>
 <script src="{{ url_for('static', filename='js/timelineView.js') }}"></script>

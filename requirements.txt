@@ -1,6 +1,9 @@
 # Web framework
 flask
 gunicorn
+flask-limiter
+flasgger
+prometheus-client
 
 # Data fetching
 requests
@@ -17,3 +20,8 @@ geopandas
 shapely
 filelock
 psutil
+rasterio
+rioxarray
+rio-tiler
+mercantile
+rio-cogeo

@@ -223,6 +223,35 @@ repomap = {
     "COUNTY_SHP_NAME": "cb_2018_us_county_20m.shp",
     "MAX_RUNS_TO_KEEP": 24,  # Number of model runs to keep in cache (24 = last 24 hours)
 
+    # Network settings
+    "DOWNLOAD_TIMEOUT_SECONDS": 60,
+    "HEAD_REQUEST_TIMEOUT_SECONDS": 10,
+    "MAX_DOWNLOAD_RETRIES": 3,
+    "RETRY_DELAY_SECONDS": 2,
+
+    # File validation
+    "MIN_GRIB_FILE_SIZE_BYTES": 1000,
+    "MIN_PNG_FILE_SIZE_BYTES": 1000,
+
+    # Cache settings
+    "CACHE_REFRESH_INTERVAL_MINUTES": 15,
+
+    # Model discovery
+    "HOURS_TO_CHECK_FOR_RUNS": 27,
+
+    # File locking
+    "FILELOCK_TIMEOUT_SECONDS": 30,
+
+    # Parallel download settings
+    "PARALLEL_DOWNLOAD_WORKERS": 4,
+
+    # Map tile generation settings
+    "GENERATE_STATIC_IMAGES": True,
+    "GENERATE_MAP_TILES": False,
+    "GENERATE_VECTOR_CONTOURS": False,
+    "TILE_MIN_ZOOM": 4,
+    "TILE_MAX_ZOOM": 10,
+
     # Location configurations
     "LOCATIONS": {
         "philly": {
@@ -244,6 +273,66 @@ repomap = {
             "lat_max": 41.5,
             "lon_min": -75.0,
             "lon_max": -72.0,
+        },
+        "boston": {
+            "name": "Boston",
+            "center_lat": 42.3601,
+            "center_lon": -71.0589,
+            "zoom": 1.5,
+            "lat_min": 41.0,
+            "lat_max": 43.5,
+            "lon_min": -72.5,
+            "lon_max": -69.5,
+        },
+        "dc": {
+            "name": "Washington DC",
+            "center_lat": 38.9072,
+            "center_lon": -77.0369,
+            "zoom": 1.5,
+            "lat_min": 37.5,
+            "lat_max": 40.0,
+            "lon_min": -78.5,
+            "lon_max": -75.5,
+        },
+        "chicago": {
+            "name": "Chicago",
+            "center_lat": 41.8781,
+            "center_lon": -87.6298,
+            "zoom": 1.5,
+            "lat_min": 40.5,
+            "lat_max": 43.0,
+            "lon_min": -89.5,
+            "lon_max": -86.0,
+        },
+        "denver": {
+            "name": "Denver",
+            "center_lat": 39.7392,
+            "center_lon": -104.9903,
+            "zoom": 1.5,
+            "lat_min": 38.5,
+            "lat_max": 41.0,
+            "lon_min": -106.5,
+            "lon_max": -103.5,
+        },
+        "la": {
+            "name": "Los Angeles",
+            "center_lat": 34.0522,
+            "center_lon": -118.2437,
+            "zoom": 1.5,
+            "lat_min": 32.5,
+            "lat_max": 35.5,
+            "lon_min": -120.0,
+            "lon_max": -116.5,
+        },
+        "seattle": {
+            "name": "Seattle",
+            "center_lat": 47.6062,
+            "center_lon": -122.3321,
+            "zoom": 1.5,
+            "lat_min": 46.0,
+            "lat_max": 49.0,
+            "lon_min": -124.0,
+            "lon_max": -121.0,
         },
     },
 }
