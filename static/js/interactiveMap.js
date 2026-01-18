@@ -18,8 +18,24 @@ class WeatherMap {
             })
         };
 
+        this.overlayLayers = {};
+        const overlayConfigs = options.overlayLayers || {};
+        Object.values(overlayConfigs).forEach(layer => {
+            if (!layer.url) {
+                return;
+            }
+            this.overlayLayers[layer.name] = L.tileLayer(layer.url, {
+                attribution: layer.attribution || '',
+                maxZoom: layer.max_zoom || 12,
+                minZoom: layer.min_zoom || 4,
+                opacity: layer.opacity ?? 0.7
+            });
+        });
+
         this.baseLayers['Streets'].addTo(this.map);
         this.weatherLayer = null;
+        this.forecastOverlayLayer = null;
+        this.forecastOverlayLabel = null;
         this.currentHour = 1;
         this.locationId = null;
         this.modelId = null;
@@ -27,7 +43,8 @@ class WeatherMap {
         this.variableId = null;
 
         this.map.on('click', (e) => this.onMapClick(e));
-        L.control.layers(this.baseLayers, {}, {position: 'topright'}).addTo(this.map);
+        this.layerControl = L.control.layers(this.baseLayers, this.overlayLayers, {position: 'topright'});
+        this.layerControl.addTo(this.map);
     }
 
     setWeatherLayer(locationId, modelId, runId, variableId, hour) {
@@ -77,6 +94,40 @@ class WeatherMap {
     setOpacity(opacity) {
         if (this.weatherLayer) {
             this.weatherLayer.setOpacity(opacity);
+        }
+    }
+
+    setOverlayLayer(locationId, modelId, runId, variableId, hour, label, opacity = 0.5) {
+        if (this.forecastOverlayLayer) {
+            this.map.removeLayer(this.forecastOverlayLayer);
+            if (this.layerControl && this.forecastOverlayLabel) {
+                this.layerControl.removeLayer(this.forecastOverlayLayer);
+            }
+        }
+
+        if (!variableId) {
+            this.forecastOverlayLayer = null;
+            this.forecastOverlayLabel = null;
+            return;
+        }
+
+        const authParam = typeof apiKeyParam !== 'undefined' ? apiKeyParam : '';
+        const tileUrl = `/tiles/${locationId}/${modelId}/${runId}/${variableId}/${hour}/{z}/{x}/{y}.png${authParam}`;
+        this.forecastOverlayLayer = L.tileLayer(tileUrl, {
+            opacity: opacity,
+            maxZoom: 12,
+            minZoom: 4
+        });
+        this.forecastOverlayLabel = label || `Overlay: ${variableId}`;
+        this.forecastOverlayLayer.addTo(this.map);
+        if (this.layerControl) {
+            this.layerControl.addOverlay(this.forecastOverlayLayer, this.forecastOverlayLabel);
+        }
+    }
+
+    setOverlayOpacity(opacity) {
+        if (this.forecastOverlayLayer) {
+            this.forecastOverlayLayer.setOpacity(opacity);
         }
     }
 }

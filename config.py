@@ -190,6 +190,7 @@ MODELS = {
         "dir_pattern": "%2Fhrrr.{date_str}%2Fconus",
         "file_pattern": "hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2",
         "availability_check_var": "var_REFC",
+        "forecast_hour_digits": 2,
     },
     "nam_nest": {
         "name": "NAM 3km CONUS",
@@ -199,6 +200,7 @@ MODELS = {
         "dir_pattern": "%2Fnam.{date_str}",
         "file_pattern": "nam.t{init_hour}z.conusnest.hiresf{forecast_hour}.tm00.grib2",
         "availability_check_var": "var_REFC",
+        "forecast_hour_digits": 2,
     },
     "nam_12km": {
         "name": "NAM 12km",
@@ -208,6 +210,50 @@ MODELS = {
         "dir_pattern": "%2Fnam.{date_str}",
         "file_pattern": "nam.t{init_hour}z.awphys{forecast_hour}.tm00.grib2",
         "availability_check_var": "var_REFC",
+        "forecast_hour_digits": 2,
+    },
+    "rap": {
+        "name": "RAP",
+        "max_forecast_hours": 21,
+        "update_frequency_hours": 1,
+        "nomads_url": "https://nomads.ncep.noaa.gov/cgi-bin/filter_rap.pl",
+        "dir_pattern": "%2Frap.{date_str}",
+        "file_pattern": "rap.t{init_hour}z.awp130pgrbf{forecast_hour}.grib2",
+        "availability_check_var": "var_TMP",
+        "forecast_hour_digits": 2,
+    },
+    "gfs": {
+        "name": "GFS",
+        "max_forecast_hours": 384,
+        "update_frequency_hours": 6,
+        "nomads_url": "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl",
+        "dir_pattern": "%2Fgfs.{date_str}%2F{init_hour}%2Fatmos",
+        "file_pattern": "gfs.t{init_hour}z.pgrb2.0p25.f{forecast_hour}",
+        "availability_check_var": "var_TMP",
+        "forecast_hour_digits": 3,
+    },
+}
+
+MAP_LAYERS = {
+    "observed_radar": {
+        "name": "Observed Radar (NEXRAD)",
+        "type": "tile",
+        "url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/"
+        "nexrad-n0q-900913/{z}/{x}/{y}.png",
+        "attribution": "Weather data © Iowa Environmental Mesonet",
+        "max_zoom": 12,
+        "min_zoom": 4,
+        "opacity": 0.7,
+    },
+    "goes_ir": {
+        "name": "GOES-16 IR Satellite",
+        "type": "tile",
+        "url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/"
+        "goes-16-ch13-0p5km/{z}/{x}/{y}.png",
+        "attribution": "Satellite data © NOAA GOES",
+        "max_zoom": 12,
+        "min_zoom": 4,
+        "opacity": 0.6,
     },
 }
 
@@ -218,6 +264,7 @@ repomap = {
     "WEATHER_VARIABLES": WEATHER_VARIABLES,
     "WEATHER_CATEGORIES": WEATHER_CATEGORIES,
     "MODELS": MODELS,
+    "MAP_LAYERS": MAP_LAYERS,
     "COUNTY_ZIP_NAME": "cb_2018_us_county_20m.zip",
     "COUNTY_DIR_NAME": "county_shapefile",
     "COUNTY_SHP_NAME": "cb_2018_us_county_20m.shp",

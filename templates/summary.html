@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Summary - {{ location_name }}{% endblock %}
+
+{% block header_content %}
+<p>24-hour summary of key forecast metrics</p>
+{% endblock %}
+
+{% block content %}
+<h2>{{ location_name }} Summary</h2>
+
+<div class="run-selector">
+    <strong>Select Model:</strong>
+    <select id="summaryModelSelect">
+        {% for model_key, model in models.items() %}
+        <option value="{{ model_key }}" {% if model_key == model_id %}selected{% endif %}>
+            {{ model.name }}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+
+<div class="run-selector">
+    <strong>Select Model Run:</strong>
+    {% for run in runs %}
+    <a href="/summary/{{ location_id }}?run={{ run.run_id }}&model={{ model_id }}"
+       {% if run.run_id == run_id %}class="active"{% endif %}>
+       {{ run.init_time }}
+    </a>
+    {% endfor %}
+</div>
+
+<div class="summary-grid">
+    <div class="summary-card">
+        <h3>Total Snowfall</h3>
+        <p class="summary-value">
+            {{ summary.total_snowfall_inches if summary.total_snowfall_inches is not none else "N/A" }}
+            {{ units.total_snowfall_inches or "" }}
+        </p>
+    </div>
+    <div class="summary-card">
+        <h3>Total Precipitation</h3>
+        <p class="summary-value">
+            {{ summary.total_precipitation_inches if summary.total_precipitation_inches is not none else "N/A" }}
+            {{ units.total_precipitation_inches or "" }}
+        </p>
+    </div>
+    <div class="summary-card">
+        <h3>Max Wind Gust</h3>
+        <p class="summary-value">
+            {{ summary.max_wind_gust_mph if summary.max_wind_gust_mph is not none else "N/A" }}
+            {{ units.max_wind_gust_mph or "" }}
+        </p>
+    </div>
+    <div class="summary-card">
+        <h3>Temperature Range</h3>
+        <p class="summary-value">
+            {% if summary.temperature_range_f.min is not none and summary.temperature_range_f.max is not none %}
+                {{ summary.temperature_range_f.min }} - {{ summary.temperature_range_f.max }}
+                {{ units.temperature_range_f or "" }}
+            {% else %}
+                N/A
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+<div class="summary-links">
+    <a href="/location/{{ location_id }}?model={{ model_id }}">Back to Forecast</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const summaryLocationId = "{{ location_id }}";
+    const summaryModelId = "{{ model_id }}";
+</script>
+<script src="{{ url_for('static', filename='js/summaryView.js') }}"></script>
+{% endblock %}

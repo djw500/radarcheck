@@ -91,3 +91,11 @@ def convert_units(data: Any, conversion: Optional[str]) -> Any:
 def compute_wind_speed(u_component: Any, v_component: Any) -> Any:
     """Compute wind speed magnitude from u/v components."""
     return np.sqrt(u_component ** 2 + v_component ** 2)
+
+
+def format_forecast_hour(hour: int, model_id: Optional[str] = None) -> str:
+    """Format forecast hour string based on model requirements."""
+    digits = 2
+    if model_id:
+        digits = repomap["MODELS"].get(model_id, {}).get("forecast_hour_digits", 2)
+    return f"{int(hour):0{digits}d}"

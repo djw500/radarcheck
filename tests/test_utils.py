@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from utils import compute_wind_speed, convert_units
+from utils import compute_wind_speed, convert_units, format_forecast_hour
 
 
 def test_convert_units_kelvin_to_fahrenheit():
@@ -21,3 +21,8 @@ def test_compute_wind_speed():
     v = np.array([4.0])
     result = compute_wind_speed(u, v)
     assert result[0] == pytest.approx(5.0)
+
+
+def test_format_forecast_hour_uses_model_digits():
+    assert format_forecast_hour(1, "hrrr") == "01"
+    assert format_forecast_hour(1, "gfs") == "001"

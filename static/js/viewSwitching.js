@@ -21,6 +21,10 @@ function initViewSwitching() {
                 Promise.resolve(createSpaghettiPlot()).catch(error => {
                     console.error('Failed to build spaghetti plot', error);
                 });
+            } else if (viewId === 'comparisonView') {
+                if (typeof initComparisonView === 'function') {
+                    initComparisonView();
+                }
             }
         });
     });

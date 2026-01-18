@@ -22,7 +22,8 @@ import numpy as np
 from config import repomap
 from alerts import get_alerts_for_location
 from plotting import select_variable_from_dataset
-from utils import convert_units
+from summary import summarize_run
+from utils import convert_units, format_forecast_hour
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -178,7 +179,9 @@ def get_available_locations(model_id: Optional[str] = None) -> list[dict[str, An
 
                 max_hours = repomap["MODELS"].get(model_id, {}).get("max_forecast_hours", 24)
                 has_frames = any(
-                    os.path.exists(os.path.join(frame_dir, f"frame_{hour:02d}.png"))
+                    os.path.exists(
+                        os.path.join(frame_dir, f"frame_{format_forecast_hour(hour, model_id)}.png")
+                    )
                     for hour in range(1, max_hours + 1)
                 )
                 
@@ -234,7 +237,9 @@ def get_location_runs(location_id: str, model_id: Optional[str] = None) -> list[
 
             max_hours = repomap["MODELS"].get(model_id, {}).get("max_forecast_hours", 24)
             has_frames = any(
-                os.path.exists(os.path.join(frame_dir, f"frame_{hour:02d}.png"))
+                os.path.exists(
+                    os.path.join(frame_dir, f"frame_{format_forecast_hour(hour, model_id)}.png")
+                )
                 for hour in range(1, max_hours + 1)
             )
             
@@ -413,6 +418,37 @@ def get_model_payload() -> dict[str, Any]:
     }
 
 
+def get_layer_payload() -> dict[str, Any]:
+    layers = repomap.get("MAP_LAYERS", {})
+    return {
+        "layers": {
+            layer_id: {
+                "name": layer["name"],
+                "type": layer.get("type", "tile"),
+                "url": layer.get("url"),
+                "attribution": layer.get("attribution"),
+                "max_zoom": layer.get("max_zoom"),
+                "min_zoom": layer.get("min_zoom"),
+                "opacity": layer.get("opacity", 0.7),
+            }
+            for layer_id, layer in layers.items()
+        }
+    }
+
+
+def summary_has_data(payload: dict[str, Any]) -> bool:
+    summary = payload.get("summary", {})
+    temp_range = summary.get("temperature_range_f", {})
+    values = [
+        summary.get("total_snowfall_inches"),
+        summary.get("total_precipitation_inches"),
+        summary.get("max_wind_gust_mph"),
+        temp_range.get("min"),
+        temp_range.get("max"),
+    ]
+    return any(value is not None for value in values)
+
+
 def get_grib_path(
     location_id: str,
     model_id: str,
@@ -421,7 +457,7 @@ def get_grib_path(
     hour: int,
 ) -> Optional[str]:
     run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id, run_id)
-    forecast_hour = f"{hour:02d}"
+    forecast_hour = format_forecast_hour(hour, model_id)
     grib_path = os.path.join(run_cache_dir, variable_id, f"grib_{forecast_hour}.grib2")
     if os.path.exists(grib_path):
         return grib_path
@@ -515,7 +551,7 @@ def get_frame(location_id: str, model_id: str, run_id: str, variable_id: str, ho
             return "Invalid forecast hour", 400
             
         # Format hour as two digits
-        hour_str = f"{hour:02d}"
+        hour_str = format_forecast_hour(hour, model_id)
         
         # Handle "latest" run_id
         if run_id == "latest":
@@ -590,7 +626,7 @@ def get_tile(
         run_id,
         variable_id,
         "tiles",
-        f"{hour:02d}",
+        format_forecast_hour(hour, model_id),
         str(z),
         str(x),
         f"{y}.png",
@@ -616,7 +652,7 @@ def get_geojson(
         model_id,
         run_id,
         variable_id,
-        f"contours_{hour:02d}.geojson",
+        f"contours_{format_forecast_hour(hour, model_id)}.geojson",
     )
     if not os.path.exists(geojson_path):
         return jsonify({"error": "Data not available"}), 404
@@ -741,6 +777,7 @@ def location_view(location_id: str):
         runs=runs,
         locations=locations,
         all_valid_times=all_valid_times,
+        overlay_layers=get_layer_payload()["layers"],
         map_center_lat=custom_lat if custom_lat is not None else location_config["center_lat"],
         map_center_lon=custom_lon if custom_lon is not None else location_config["center_lon"],
         map_zoom=custom_zoom if custom_zoom is not None else location_config["zoom"],
@@ -750,6 +787,44 @@ def location_view(location_id: str):
 def forecast():
     """Legacy endpoint for GIF - redirect to main page"""
     return redirect(url_for('index'))
+
+
+@app.route("/summary/<location_id>")
+@require_api_key
+def summary_view(location_id: str):
+    """Summary dashboard for a location."""
+    if location_id not in repomap["LOCATIONS"]:
+        return handle_error(f"Location '{location_id}' not found", 404)
+
+    model_id = request.args.get("model", repomap["DEFAULT_MODEL"])
+    if model_id not in repomap["MODELS"]:
+        return handle_error(f"Model '{model_id}' not found", 404)
+
+    runs = get_location_runs(location_id, model_id)
+    if not runs:
+        return handle_error("Forecast data not available for this location", 404)
+
+    run_id = request.args.get("run", runs[0]["run_id"])
+    summary_payload = summarize_run(repomap["CACHE_DIR"], location_id, model_id, run_id)
+    if not summary_has_data(summary_payload):
+        return handle_error("Summary data not available for this run", 404)
+
+    locations = get_available_locations(model_id)
+    location_config = repomap["LOCATIONS"][location_id]
+
+    return render_template(
+        "summary.html",
+        location_id=location_id,
+        location_name=location_config["name"],
+        model_id=model_id,
+        model_name=repomap["MODELS"][model_id]["name"],
+        run_id=run_id,
+        runs=runs,
+        locations=locations,
+        models=get_model_payload()["models"],
+        summary=summary_payload["summary"],
+        units=summary_payload.get("units", {}),
+    )
 
 
 @app.route("/api/runs/<location_id>")
@@ -865,6 +940,37 @@ def api_variables(
 def api_models():
     """API endpoint to get available model metadata."""
     return jsonify(get_model_payload())
+
+
+@app.route("/api/layers")
+@require_api_key
+def api_layers():
+    """API endpoint to get available map overlay layers."""
+    return jsonify(get_layer_payload())
+
+
+@app.route("/api/summary/<location_id>")
+@app.route("/api/summary/<location_id>/<model_id>/<run_id>")
+@require_api_key
+def api_summary(location_id: str, model_id: Optional[str] = None, run_id: Optional[str] = None):
+    """API endpoint to return summary metrics for a run."""
+    if location_id not in repomap["LOCATIONS"]:
+        return handle_error(f"Location '{location_id}' not found", 404)
+
+    model_id = model_id or repomap["DEFAULT_MODEL"]
+    if model_id not in repomap["MODELS"]:
+        return handle_error(f"Model '{model_id}' not found", 404)
+
+    runs = get_location_runs(location_id, model_id)
+    if not runs:
+        return handle_error("Forecast data not available for this location", 404)
+
+    run_id = run_id or runs[0]["run_id"]
+    summary_payload = summarize_run(repomap["CACHE_DIR"], location_id, model_id, run_id)
+    if not summary_has_data(summary_payload):
+        return handle_error("Summary data not available for this run", 404)
+
+    return jsonify(summary_payload)
 
 @app.route("/health")
 def health_check():

@@ -50,10 +50,15 @@
     {% endfor %}
 </div>
 
+<div class="summary-links">
+    <a href="/summary/{{ location_id }}?model={{ model_id }}&run={{ run_id }}">View Summary</a>
+</div>
+
 <div class="view-selector">
     <button id="singleViewBtn" class="active">Single Run View</button>
     <button id="timelineViewBtn">Timeline View</button>
     <button id="spaghettiViewBtn">Spaghetti Plot</button>
+    <button id="comparisonViewBtn">Comparison View</button>
 </div>
 
 <div id="singleView" class="view active">
@@ -65,6 +70,25 @@
         <label class="opacity-control">
             Opacity
             <input type="range" id="opacitySlider" min="0" max="100" value="70">
+        </label>
+    </div>
+    <div class="controls overlay-controls">
+        <label>
+            Overlay Variable
+            <select id="overlayVariableSelect">
+                <option value="">None</option>
+                {% for category_id, category in variables.categories.items() %}
+                <optgroup label="{{ category.name }}">
+                    {% for var_id in category.variables %}
+                    <option value="{{ var_id }}">{{ variables.variables[var_id].display_name }}</option>
+                    {% endfor %}
+                </optgroup>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="opacity-control">
+            Overlay Opacity
+            <input type="range" id="overlayOpacitySlider" min="0" max="100" value="50">
         </label>
     </div>
     <div class="map-wrapper">
@@ -116,6 +140,63 @@
         Note: This is a simplified visualization. Each line represents a different model run.
     </div>
 </div>
+
+<div id="comparisonView" class="view">
+    <h3>Model Comparison</h3>
+    <p>Compare two model runs side-by-side at the same forecast hour</p>
+    <div class="comparison-controls">
+        <div class="comparison-panel">
+            <h4>Primary</h4>
+            <p><strong>Model:</strong> {{ model_name }}</p>
+            <p><strong>Variable:</strong> {{ variables.variables[variable_id].display_name }}</p>
+            <p><strong>Run:</strong> {{ init_time }}</p>
+        </div>
+        <div class="comparison-panel">
+            <h4>Comparison</h4>
+            <label>
+                Model
+                <select id="compareModelSelect">
+                    {% for model_key, model in models.items() %}
+                    <option value="{{ model_key }}" {% if model_key == model_id %}selected{% endif %}>
+                        {{ model.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Variable
+                <select id="compareVariableSelect">
+                    {% for category_id, category in variables.categories.items() %}
+                    <optgroup label="{{ category.name }}">
+                        {% for var_id in category.variables %}
+                        <option value="{{ var_id }}" {% if var_id == variable_id %}selected{% endif %}>
+                            {{ variables.variables[var_id].display_name }}
+                        </option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Run
+                <select id="compareRunSelect"></select>
+            </label>
+        </div>
+    </div>
+    <div class="controls comparison-controls-row">
+        <button id="comparePlayButton">Play</button>
+        <input type="range" id="compareTimeSlider" min="1" max="{{ models[model_id].max_forecast_hours }}" value="1">
+        <span id="compareTimeDisplay">Hour +1</span>
+    </div>
+    <div class="comparison-maps">
+        <div class="comparison-map">
+            <div id="primaryCompareMap" class="weather-map"></div>
+        </div>
+        <div class="comparison-map">
+            <div id="secondaryCompareMap" class="weather-map"></div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -133,6 +214,8 @@
     const maxForecastHours = {{ models[model_id].max_forecast_hours }};
     const timelineData = {{ runs|tojson }};
     const validTimes = {{ all_valid_times|tojson }};
+    const overlayLayers = {{ overlay_layers|tojson }};
+    const modelConfig = {{ models|tojson }};
     const mapCenter = {
         lat: {{ map_center_lat }},
         lon: {{ map_center_lon }},
@@ -145,5 +228,6 @@
 <script src="{{ url_for('static', filename='js/singleRunView.js') }}"></script>
 <script src="{{ url_for('static', filename='js/timelineView.js') }}"></script>
 <script src="{{ url_for('static', filename='js/spaghettiPlot.js') }}"></script>
+<script src="{{ url_for('static', filename='js/comparisonView.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 {% endblock %}
