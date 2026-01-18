@@ -98,3 +98,7 @@ function selectTimelineCell(cell) {
         timelineImage.style.display = 'block';
     }
 }
+
+if (typeof module !== 'undefined') {
+    module.exports = { createTimeline, selectTimelineCell };
+}

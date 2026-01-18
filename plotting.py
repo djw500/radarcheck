@@ -1,28 +1,34 @@
-import os
-import logging
-import zipfile
-from io import BytesIO
+from __future__ import annotations
+
 import gc
+import logging
 from datetime import datetime, timedelta
+from io import BytesIO
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 import pytz
 import xarray as xr
 import numpy as np
-from matplotlib.colors import LinearSegmentedColormap, ListedColormap
+from matplotlib.colors import LinearSegmentedColormap
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import geopandas as gpd
 from shapely.geometry import box
-import requests
 from PIL import Image
 
-from utils import download_file, fetch_county_shapefile, convert_units, compute_wind_speed
+from utils import (
+    PlotGenerationError,
+    compute_wind_speed,
+    convert_units,
+    download_file,
+    fetch_county_shapefile,
+)
 
-def create_radar_colormap():
+def create_radar_colormap() -> LinearSegmentedColormap:
     """Create a colormap matching NWS radar reflectivity standards."""
     # Define colors for different dBZ ranges
     colors = [
@@ -40,7 +46,7 @@ def create_radar_colormap():
     
     return LinearSegmentedColormap.from_list('radar', list(zip(positions, colors)))
 
-def create_snow_colormap():
+def create_snow_colormap() -> LinearSegmentedColormap:
     colors = [
         "#ffffff",
         "#dbe9f6",
@@ -52,32 +58,32 @@ def create_snow_colormap():
     return LinearSegmentedColormap.from_list("snow", colors)
 
 
-def create_wind_colormap():
+def create_wind_colormap() -> LinearSegmentedColormap:
     colors = ["#2ca02c", "#f1c40f", "#e67e22", "#e74c3c", "#8e44ad"]
     return LinearSegmentedColormap.from_list("wind", colors)
 
 
-def create_temperature_colormap():
+def create_temperature_colormap() -> LinearSegmentedColormap:
     colors = ["#08306b", "#2b8cbe", "#7bccc4", "#fdd49e", "#f03b20"]
     return LinearSegmentedColormap.from_list("temp", colors)
 
 
-def create_precip_colormap():
+def create_precip_colormap() -> LinearSegmentedColormap:
     colors = ["#d8f3dc", "#95d5b2", "#52b788", "#2d6a4f", "#1b4332"]
     return LinearSegmentedColormap.from_list("precip", colors)
 
 
-def create_severe_colormap():
+def create_severe_colormap() -> LinearSegmentedColormap:
     colors = ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]
     return LinearSegmentedColormap.from_list("severe", colors)
 
 
-def create_visibility_colormap():
+def create_visibility_colormap() -> LinearSegmentedColormap:
     colors = ["#2c3e50", "#7f8c8d", "#bdc3c7", "#ecf0f1", "#ffffff"]
     return LinearSegmentedColormap.from_list("visibility", colors)
 
 
-def get_colormap(variable_config):
+def get_colormap(variable_config: dict[str, Any]) -> matplotlib.colors.Colormap:
     cmap_name = variable_config.get("colormap", "viridis")
     if cmap_name == "nws_reflectivity":
         return create_radar_colormap()
@@ -96,7 +102,7 @@ def get_colormap(variable_config):
     return plt.get_cmap(cmap_name)
 
 
-def select_variable_from_dataset(ds, variable_config):
+def select_variable_from_dataset(ds: xr.Dataset, variable_config: dict[str, Any]) -> xr.DataArray:
     vector_components = variable_config.get("vector_components")
     if vector_components:
         u_name, v_name = vector_components
@@ -118,17 +124,17 @@ def select_variable_from_dataset(ds, variable_config):
 
 
 def create_plot(
-    grib_path,
-    init_time,
-    forecast_hour,
-    cache_dir,
-    variable_config,
-    model_name="HRRR",
-    center_lat=None,
-    center_lon=None,
-    zoom=None,
-    counties=None,
-):
+    grib_path: str,
+    init_time: str,
+    forecast_hour: str,
+    cache_dir: str,
+    variable_config: dict[str, Any],
+    model_name: str = "HRRR",
+    center_lat: Optional[float] = None,
+    center_lon: Optional[float] = None,
+    zoom: Optional[float] = None,
+    counties: Optional[gpd.GeoDataFrame] = None,
+) -> BytesIO:
     """Create a plot from GRIB data."""
     logger.info("Starting plot creation...")
     
@@ -145,8 +151,8 @@ def create_plot(
                 filter_by_keys={"shortName": variable_config.get("short_name")},
             )
             logger.info("Successfully loaded dataset with shortName filter")
-        except Exception as e:
-            logger.warning(f"Error with shortName filter: {str(e)}")
+        except (RuntimeError, ValueError) as exc:
+            logger.warning(f"Error with shortName filter: {str(exc)}")
             ds = xr.open_dataset(grib_path, engine="cfgrib")
             logger.info("Successfully loaded dataset without filter")
 
@@ -287,10 +293,9 @@ def create_plot(
         buf.seek(0)
         return buf
 
-    except Exception as e:
-        import traceback
+    except (RuntimeError, ValueError, KeyError) as exc:
         logger.error("Error in create_plot:", exc_info=True)
-        raise
+        raise PlotGenerationError(str(exc)) from exc
     finally:
         # Cleanup resources
         if fig is not None:
@@ -304,7 +309,13 @@ def create_plot(
         # Force garbage collection to free up memory from large arrays
         gc.collect()
     
-def create_forecast_gif(grib_paths, init_time, cache_dir, variable_config, duration=500):
+def create_forecast_gif(
+    grib_paths: list[str],
+    init_time: str,
+    cache_dir: str,
+    variable_config: dict[str, Any],
+    duration: int = 500,
+) -> BytesIO:
     """
     Create an animated GIF from multiple HRRR forecast hours.
     

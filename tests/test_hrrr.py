@@ -10,7 +10,7 @@ from unittest.mock import patch  # Import patch
 # Import the functions we want to test
 from app import app, index
 from cache_builder import get_latest_hrrr_run, fetch_grib, get_available_hrrr_runs
-from utils import download_file, fetch_county_shapefile
+from utils import GribDownloadError, download_file, fetch_county_shapefile
 from config import repomap
 from plotting import create_plot, create_forecast_gif
 
@@ -41,8 +41,11 @@ def test_fetch_county_shapefile(tmpdir):
     county_zip = os.path.join(cache_dir, "cb_2018_us_county_20m.zip")
     county_dir = os.path.join(cache_dir, "county_shapefile")
     county_shp = os.path.join(county_dir, "cb_2018_us_county_20m.shp")
-    
-    result_shp = fetch_county_shapefile(cache_dir)
+
+    try:
+        result_shp = fetch_county_shapefile(cache_dir)
+    except requests.RequestException as exc:
+        pytest.skip(f"Network unavailable for shapefile download: {exc}")
     
     assert os.path.exists(county_shp)
     assert result_shp == county_shp
@@ -51,7 +54,10 @@ def test_fetch_county_shapefile(tmpdir):
 
 def test_real_hrrr_availability():
     """Test actual HRRR server availability and time conversion"""
-    date_str, init_hour, init_time = get_latest_hrrr_run()
+    try:
+        date_str, init_hour, init_time = get_latest_hrrr_run()
+    except (GribDownloadError, requests.RequestException) as exc:
+        pytest.skip(f"HRRR availability check failed: {exc}")
 
     # Check date string format (YYYYMMDD)
     assert len(date_str) == 8
@@ -82,7 +88,10 @@ def test_real_hrrr_availability():
         f"dir={dir_path}&"
         "var_REFC=on"
     )
-    response = requests.head(hrrr_url, timeout=10)
+    try:
+        response = requests.head(hrrr_url, timeout=10)
+    except requests.RequestException as exc:
+        pytest.skip(f"HRRR head request failed: {exc}")
     assert response.status_code == 200, f"HRRR file not available at {hrrr_url}"
 
     # Get file size in MB if available
@@ -93,7 +102,10 @@ def test_real_hrrr_availability():
 def test_real_grib_download():
     """Test actual GRIB file downloading and verification"""
     # Get the latest run info
-    date_str, init_hour, init_time = get_latest_hrrr_run()
+    try:
+        date_str, init_hour, init_time = get_latest_hrrr_run()
+    except (GribDownloadError, requests.RequestException) as exc:
+        pytest.skip(f"HRRR availability check failed: {exc}")
     run_id = f"run_{date_str}_{init_hour}"
 
     # Get the first location config
@@ -103,7 +115,10 @@ def test_real_grib_download():
 
     # Fetch the GRIB file
     forecast_hour = "01"  # Use 1-hour forecast
-    grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
+    try:
+        grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
+    except (GribDownloadError, requests.RequestException) as exc:
+        pytest.skip(f"GRIB download failed: {exc}")
 
     # Verify the file exists
     assert os.path.exists(grib_path), f"GRIB file not found at {grib_path}"
@@ -117,7 +132,10 @@ def test_real_grib_download():
 
 def test_latest_hrrr_info():
     """Test and display information about the latest available HRRR run"""
-    date_str, init_hour, init_time = get_latest_hrrr_run()
+    try:
+        date_str, init_hour, init_time = get_latest_hrrr_run()
+    except (GribDownloadError, requests.RequestException) as exc:
+        pytest.skip(f"HRRR availability check failed: {exc}")
     
     # Convert to Eastern Time for display
     utc_time = datetime.strptime(init_time, "%Y-%m-%d %H:%M:%S")
@@ -141,7 +159,10 @@ def test_latest_hrrr_info():
 def test_create_forecast_gif_success():
     """Test successful creation of an animated forecast GIF."""
     # 1. Get the latest HRRR run information
-    date_str, init_hour, init_time = get_latest_hrrr_run()
+    try:
+        date_str, init_hour, init_time = get_latest_hrrr_run()
+    except (GribDownloadError, requests.RequestException) as exc:
+        pytest.skip(f"HRRR availability check failed: {exc}")
     run_id = f"run_{date_str}_{init_hour}"
 
     # Get the first location config
@@ -153,8 +174,11 @@ def test_create_forecast_gif_success():
     grib_paths = []
     for hour in range(1, 4):  # Test with 3 hours instead of 12 for speed
         hour_str = f"{hour:02d}"
-        grib_path = fetch_grib(date_str, init_hour, hour_str, location_config, run_id)
-        grib_paths.append(grib_path)
+        try:
+            grib_path = fetch_grib(date_str, init_hour, hour_str, location_config, run_id)
+            grib_paths.append(grib_path)
+        except (GribDownloadError, requests.RequestException) as exc:
+            pytest.skip(f"GRIB download failed: {exc}")
 
     # 3. Create the animated GIF
     gif_buffer = create_forecast_gif(
@@ -189,7 +213,10 @@ def test_create_forecast_gif_success():
 def test_create_plot_success():
     """Test successful creation of a plot using real data."""
     # 1. Get the latest HRRR run information
-    date_str, init_hour, init_time = get_latest_hrrr_run()
+    try:
+        date_str, init_hour, init_time = get_latest_hrrr_run()
+    except (GribDownloadError, requests.RequestException) as exc:
+        pytest.skip(f"HRRR availability check failed: {exc}")
     run_id = f"run_{date_str}_{init_hour}"
     forecast_hour = "01"  # Use 1-hour forecast
 
@@ -199,7 +226,10 @@ def test_create_plot_success():
     location_config['id'] = location_id
 
     # 2. Download the GRIB file
-    grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
+    try:
+        grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
+    except (GribDownloadError, requests.RequestException) as exc:
+        pytest.skip(f"GRIB download failed: {exc}")
 
     # 3. Call create_plot
     image_buffer = create_plot(

@@ -5,6 +5,21 @@ function initSingleRunView() {
     const forecastImage = document.getElementById('forecastImage');
     const loading = document.getElementById('loading');
     const playButton = document.getElementById('playButton');
+    const opacitySlider = document.getElementById('opacitySlider');
+    const preferences = loadPreferences();
+
+    let weatherMap = null;
+    if (document.getElementById('weatherMap') && typeof WeatherMap !== 'undefined') {
+        weatherMap = new WeatherMap('weatherMap', {
+            centerLat: mapCenter.lat,
+            centerLon: mapCenter.lon,
+            zoom: mapCenter.zoom
+        });
+        weatherMap.setWeatherLayer(locationId, modelId, runId, variableId, 1);
+        window.weatherMap = weatherMap;
+    } else if (forecastImage) {
+        forecastImage.classList.add('visible');
+    }
 
     let isPlaying = false;
     let playInterval;
@@ -33,10 +48,15 @@ function initSingleRunView() {
 
     function updateDisplay(hour) {
         timeDisplay.textContent = `Hour +${hour}`;
-        if (images[hour - 1]) {
-            forecastImage.src = images[hour - 1].src;
-        } else {
-            forecastImage.src = `/frame/${locationId}/${modelId}/${runId}/${variableId}/${hour}${apiKeyParam}`;
+        if (weatherMap) {
+            weatherMap.setWeatherLayer(locationId, modelId, runId, variableId, hour);
+        }
+        if (forecastImage) {
+            if (images[hour - 1]) {
+                forecastImage.src = images[hour - 1].src;
+            } else {
+                forecastImage.src = `/frame/${locationId}/${modelId}/${runId}/${variableId}/${hour}${apiKeyParam}`;
+            }
         }
     }
 
@@ -55,9 +75,19 @@ function initSingleRunView() {
                 hour = hour >= maxForecastHours ? 1 : hour + 1;
                 slider.value = hour;
                 updateDisplay(hour);
-            }, 500);
+            }, preferences.playbackSpeed || 500);
             playButton.textContent = 'Pause';
         }
         isPlaying = !isPlaying;
     });
+
+    if (opacitySlider && weatherMap) {
+        opacitySlider.addEventListener('input', () => {
+            weatherMap.setOpacity(opacitySlider.value / 100);
+        });
+    }
+}
+
+if (typeof module !== 'undefined') {
+    module.exports = { initSingleRunView };
 }

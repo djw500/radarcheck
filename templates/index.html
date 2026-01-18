@@ -12,10 +12,15 @@
     <div class="location-card">
         <h3>{{ location.name }}</h3>
         <p>Model initialized: {{ location.init_time }}</p>
-        <a href="/location/{{ location.id }}">View Forecast</a>
+        <a href="/location/{{ location.id }}" data-location-id="{{ location.id }}">View Forecast</a>
     </div>
     {% endfor %}
 {% else %}
     <p>No forecast data is currently available. Please check back later.</p>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/preferences.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
 {% endblock %}

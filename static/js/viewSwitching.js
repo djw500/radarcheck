@@ -18,8 +18,14 @@ function initViewSwitching() {
             if (viewId === 'timelineView') {
                 createTimeline();
             } else if (viewId === 'spaghettiView') {
-                createSpaghettiPlot();
+                Promise.resolve(createSpaghettiPlot()).catch(error => {
+                    console.error('Failed to build spaghetti plot', error);
+                });
             }
         });
     });
+}
+
+if (typeof module !== 'undefined') {
+    module.exports = { initViewSwitching };
 }

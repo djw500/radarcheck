@@ -33,6 +33,12 @@ header {
     gap: 10px;
 }
 
+.opacity-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 #timeSlider {
     flex-grow: 1;
 }
@@ -182,6 +188,45 @@ header {
     height: 400px;
 }
 
+.spaghetti-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.spaghetti-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+}
+
+.spaghetti-stats {
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+.map-wrapper {
+    position: relative;
+}
+
+.weather-map {
+    width: 100%;
+    height: 500px;
+    border-radius: 5px;
+}
+
+.fallback-image {
+    display: none;
+}
+
+.fallback-image.visible {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
 .location-card {
     margin-bottom: 15px;
     padding: 15px;
@@ -208,4 +253,30 @@ footer {
     margin-top: 20px; 
     text-align: center; 
     color: #666; 
+}
+
+@media (max-width: 768px) {
+    .run-selector {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .view-selector button {
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+
+    .timeline-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .controls {
+        flex-wrap: wrap;
+    }
+
+    .weather-map {
+        height: 360px;
+    }
 }

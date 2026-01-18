@@ -1,20 +1,39 @@
-import os
-import requests
-import zipfile
+from __future__ import annotations
+
 import logging
+import os
+import zipfile
+from typing import Any, Optional
 
 import numpy as np
+import requests
+
+from config import repomap
 
 logger = logging.getLogger(__name__)
 
-def download_file(url, local_path, timeout=60):
+
+class GribDownloadError(Exception):
+    """Failed to download GRIB file from NOMADS."""
+
+
+class GribValidationError(Exception):
+    """GRIB file is corrupted or invalid."""
+
+
+class PlotGenerationError(Exception):
+    """Failed to generate forecast plot."""
+
+
+def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> None:
     """Download a file if it doesn't exist in cache.
 
     Args:
         url: The URL to download from
         local_path: The local path to save the file
-        timeout: Request timeout in seconds (default 60)
+        timeout: Request timeout in seconds (default from config)
     """
+    timeout = timeout or repomap["DOWNLOAD_TIMEOUT_SECONDS"]
     if not os.path.exists(local_path):
         logger.info(f"Downloading from: {url}")
         response = requests.get(url, stream=True, timeout=timeout)
@@ -32,7 +51,8 @@ def download_file(url, local_path, timeout=60):
     else:
         logger.info(f"Using cached file: {local_path}")
 
-def fetch_county_shapefile(cache_dir):
+
+def fetch_county_shapefile(cache_dir: str) -> str:
     """Download and extract the county shapefile if needed."""
     county_zip = os.path.join(cache_dir, "cb_2018_us_county_20m.zip")
     county_dir = os.path.join(cache_dir, "county_shapefile")
@@ -49,7 +69,7 @@ def fetch_county_shapefile(cache_dir):
     return county_shp
 
 
-def convert_units(data, conversion):
+def convert_units(data: Any, conversion: Optional[str]) -> Any:
     """Convert data arrays to display units."""
     if conversion is None:
         return data
@@ -68,6 +88,6 @@ def convert_units(data, conversion):
     return data
 
 
-def compute_wind_speed(u_component, v_component):
+def compute_wind_speed(u_component: Any, v_component: Any) -> Any:
     """Compute wind speed magnitude from u/v components."""
     return np.sqrt(u_component ** 2 + v_component ** 2)
