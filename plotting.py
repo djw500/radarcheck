@@ -20,7 +20,7 @@ from shapely.geometry import box
 import requests
 from PIL import Image
 
-from utils import download_file, fetch_county_shapefile
+from utils import download_file, fetch_county_shapefile, convert_units, compute_wind_speed
 
 def create_radar_colormap():
     """Create a colormap matching NWS radar reflectivity standards."""
@@ -40,8 +40,96 @@ def create_radar_colormap():
     
     return LinearSegmentedColormap.from_list('radar', list(zip(positions, colors)))
 
-def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None, center_lon=None, zoom=None, counties=None):
-    """Create a plot from HRRR GRIB data."""
+def create_snow_colormap():
+    colors = [
+        "#ffffff",
+        "#dbe9f6",
+        "#9ac7f0",
+        "#5b9bd5",
+        "#2f5597",
+        "#6f2dbd",
+    ]
+    return LinearSegmentedColormap.from_list("snow", colors)
+
+
+def create_wind_colormap():
+    colors = ["#2ca02c", "#f1c40f", "#e67e22", "#e74c3c", "#8e44ad"]
+    return LinearSegmentedColormap.from_list("wind", colors)
+
+
+def create_temperature_colormap():
+    colors = ["#08306b", "#2b8cbe", "#7bccc4", "#fdd49e", "#f03b20"]
+    return LinearSegmentedColormap.from_list("temp", colors)
+
+
+def create_precip_colormap():
+    colors = ["#d8f3dc", "#95d5b2", "#52b788", "#2d6a4f", "#1b4332"]
+    return LinearSegmentedColormap.from_list("precip", colors)
+
+
+def create_severe_colormap():
+    colors = ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]
+    return LinearSegmentedColormap.from_list("severe", colors)
+
+
+def create_visibility_colormap():
+    colors = ["#2c3e50", "#7f8c8d", "#bdc3c7", "#ecf0f1", "#ffffff"]
+    return LinearSegmentedColormap.from_list("visibility", colors)
+
+
+def get_colormap(variable_config):
+    cmap_name = variable_config.get("colormap", "viridis")
+    if cmap_name == "nws_reflectivity":
+        return create_radar_colormap()
+    if cmap_name in {"snow_accumulation", "snow_depth"}:
+        return create_snow_colormap()
+    if cmap_name == "wind":
+        return create_wind_colormap()
+    if cmap_name == "temperature":
+        return create_temperature_colormap()
+    if cmap_name in {"precip_accumulation", "precip_rate"}:
+        return create_precip_colormap()
+    if cmap_name == "severe":
+        return create_severe_colormap()
+    if cmap_name == "visibility":
+        return create_visibility_colormap()
+    return plt.get_cmap(cmap_name)
+
+
+def select_variable_from_dataset(ds, variable_config):
+    vector_components = variable_config.get("vector_components")
+    if vector_components:
+        u_name, v_name = vector_components
+        if u_name in ds.data_vars and v_name in ds.data_vars:
+            return compute_wind_speed(ds[u_name], ds[v_name])
+        raise ValueError(f"Missing wind components: {vector_components}")
+
+    preferred_name = variable_config.get("short_name")
+    if preferred_name in ds.data_vars:
+        return ds[preferred_name]
+
+    for alt_name in variable_config.get("source_short_names", []):
+        if alt_name in ds.data_vars:
+            return ds[alt_name]
+
+    if ds.data_vars:
+        return ds[list(ds.data_vars.keys())[0]]
+    raise ValueError("No variables found in GRIB dataset.")
+
+
+def create_plot(
+    grib_path,
+    init_time,
+    forecast_hour,
+    cache_dir,
+    variable_config,
+    model_name="HRRR",
+    center_lat=None,
+    center_lon=None,
+    zoom=None,
+    counties=None,
+):
+    """Create a plot from GRIB data."""
     logger.info("Starting plot creation...")
     
     ds = None
@@ -51,29 +139,28 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None,
         # --- Step 1: Open GRIB file ---
         logger.info("Attempting to open dataset with shortName filter...")
         try:
-            ds = xr.open_dataset(grib_path, engine="cfgrib", filter_by_keys={'shortName': 'refc'})
-            logger.info("Successfully loaded dataset with filter_by_keys={'shortName': 'refc'}")
+            ds = xr.open_dataset(
+                grib_path,
+                engine="cfgrib",
+                filter_by_keys={"shortName": variable_config.get("short_name")},
+            )
+            logger.info("Successfully loaded dataset with shortName filter")
         except Exception as e:
             logger.warning(f"Error with shortName filter: {str(e)}")
-            logger.info("Trying parameter filter...")
-            ds = xr.open_dataset(grib_path, engine="cfgrib", 
-                               backend_kwargs={'filter_by_keys': {'paramId': '132'}})
-            logger.info("Successfully loaded dataset with parameter filter")
+            ds = xr.open_dataset(grib_path, engine="cfgrib")
+            logger.info("Successfully loaded dataset without filter")
 
         logger.info(f"Available variables in dataset: {list(ds.data_vars.keys())}")
 
         # --- Step 2: Determine which variable to plot ---
-        if not ds.data_vars:
-            raise ValueError("No variables found in the GRIB file after filtering.")
+        data_to_plot = select_variable_from_dataset(ds, variable_config)
+        conversion = variable_config.get("conversion")
+        if conversion:
+            data_to_plot = convert_units(data_to_plot, conversion)
 
-        if "refc" in ds.data_vars:
-            logger.info("Found refc variable")
-            data_to_plot = ds["refc"]
-            var_label = "Composite Reflectivity (dBZ)"
-        else:
-            logger.info("Using first available variable")
-            var_label = list(ds.data_vars.keys())[0]
-            data_to_plot = ds[var_label]
+        display_name = variable_config.get("display_name", variable_config.get("short_name", "Variable"))
+        units = variable_config.get("units", "")
+        var_label = f"{display_name} ({units})" if units else display_name
 
         # --- Step 3: Define region center and zoom ---
         center_point = {
@@ -124,9 +211,9 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None,
             ax=ax,
             x="longitude",
             y="latitude",
-            cmap=create_radar_colormap(),
-            vmin=5,
-            vmax=75,
+            cmap=get_colormap(variable_config),
+            vmin=variable_config.get("vmin"),
+            vmax=variable_config.get("vmax"),
             add_colorbar=True,
             transform=ccrs.PlateCarree()
         )
@@ -153,7 +240,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None,
             forecast_delta = timedelta(hours=int(forecast_hour))
             est_valid_time = est_init_time + forecast_delta
         
-        ax.set_title(f"HRRR Forecast: {var_label}\n"
+        ax.set_title(f"{model_name} Forecast: {var_label}\n"
                     f"Model Run: {est_init_time.strftime('%I:%M %p %Z')}\n"
                     f"Valid: {est_valid_time.strftime('%I:%M %p %Z')}")
         ax.coastlines(resolution='50m')
@@ -217,7 +304,7 @@ def create_plot(grib_path, init_time, forecast_hour, cache_dir, center_lat=None,
         # Force garbage collection to free up memory from large arrays
         gc.collect()
     
-def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
+def create_forecast_gif(grib_paths, init_time, cache_dir, variable_config, duration=500):
     """
     Create an animated GIF from multiple HRRR forecast hours.
     
@@ -236,7 +323,13 @@ def create_forecast_gif(grib_paths, init_time, cache_dir, duration=500):
         logger.info(f"Processing forecast hour {i}...")
         
         # Create the plot for this forecast hour and get the buffer
-        plot_buffer = create_plot(grib_path, init_time, str(i+1), cache_dir)
+        plot_buffer = create_plot(
+            grib_path,
+            init_time,
+            str(i + 1),
+            cache_dir,
+            variable_config=variable_config,
+        )
             
         # Convert buffer to PIL Image
         plot_buffer.seek(0)

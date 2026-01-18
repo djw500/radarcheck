@@ -73,10 +73,15 @@ def test_real_hrrr_availability():
     print(f"Eastern Time: {est_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
 
     # Verify the HRRR file is actually available by constructing the URL
-    hrrr_url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?"
-                f"file={repomap['HRRR_FILE_PREFIX']}{init_hour}z.wrfsfcf01.grib2&"
-                f"dir=%2Fhrrr.{date_str}%2Fconus&"
-                f"var_REFC=on")
+    model = repomap["MODELS"]["hrrr"]
+    file_name = model["file_pattern"].format(init_hour=init_hour, forecast_hour="01")
+    dir_path = model["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+    hrrr_url = (
+        f"{model['nomads_url']}?"
+        f"file={file_name}&"
+        f"dir={dir_path}&"
+        "var_REFC=on"
+    )
     response = requests.head(hrrr_url, timeout=10)
     assert response.status_code == 200, f"HRRR file not available at {hrrr_url}"
 
@@ -152,7 +157,13 @@ def test_create_forecast_gif_success():
         grib_paths.append(grib_path)
 
     # 3. Create the animated GIF
-    gif_buffer = create_forecast_gif(grib_paths, init_time, repomap["CACHE_DIR"], duration=500)
+    gif_buffer = create_forecast_gif(
+        grib_paths,
+        init_time,
+        repomap["CACHE_DIR"],
+        variable_config=repomap["WEATHER_VARIABLES"]["refc"],
+        duration=500,
+    )
 
     # 4. Verify the result is a BytesIO object
     assert isinstance(gif_buffer, BytesIO)
@@ -191,7 +202,14 @@ def test_create_plot_success():
     grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
 
     # 3. Call create_plot
-    image_buffer = create_plot(grib_path, init_time, forecast_hour, repomap["CACHE_DIR"])
+    image_buffer = create_plot(
+        grib_path,
+        init_time,
+        forecast_hour,
+        repomap["CACHE_DIR"],
+        variable_config=repomap["WEATHER_VARIABLES"]["refc"],
+        model_name=repomap["MODELS"]["hrrr"]["name"],
+    )
 
     # 4. Assert that the result is a BytesIO object (i.e., a PNG image)
     assert isinstance(image_buffer, BytesIO)

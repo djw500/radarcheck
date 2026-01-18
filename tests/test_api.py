@@ -80,6 +80,32 @@ def test_api_locations_structure(client):
     assert 'run_id' in location
 
 
+# --- API Variables Tests ---
+
+def test_api_variables_lists_reflectivity(client):
+    """Test /api/variables returns available variable categories."""
+    response = client.get('/api/variables')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "categories" in data
+    assert "variables" in data
+
+    all_variables = []
+    for category in data["categories"].values():
+        all_variables.extend(category.get("variables", []))
+
+    assert "refc" in all_variables
+
+
+def test_api_models_lists_hrrr(client):
+    """Test /api/models returns available models."""
+    response = client.get('/api/models')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "models" in data
+    assert "hrrr" in data["models"]
+
+
 # --- API Runs Tests ---
 
 def test_api_runs_for_valid_location(client):
