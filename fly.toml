@@ -12,7 +12,6 @@ primary_region = 'ewr'
 [mounts]
   source = 'radar_cache'
   destination = '/app/cache'
-  processes = ['app']
 
 [http_service]
   internal_port = 5000
@@ -32,4 +31,3 @@ primary_region = 'ewr'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 1024
