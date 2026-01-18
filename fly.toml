@@ -9,9 +9,9 @@ primary_region = 'ewr'
 [build]
   dockerfile = 'Dockerfile'
 
-[[mounts]]
-  source = 'radar_cache'
-  destination = '/app/cache'
+[mounts]
+  source = "radar_cache"
+  destination = "/app/cache"
 
 [http_service]
   internal_port = 5000
