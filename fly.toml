@@ -9,7 +9,7 @@ primary_region = 'ewr'
 [build]
   dockerfile = 'Dockerfile'
 
-[mounts]
+[[mounts]]
   source = 'radar_cache'
   destination = '/app/cache'
 
