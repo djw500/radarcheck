@@ -6,6 +6,8 @@ function initSingleRunView() {
     const loading = document.getElementById('loading');
     const playButton = document.getElementById('playButton');
     const opacitySlider = document.getElementById('opacitySlider');
+    const overlayVariableSelect = document.getElementById('overlayVariableSelect');
+    const overlayOpacitySlider = document.getElementById('overlayOpacitySlider');
     const preferences = loadPreferences();
 
     let weatherMap = null;
@@ -13,7 +15,8 @@ function initSingleRunView() {
         weatherMap = new WeatherMap('weatherMap', {
             centerLat: mapCenter.lat,
             centerLon: mapCenter.lon,
-            zoom: mapCenter.zoom
+            zoom: mapCenter.zoom,
+            overlayLayers: typeof overlayLayers !== 'undefined' ? overlayLayers : {}
         });
         weatherMap.setWeatherLayer(locationId, modelId, runId, variableId, 1);
         window.weatherMap = weatherMap;
@@ -38,10 +41,12 @@ function initSingleRunView() {
         });
     }
 
+    const preloadLimit = Math.min(maxForecastHours, 48);
+
     // Preload first few frames immediately
     Promise.all([1, 2, 3].map(preloadImage)).then(() => {
-        // Then load the rest in background
-        for (let hour = 4; hour <= maxForecastHours; hour++) {
+        // Then load the rest in background (cap for very long models)
+        for (let hour = 4; hour <= preloadLimit; hour++) {
             preloadImage(hour);
         }
     });
@@ -50,6 +55,18 @@ function initSingleRunView() {
         timeDisplay.textContent = `Hour +${hour}`;
         if (weatherMap) {
             weatherMap.setWeatherLayer(locationId, modelId, runId, variableId, hour);
+            if (overlayVariableSelect && overlayVariableSelect.value) {
+                const label = overlayVariableSelect.options[overlayVariableSelect.selectedIndex]?.textContent?.trim();
+                weatherMap.setOverlayLayer(
+                    locationId,
+                    modelId,
+                    runId,
+                    overlayVariableSelect.value,
+                    hour,
+                    label,
+                    overlayOpacitySlider ? overlayOpacitySlider.value / 100 : 0.5
+                );
+            }
         }
         if (forecastImage) {
             if (images[hour - 1]) {
@@ -84,6 +101,31 @@ function initSingleRunView() {
     if (opacitySlider && weatherMap) {
         opacitySlider.addEventListener('input', () => {
             weatherMap.setOpacity(opacitySlider.value / 100);
+        });
+    }
+
+    if (overlayVariableSelect && weatherMap) {
+        overlayVariableSelect.addEventListener('change', () => {
+            if (!overlayVariableSelect.value) {
+                weatherMap.setOverlayLayer(locationId, modelId, runId, '', slider.value, '', 0);
+                return;
+            }
+            const label = overlayVariableSelect.options[overlayVariableSelect.selectedIndex]?.textContent?.trim();
+            weatherMap.setOverlayLayer(
+                locationId,
+                modelId,
+                runId,
+                overlayVariableSelect.value,
+                slider.value,
+                label,
+                overlayOpacitySlider ? overlayOpacitySlider.value / 100 : 0.5
+            );
+        });
+    }
+
+    if (overlayOpacitySlider && weatherMap) {
+        overlayOpacitySlider.addEventListener('input', () => {
+            weatherMap.setOverlayOpacity(overlayOpacitySlider.value / 100);
         });
     }
 }

@@ -106,6 +106,15 @@ def test_api_models_lists_hrrr(client):
     assert "hrrr" in data["models"]
 
 
+def test_api_layers_lists_radar(client):
+    """Test /api/layers returns available map layers."""
+    response = client.get('/api/layers')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "layers" in data
+    assert "observed_radar" in data["layers"]
+
+
 # --- API Runs Tests ---
 
 def test_api_runs_for_valid_location(client):
@@ -135,6 +144,46 @@ def test_api_runs_for_invalid_location(client):
     assert response.status_code == 200
     data = response.get_json()
     assert data == []
+
+
+def test_api_summary_returns_payload(client, tmp_path, monkeypatch):
+    """Test /api/summary returns summary metrics when data exists."""
+    from config import repomap
+
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setitem(repomap, "CACHE_DIR", str(cache_dir))
+
+    run_dir = cache_dir / "philly" / "hrrr" / "run_test"
+    (run_dir / "refc").mkdir(parents=True, exist_ok=True)
+    (run_dir / "refc" / "frame_01.png").write_bytes(b"fake")
+    (run_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "date_str": "20240101",
+                "init_hour": "00",
+                "init_time": "2024-01-01 00:00:00",
+                "run_id": "run_test",
+                "model_id": "hrrr",
+                "model_name": "HRRR",
+                "location": {"name": "Philadelphia"},
+            }
+        )
+    )
+    summary_dir = run_dir / "asnow"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / "center_values.json").write_text(
+        json.dumps(
+            {
+                "units": "in",
+                "values": [{"forecast_hour": 1, "value": 2.5}],
+            }
+        )
+    )
+
+    response = client.get('/api/summary/philly/hrrr/run_test')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["summary"]["total_snowfall_inches"] == 2.5
 
 
 # --- API Valid Times Tests ---

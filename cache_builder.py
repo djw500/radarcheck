@@ -28,6 +28,7 @@ from utils import (
     PlotGenerationError,
     convert_units,
     download_file,
+    format_forecast_hour,
     fetch_county_shapefile,
 )
 
@@ -96,9 +97,10 @@ def get_available_model_runs(model_id: str, max_runs: int = 5) -> list[dict[str,
         init_hour = check_time.strftime("%H")
         
         # Check if the file exists using the filter URL
+        forecast_hour = format_forecast_hour(1, model_id)
         file_name = model_config["file_pattern"].format(
             init_hour=init_hour,
-            forecast_hour="01",
+            forecast_hour=forecast_hour,
         )
         dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
         url = (
@@ -276,6 +278,8 @@ def download_all_hours_parallel(
     """Download GRIB files in parallel using a thread pool."""
     results: dict[int, str] = {}
     max_workers = repomap["PARALLEL_DOWNLOAD_WORKERS"]
+    model_config = repomap["MODELS"][model_id]
+    digits = model_config.get("forecast_hour_digits", 2)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
@@ -284,7 +288,7 @@ def download_all_hours_parallel(
                 variable_id,
                 date_str,
                 init_hour,
-                f"{hour:02d}",
+                f"{hour:0{digits}d}",
                 location_config,
                 run_id,
             ): hour
@@ -425,7 +429,7 @@ def generate_forecast_images(
                 max_hours,
             )
             for hour in range(1, max_hours + 1):
-                hour_str = f"{hour:02d}"
+                hour_str = format_forecast_hour(hour, model_id)
                 logger.info(
                     f"Processing {variable_id} hour {hour_str} for {location_config['name']} (run {run_id})"
                 )
