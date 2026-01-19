@@ -13,7 +13,12 @@ from typing import Any, Optional
 from flask import Flask, send_file, render_template, redirect, url_for, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flasgger import Swagger
+try:
+    from flasgger import Swagger
+    FLASGGER_AVAILABLE = True
+except ImportError:
+    FLASGGER_AVAILABLE = False
+    Swagger = None
 from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
 import pytz
 import xarray as xr
@@ -83,7 +88,8 @@ logger.addHandler(file_handler)
 app = Flask(__name__, static_folder='static', template_folder='templates')
 logger.info('Application startup')
 
-swagger = Swagger(app)
+if FLASGGER_AVAILABLE:
+    swagger = Swagger(app)
 
 limiter = Limiter(
     app=app,
