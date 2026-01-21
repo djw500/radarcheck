@@ -1,114 +1,124 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code and other AI agents working with this codebase.
 
 ## Project Overview
 
-Radarcheck is a Flask web application that displays HRRR (High-Resolution Rapid Refresh) weather radar forecast data. It fetches GRIB2 files from NOAA's NOMADS server, generates forecast images with matplotlib/cartopy, and serves them through a web interface.
+Radarcheck is a weather forecast visualization app that fetches GRIB2 data from NOAA NOMADS, generates statistical tiles, and serves forecast tables through a Flask web interface.
 
-## Local Development Setup
+**Current Focus**: Transitioning from legacy PNG-based location views to a tile-based multi-model tabular interface.
 
-```bash
-# Create and activate virtual environment (required on macOS with Homebrew Python)
-python3 -m venv venv
-source venv/bin/activate
+## Architecture
 
-# Install dependencies
-pip install -r requirements.txt
+```
+NOMADS → build_tiles.py → GRIB → tiles.py → NPZ tiles → Flask → /forecast UI
+```
+
+**Key files**:
+- `build_tiles.py` - CLI to fetch GRIBs and generate tiles
+- `tiles.py` - Tile statistics and point queries
+- `app.py` - Flask routes and API
+- `config.py` - Models, variables, regions configuration
+
+**Cache structure**:
+```
+cache/
+├── gribs/<model>/<run>/<var>/grib_XX.grib2   # Raw GRIB files
+└── tiles/<region>/<res>/<model>/<run>/<var>.npz  # Statistical tiles
 ```
 
 ## Common Commands
 
-All commands below assume the virtual environment is activated (`source venv/bin/activate`).
-
 ```bash
-# Run the Flask development server (default port 5000, use -p for alternate port)
-python app.py
-python app.py -p 5001  # if port 5000 is in use (e.g., AirPlay Receiver on macOS)
+# Setup
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-# Build/refresh the forecast cache (downloads HRRR data and generates images)
-python cache_builder.py
+# Run development server
+python app.py -p 5001
 
-# Build cache for a specific location only
-python cache_builder.py --location philly
+# Build tiles for a region/model
+python build_tiles.py --region ne --model hrrr --max-hours 24
 
-# Build only the latest model run
-python cache_builder.py --latest-only
+# Build with cleanup (saves disk space)
+python build_tiles.py --region ne --model gfs --max-hours 168 --clean-gribs
 
-# Run all tests
+# Run tests
 pytest tests/
 
-# Run a single test
-pytest tests/test_hrrr.py::test_real_hrrr_availability -v
-
-# Run tests with output displayed
-pytest tests/test_hrrr.py -v -s
+# Run single test
+pytest tests/test_tiles_build.py -v
 ```
 
-## Architecture
+## Key Endpoints
 
-### Data Flow
-1. `cache_builder.py` fetches HRRR GRIB2 data from NOAA NOMADS for configured locations
-2. `plotting.py` generates PNG forecast images using matplotlib and cartopy
-3. Images are stored in `cache/<location_id>/run_<date>_<hour>/` with a `latest` symlink
-4. `app.py` serves these cached images through Flask endpoints
+| Endpoint | Purpose |
+|----------|---------|
+| `/table/geo` | Main tabular forecast UI (tile-backed) |
+| `/api/table/bylatlon` | JSON forecast data at lat/lon |
+| `/api/tile_models` | Available models with tiles |
+| `/api/tile_runs/<model>` | Available runs for a model |
+| `/health` | Health check |
 
-### Key Components
+## Current State (January 2026)
 
-- **config.py**: Central configuration with `repomap` dict containing:
-  - `LOCATIONS`: Geographic regions with lat/lon bounds and center points
-  - `CACHE_DIR`: Where forecast data is stored
-  - HRRR file naming patterns
+**Working**:
+- Tile building for HRRR and NAM Nest (NE region)
+- `/table/geo` UI with lat/lon input
+- Centralized GRIB caching
 
-- **cache_builder.py**: Background job that:
-  - Discovers available HRRR model runs (checks last 24 hours)
-  - Downloads subsetted GRIB2 files via NOMADS filter API
-  - Generates 24-hour forecast frames per location
-  - Manages cache cleanup (keeps last N runs per `MAX_RUNS_TO_KEEP`)
+**Deprecated/Broken**:
+- `/location/<id>` PNG-based views
+- `cache_builder.py` image generation
 
-- **plotting.py**: Creates radar reflectivity plots with:
-  - NWS-style colormap for dBZ values
-  - County boundary overlays (from Census shapefiles)
-  - Configurable center point and zoom level
+## Documentation
 
-- **app.py**: Flask routes including:
-  - `/` - Location selection index
-  - `/location/<id>` - Forecast viewer with run selector
-  - `/frame/<location_id>/<run_id>/<hour>` - Individual frame images
-  - `/api/*` - JSON endpoints for runs, valid times, locations
-  - `/health` - Health check endpoint
-
-### Cache Structure
 ```
-cache/
-├── <location_id>/
-│   ├── latest -> run_YYYYMMDD_HH (symlink)
-│   └── run_YYYYMMDD_HH/
-│       ├── metadata.txt
-│       ├── valid_times.txt
-│       ├── frame_01.png through frame_24.png
-│       └── grib_*.grib2
-└── county_shapefile/
+docs/
+├── planning/roadmap.md      # Vision and phases
+├── planning/todos.md        # Implementation checklist
+├── architecture/overview.md # System design
+├── operations/flyio-guide.md # Deployment
+└── ux/ideas.md              # UX improvements
 ```
 
-## Adding New Locations
+## Development Workflow
 
-Add entries to `repomap["LOCATIONS"]` in `config.py`:
-```python
-"location_id": {
-    "name": "Display Name",
-    "center_lat": 40.0,
-    "center_lon": -75.0,
-    "zoom": 1.5,  # degrees from center
-    "lat_min": 38.5,
-    "lat_max": 41.5,
-    "lon_min": -77.0,
-    "lon_max": -73.0
-}
+**Branch strategy**: Work directly on `main` branch. No PRs or feature branches—commit directly to main.
+
+**Local development**:
+- Run dev server on macbook: `python app.py -p 5001`
+- Test tile building and caching locally before deploying
+- No API key required for local dev server
+
+**Production (Fly.io)**:
+- Push to `main` triggers automatic deploy
+- API key authentication is required (set via `FLY_API_KEY` secret)
+- 1GB volume for tile/GRIB caches
+
+## Development Notes
+
+- Use `.venv` for virtualenv (not `venv`)
+- Server runs on `localhost:5001` during development
+- Keep `PARALLEL_DOWNLOAD_WORKERS=1` for NOMADS reliability
+
+## Adding New Features
+
+1. **New variable**: Add to `WEATHER_VARIABLES` in `config.py`
+2. **New model**: Add to `MODELS` in `config.py`
+3. **New region**: Add to `TILING_REGIONS` in `config.py`
+4. **New API endpoint**: Add route in `app.py`
+
+## Testing
+
+```bash
+pytest tests/                    # All tests
+pytest tests/test_tiles_build.py # Tile tests
+pytest --cov=. --cov-report=term # With coverage
 ```
 
-## External Dependencies
+## Commit Style
 
-- NOAA NOMADS HRRR data: `nomads.ncep.noaa.gov`
-- US Census county shapefiles: `www2.census.gov`
-- Requires `cfgrib` engine for xarray (eccodes library)
+- Small, targeted commits
+- Conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`
+- Example: `feat(tiles): add GFS support for NE region`
