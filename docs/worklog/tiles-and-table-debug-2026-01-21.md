@@ -53,3 +53,10 @@ Operational note
 - **Observation:** `cache/seattle/...` and `cache/boston/...` contain identical GRIB files for the same model/run (checked hash/metadata).
 - **Implication:** The current downloader fetches the full CONUS grid for every configured location, resulting in ~200MB of duplication per city.
 - **Next Step:** Refactor `cache_builder.py` to store GRIBs in a central `cache/gribs/<model>/<run>/` directory, enabling multiple location/tile extractions from a single download.
+
+## NAM Nest Enablement
+- **Goal:** Enable NAM Nest (3km) model alongside HRRR.
+- **Challenge:** NAM Nest does not support all variables available in HRRR (e.g., `asnow`, `hlcy` at 0-3km, `hail`).
+- **Solution:** Added `model_exclusions` list to `WEATHER_VARIABLES` in `config.py`. Updated `build_tiles.py` and `cache_builder.py` to skip excluded variables.
+- **Result:** Successfully built tiles for NAM Nest (run `20260121_00`) for `t2m`, `refc`, `dpt`, `wind_10m`, `apcp`, `snod`, `cape`.
+- **Validation:** `/api/table/bylatlon` correctly serves NAM Nest data for Philly.
