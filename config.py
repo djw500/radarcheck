@@ -28,6 +28,17 @@ WEATHER_VARIABLES = {
         "is_accumulation": True,
         "model_exclusions": ["nam_nest", "gfs"],
     },
+    "csnow": {
+        "nomads_params": ["var_CSNOW"],
+        "level_params": ["lev_surface=on"],
+        "display_name": "Categorical Snow (Yes/No)",
+        "units": "bool",
+        "short_name": "csnow",
+        "colormap": "snow_depth",
+        "vmin": 0,
+        "vmax": 1,
+        "category": "winter",
+    },
     "snod": {
         "nomads_params": ["var_SNOD"],
         "level_params": [],
