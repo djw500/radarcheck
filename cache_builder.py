@@ -508,6 +508,12 @@ def generate_forecast_images(
                 pass
         for variable_id in variable_ids:
             variable_config = repomap["WEATHER_VARIABLES"][variable_id]
+            
+            # Check for model-specific exclusions
+            if model_id in variable_config.get("model_exclusions", []):
+                logger.info(f"Skipping variable {variable_id} for model {model_id} (excluded)")
+                continue
+
             valid_times = []
             center_values = []
             grib_paths = download_all_hours_parallel(

@@ -194,6 +194,12 @@ def build_region_tiles(
     var_ids = variables or list(repomap["WEATHER_VARIABLES"].keys())
     for variable_id in var_ids:
         variable_config = repomap["WEATHER_VARIABLES"][variable_id]
+        
+        # Check for model-specific exclusions
+        if model_id in variable_config.get("model_exclusions", []):
+            print(f"Skipping variable {variable_id} for model {model_id} (excluded in config)")
+            continue
+
         # Download GRIBs for all hours for the region (actually CONUS now)
         grib_paths = _download_all_hours_parallel(
             model_id,
