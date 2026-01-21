@@ -29,6 +29,13 @@ from alerts import get_alerts_for_location
 from plotting import select_variable_from_dataset
 from summary import summarize_run
 from utils import convert_units, format_forecast_hour
+from forecast_table import (
+    load_all_center_values,
+    build_forecast_table,
+    format_table_html,
+    format_table_json,
+    get_variable_display_order,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -831,6 +838,93 @@ def summary_view(location_id: str):
         summary=summary_payload["summary"],
         units=summary_payload.get("units", {}),
     )
+
+
+@app.route("/table/<location_id>")
+@app.route("/table/<location_id>/<model_id>")
+@app.route("/table/<location_id>/<model_id>/<run_id>")
+@require_api_key
+def table_view(location_id: str, model_id: Optional[str] = None, run_id: Optional[str] = None):
+    """Simple table view showing all forecast values for a location.
+
+    This provides a cleaner, debug-friendly interface to inspect forecast
+    data across all variables and forecast hours.
+    """
+    if location_id not in repomap["LOCATIONS"]:
+        return handle_error(f"Location '{location_id}' not found", 404)
+
+    model_id = model_id or repomap["DEFAULT_MODEL"]
+    if model_id not in repomap["MODELS"]:
+        return handle_error(f"Model '{model_id}' not found", 404)
+
+    # Load forecast data
+    data = load_all_center_values(repomap["CACHE_DIR"], location_id, model_id, run_id)
+    if not data.get("variables"):
+        return handle_error("No forecast data available for this location/model", 404)
+
+    # Build table rows
+    rows = build_forecast_table(data)
+
+    # Get all runs for navigation
+    runs = get_location_runs(location_id, model_id)
+    locations = get_available_locations(model_id)
+
+    # Determine output format
+    output_format = request.args.get("format", "html")
+    if output_format == "json":
+        return jsonify({
+            "metadata": data.get("metadata", {}),
+            "columns": ["hour", "valid_time"] + [
+                v for v in get_variable_display_order() if v in data.get("variables", {})
+            ],
+            "rows": rows,
+        })
+
+    # For HTML, use template or raw HTML
+    location_config = repomap["LOCATIONS"][location_id]
+    return render_template(
+        "table.html",
+        location_id=location_id,
+        location_name=location_config["name"],
+        model_id=model_id,
+        model_name=repomap["MODELS"][model_id]["name"],
+        run_id=data["metadata"].get("run_id", "unknown"),
+        init_time=data["metadata"].get("init_time", "Unknown"),
+        runs=runs,
+        locations=locations,
+        models=get_model_payload()["models"],
+        variables=data.get("variables", {}),
+        variable_order=[v for v in get_variable_display_order() if v in data.get("variables", {})],
+        rows=rows,
+        weather_variables=repomap["WEATHER_VARIABLES"],
+    )
+
+
+@app.route("/api/table/<location_id>")
+@app.route("/api/table/<location_id>/<model_id>")
+@app.route("/api/table/<location_id>/<model_id>/<run_id>")
+@require_api_key
+def api_table(location_id: str, model_id: Optional[str] = None, run_id: Optional[str] = None):
+    """API endpoint to get tabular forecast data for a location."""
+    if location_id not in repomap["LOCATIONS"]:
+        return handle_error(f"Location '{location_id}' not found", 404)
+
+    model_id = model_id or repomap["DEFAULT_MODEL"]
+    if model_id not in repomap["MODELS"]:
+        return handle_error(f"Model '{model_id}' not found", 404)
+
+    data = load_all_center_values(repomap["CACHE_DIR"], location_id, model_id, run_id)
+    if not data.get("variables"):
+        return handle_error("No forecast data available", 404)
+
+    rows = build_forecast_table(data)
+    return jsonify({
+        "metadata": data.get("metadata", {}),
+        "columns": ["hour", "valid_time"] + [
+            v for v in get_variable_display_order() if v in data.get("variables", {})
+        ],
+        "rows": rows,
+    })
 
 
 @app.route("/api/runs/<location_id>")

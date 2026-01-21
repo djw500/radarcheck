@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}Forecast Table - {{ location_name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .table-container {
+        overflow-x: auto;
+        margin-top: 20px;
+    }
+
+    .forecast-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+    }
+
+    .forecast-table th,
+    .forecast-table td {
+        border: 1px solid #ddd;
+        padding: 6px 10px;
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .forecast-table th {
+        background-color: #4a90d9;
+        color: white;
+        font-weight: 500;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .forecast-table th small {
+        display: block;
+        font-weight: 400;
+        opacity: 0.9;
+    }
+
+    .forecast-table tr:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+
+    .forecast-table tr:hover {
+        background-color: #e9ecef;
+    }
+
+    .forecast-table td:first-child,
+    .forecast-table td:nth-child(2) {
+        text-align: left;
+        font-weight: 500;
+    }
+
+    .forecast-table td.missing {
+        color: #999;
+    }
+
+    .header-info {
+        background: #f1f3f5;
+        padding: 15px 20px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+    }
+
+    .header-info p {
+        margin: 5px 0;
+    }
+
+    .selectors {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+    }
+
+    .selectors label {
+        font-weight: 500;
+    }
+
+    .selectors select {
+        padding: 6px 10px;
+        border-radius: 4px;
+        border: 1px solid #ccc;
+        font-size: 14px;
+    }
+
+    .view-links {
+        margin-top: 20px;
+    }
+
+    .view-links a {
+        margin-right: 15px;
+        color: #4a90d9;
+    }
+</style>
+{% endblock %}
+
+{% block main_container_class %}table-view-container{% endblock %}
+
+{% block content %}
+<div class="header-info">
+    <p><strong>Location:</strong> {{ location_name }}</p>
+    <p><strong>Model:</strong> {{ model_name }}</p>
+    <p><strong>Run:</strong> {{ run_id }}</p>
+    <p><strong>Init Time:</strong> {{ init_time }}</p>
+</div>
+
+<div class="selectors">
+    <div>
+        <label for="modelSelect">Model:</label>
+        <select id="modelSelect" onchange="updateTable()">
+            {% for mid, model in models.items() %}
+            <option value="{{ mid }}" {% if mid == model_id %}selected{% endif %}>{{ model.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <label for="runSelect">Run:</label>
+        <select id="runSelect" onchange="updateTable()">
+            {% for run in runs %}
+            <option value="{{ run.run_id }}" {% if run.run_id == run_id %}selected{% endif %}>{{ run.init_time }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<div class="view-links">
+    <a href="/location/{{ location_id }}?model={{ model_id }}">Map View</a>
+    <a href="/summary/{{ location_id }}?model={{ model_id }}">Summary View</a>
+    <a href="/api/table/{{ location_id }}/{{ model_id }}/{{ run_id }}">JSON API</a>
+</div>
+
+<div class="table-container">
+    <table class="forecast-table">
+        <thead>
+            <tr>
+                <th>Hour</th>
+                <th>Valid Time</th>
+                {% for var_id in variable_order %}
+                <th>
+                    {{ weather_variables[var_id].display_name }}
+                    <small>({{ weather_variables[var_id].units }})</small>
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>+{{ row.hour }}</td>
+                <td>{{ row.valid_time[:16] if row.valid_time else '-' }}</td>
+                {% for var_id in variable_order %}
+                <td {% if row[var_id] == '-' %}class="missing"{% endif %}>
+                    {% set val = row[var_id] %}
+                    {% if val != '-' %}
+                        {{ val.split()[0] if ' ' in val else val }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateTable() {
+    const model = document.getElementById('modelSelect').value;
+    const run = document.getElementById('runSelect').value;
+    window.location.href = `/table/{{ location_id }}/${model}/${run}`;
+}
+</script>
+{% endblock %}
