@@ -17,7 +17,10 @@ import requests
 import xarray as xr
 from filelock import FileLock, Timeout
 
-import geopandas as gpd
+try:
+    import geopandas as gpd  # type: ignore
+except Exception:  # Optional for non-plotting tile builds
+    gpd = None  # type: ignore
 import numpy as np
 import psutil
 
@@ -168,23 +171,27 @@ def get_latest_hrrr_run() -> tuple[str, str, str]:
     """Backward-compatible wrapper for the latest HRRR run."""
     return get_latest_model_run("hrrr")
 
-def fetch_grib(*args: Any, **kwargs: Any) -> str:
-    """Download and cache the GRIB file for a specific forecast hour and location."""
-    if len(args) == 5 and not kwargs:
-        date_str, init_hour, forecast_hour, location_config, run_id = args
-        model_id = repomap["DEFAULT_MODEL"]
-        variable_id = repomap["DEFAULT_VARIABLE"]
-    else:
-        model_id, variable_id, date_str, init_hour, forecast_hour, location_config, run_id = args
-
+def fetch_grib(
+    model_id: str,
+    variable_id: str,
+    date_str: str,
+    init_hour: str,
+    forecast_hour: str,
+    run_id: str,
+    location_config: Optional[dict[str, Any]] = None, # Kept for signature compatibility but ignored for fetch region
+) -> str:
+    """Download and cache the GRIB file for a specific forecast hour in the central GRIB cache."""
     model_config = repomap["MODELS"][model_id]
     variable_config = repomap["WEATHER_VARIABLES"][variable_id]
 
-    location_id = location_config['id']
-    run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id, run_id, variable_id)
+    # Always use central GRIB cache
+    run_cache_dir = os.path.join(repomap["GRIB_CACHE_DIR"], model_id, run_id, variable_id)
     os.makedirs(run_cache_dir, exist_ok=True)
 
     filename = os.path.join(run_cache_dir, f"grib_{forecast_hour}.grib2")
+
+    # Use CONUS region for all downloads to ensure full coverage and deduplication
+    download_region = repomap["DOWNLOAD_REGIONS"]["conus"]
 
     # ECMWF CDS download path
     if model_config.get("source") == "cds":
@@ -197,7 +204,7 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
                 date_str,
                 init_hour,
                 forecast_hour,
-                location_config,
+                download_region,
                 run_id,
                 temp_filename,
             )
@@ -235,7 +242,7 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
         init_hour,
         forecast_hour,
         variable_query,
-        location_config,
+        download_region,
     )
     
     def try_load_grib(filename: str) -> bool:
@@ -272,7 +279,7 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
 
     # Try to use cached file
     if try_load_grib(filename):
-        logger.info(f"Using cached valid GRIB file: {filename}")
+        # logger.info(f"Using cached valid GRIB file: {filename}") # Reduce noise
         return filename
 
     # Try downloading up to 3 times
@@ -328,7 +335,6 @@ def download_all_hours_parallel(
     variable_id: str,
     date_str: str,
     init_hour: str,
-    location_config: dict[str, Any],
     run_id: str,
     max_hours: int,
 ) -> dict[int, str]:
@@ -346,7 +352,6 @@ def download_all_hours_parallel(
                 date_str,
                 init_hour,
                 f"{hour:0{digits}d}",
-                location_config,
                 run_id,
             ): hour
             for hour in range(1, max_hours + 1)
@@ -510,7 +515,6 @@ def generate_forecast_images(
                 variable_id,
                 date_str,
                 init_hour,
-                location_config,
                 run_id,
                 max_hours,
             )
@@ -683,6 +687,32 @@ def cleanup_old_runs(location_id: str, model_id: str) -> None:
     except (OSError, ValueError, RuntimeError) as exc:
         logger.error(f"Error cleaning up old runs for {location_id}: {str(exc)}")
 
+
+def cleanup_old_gribs(model_id: str) -> None:
+    """Remove old GRIBs from the central cache to save disk space."""
+    try:
+        model_dir = os.path.join(repomap["GRIB_CACHE_DIR"], model_id)
+        if not os.path.exists(model_dir):
+            return
+
+        run_dirs = []
+        for item in os.listdir(model_dir):
+            if item.startswith("run_") and os.path.isdir(os.path.join(model_dir, item)):
+                run_dirs.append(item)
+        
+        run_dirs.sort(reverse=True)
+        max_runs = repomap.get("MAX_RUNS_TO_KEEP", 5)
+        
+        if len(run_dirs) > max_runs:
+            for old_run in run_dirs[max_runs:]:
+                old_run_path = os.path.join(model_dir, old_run)
+                logger.info(f"Removing old centralized GRIBs: {old_run_path}")
+                shutil.rmtree(old_run_path)
+
+    except Exception as exc:
+        logger.error(f"Error cleaning up old GRIBs for {model_id}: {str(exc)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build forecast cache for configured locations")
     parser.add_argument("--location", help="Specific location ID to process (default: all)")
@@ -696,6 +726,7 @@ def main() -> None:
     
     # Ensure cache directory exists
     os.makedirs(repomap["CACHE_DIR"], exist_ok=True)
+    os.makedirs(repomap["GRIB_CACHE_DIR"], exist_ok=True)
     
     # Get county shapefile (shared resource)
     shp_path = fetch_county_shapefile(repomap["CACHE_DIR"])
@@ -763,6 +794,9 @@ def main() -> None:
                     gc.collect()
 
                 cleanup_old_runs(location_id, model_id)
+        
+        # Cleanup old GRIBs
+        cleanup_old_gribs(model_id)
     
     logger.info("Cache building complete")
     

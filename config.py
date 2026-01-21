@@ -83,6 +83,13 @@ WEATHER_VARIABLES = {
         "category": "temperature",
         "conversion": "k_to_f",
         "source_short_names": ["t2m", "2t", "tmp"],
+        "unit_conversions_by_units": {
+            "K": "k_to_f",
+            "degC": "c_to_f",
+            "°C": "c_to_f",
+            "degF": None,
+            "°F": None
+        },
     },
     "dpt": {
         "nomads_params": ["var_DPT"],
@@ -96,6 +103,13 @@ WEATHER_VARIABLES = {
         "category": "temperature",
         "conversion": "k_to_f",
         "source_short_names": ["dpt", "2d"],
+        "unit_conversions_by_units": {
+            "K": "k_to_f",
+            "degC": "c_to_f",
+            "°C": "c_to_f",
+            "degF": None,
+            "°F": None
+        },
     },
     "rh": {
         "nomads_params": ["var_RH"],
@@ -290,6 +304,7 @@ MAP_LAYERS = {
 
 repomap = {
     "CACHE_DIR": "cache",
+    "GRIB_CACHE_DIR": "cache/gribs",
     "TILES_DIR": "cache/tiles",
     "DEFAULT_MODEL": "hrrr",
     "DEFAULT_VARIABLE": "refc",
@@ -330,6 +345,18 @@ repomap = {
     "GENERATE_VECTOR_CONTOURS": False,
     "TILE_MIN_ZOOM": 4,
     "TILE_MAX_ZOOM": 10,
+
+    # Download regions for centralized GRIB fetching
+    "DOWNLOAD_REGIONS": {
+        "conus": {
+            "id": "conus",
+            "name": "Continental US",
+            "lat_min": 20.0,
+            "lat_max": 55.0,
+            "lon_min": -135.0,
+            "lon_max": -60.0,
+        }
+    },
 
     # Region tiling (grid statistics) configuration
     "TILING_REGIONS": {

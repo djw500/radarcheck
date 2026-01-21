@@ -6,11 +6,133 @@ import os
 from typing import Any, Dict, List, Optional
 
 from config import repomap
-from cache_builder import (
-    get_available_model_runs,
-    download_all_hours_parallel,
-)
 from tiles import build_tiles_for_variable, save_tiles_npz
+from utils import download_file, format_forecast_hour
+import requests
+import xarray as xr
+from filelock import FileLock, Timeout
+
+
+def _build_variable_query(variable_config: dict[str, Any]) -> str:
+    params = [f"{param}=on" for param in variable_config.get("nomads_params", [])]
+    levels = variable_config.get("level_params", [])
+    query = "&".join(params + levels)
+    return f"{query}&" if query else ""
+
+
+def _build_model_url(model_config: dict[str, Any], date_str: str, init_hour: str, forecast_hour: str, variable_query: str, location_config: dict[str, Any]) -> str:
+    file_name = model_config["file_pattern"].format(init_hour=init_hour, forecast_hour=forecast_hour)
+    dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+    return (
+        f"{model_config['nomads_url']}?"
+        f"file={file_name}&"
+        f"dir={dir_path}&"
+        f"{variable_query}"
+        f"leftlon={location_config['lon_min']}&rightlon={location_config['lon_max']}&"
+        f"toplat={location_config['lat_max']}&bottomlat={location_config['lat_min']}&"
+    )
+
+
+def _get_available_model_runs(model_id: str, max_runs: int = 1) -> list[dict[str, str]]:
+    model_config = repomap["MODELS"][model_id]
+    from datetime import datetime, timedelta, timezone
+    import pytz
+    now = datetime.now(timezone.utc)
+    found: list[dict[str, str]] = []
+    for hours_ago in range(0, repomap["HOURS_TO_CHECK_FOR_RUNS"]):
+        if len(found) >= max_runs:
+            break
+        check_time = now - timedelta(hours=hours_ago)
+        date_str = check_time.strftime("%Y%m%d")
+        init_hour = check_time.strftime("%H")
+        forecast_hour = format_forecast_hour(1, model_id)
+        file_name = model_config["file_pattern"].format(init_hour=init_hour, forecast_hour=forecast_hour)
+        dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+        url = (
+            f"{model_config['nomads_url']}?file={file_name}&dir={dir_path}&{model_config['availability_check_var']}=on"
+        )
+        try:
+            r = requests.head(url, timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"])
+            if r.status_code == 200:
+                model_time = datetime(check_time.year, check_time.month, check_time.day, int(init_hour), tzinfo=pytz.UTC)
+                found.append({
+                    'date_str': date_str,
+                    'init_hour': init_hour,
+                    'init_time': model_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    'run_id': f"run_{date_str}_{init_hour}",
+                })
+        except requests.RequestException:
+            continue
+    return found
+
+
+def _fetch_grib(model_id: str, variable_id: str, date_str: str, init_hour: str, forecast_hour: str, location_config: dict[str, Any], run_id: str) -> str:
+    model_config = repomap["MODELS"][model_id]
+    variable_config = repomap["WEATHER_VARIABLES"][variable_id]
+    
+    # Use centralized GRIB cache
+    run_cache_dir = os.path.join(repomap["GRIB_CACHE_DIR"], model_id, run_id, variable_id)
+    os.makedirs(run_cache_dir, exist_ok=True)
+    filename = os.path.join(run_cache_dir, f"grib_{forecast_hour}.grib2")
+
+    # Use NOMADS with CONUS region to ensure we match the cache_builder's files
+    # location_config is ignored for the fetch region
+    download_region = repomap["DOWNLOAD_REGIONS"]["conus"]
+    variable_query = _build_variable_query(variable_config)
+    url = _build_model_url(model_config, date_str, init_hour, forecast_hour, variable_query, download_region)
+
+    # Cached valid?
+    if os.path.exists(filename) and os.path.getsize(filename) >= repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
+        try:
+            ds = xr.open_dataset(filename, engine="cfgrib")
+            ds.close()
+            return filename
+        except Exception:
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+    # Download with temp then verify basic open
+    temp_filename = f"{filename}.tmp"
+    download_file(url, temp_filename)
+    if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
+        raise RuntimeError(f"Downloaded file is missing or too small: {temp_filename}")
+    ds = xr.open_dataset(temp_filename, engine="cfgrib")
+    ds.close()
+    with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
+        os.replace(temp_filename, filename)
+    return filename
+
+
+def _download_all_hours_parallel(model_id: str, variable_id: str, date_str: str, init_hour: str, run_id: str, max_hours: int) -> dict[int, str]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results: dict[int, str] = {}
+    digits = repomap["MODELS"][model_id].get("forecast_hour_digits", 2)
+    max_workers = repomap["PARALLEL_DOWNLOAD_WORKERS"]
+    # Pass a dummy location config since _fetch_grib ignores it now
+    dummy_config = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _fetch_grib,
+                model_id,
+                variable_id,
+                date_str,
+                init_hour,
+                f"{hour:0{digits}d}",
+                dummy_config,
+                run_id,
+            ): hour
+            for hour in range(1, max_hours + 1)
+        }
+        for future in as_completed(futures):
+            hour = futures[future]
+            try:
+                path = future.result()
+                results[hour] = path
+            except Exception:
+                continue
+    return results
 
 
 def build_region_tiles(
@@ -34,7 +156,7 @@ def build_region_tiles(
 
     # Determine run
     if run_id is None:
-        runs = get_available_model_runs(model_id, max_runs=1)
+        runs = _get_available_model_runs(model_id, max_runs=1)
         if not runs:
             raise SystemExit(f"No recent runs available for {model_id}")
         run_info = runs[0]
@@ -51,11 +173,11 @@ def build_region_tiles(
         }
 
     model_config = repomap["MODELS"][model_id]
-    digits = model_config.get("forecast_hour_digits", 2)
     if max_hours is None:
         max_hours = model_config.get("max_forecast_hours", 24)
 
-    # Pseudo location config for regional subset
+    # Pseudo location config for regional subset - used for tile bounds, NOT for download
+    # (download now uses CONUS)
     location_config = {
         "id": f"region_{region_id}",
         "name": f"Region {region_id}",
@@ -72,20 +194,19 @@ def build_region_tiles(
     var_ids = variables or list(repomap["WEATHER_VARIABLES"].keys())
     for variable_id in var_ids:
         variable_config = repomap["WEATHER_VARIABLES"][variable_id]
-        # Download GRIBs for all hours for the region
-        grib_paths = download_all_hours_parallel(
+        # Download GRIBs for all hours for the region (actually CONUS now)
+        grib_paths = _download_all_hours_parallel(
             model_id,
             variable_id,
             run_info["date_str"],
             run_info["init_hour"],
-            location_config,
             run_info["run_id"],
             max_hours,
         )
         if not grib_paths:
             continue
 
-        mins, maxs, means, hours = build_tiles_for_variable(
+        mins, maxs, means, hours, index_meta = build_tiles_for_variable(
             grib_paths,
             variable_config,
             lat_min,
@@ -106,6 +227,8 @@ def build_region_tiles(
             "lon_max": lon_max,
             "resolution_deg": res_deg,
             "units": variable_config.get("units"),
+            "lon_0_360": bool(index_meta.get("lon_0_360", False)),
+            "index_lon_min": float(index_meta.get("index_lon_min", lon_min)),
         }
 
         out_path = save_tiles_npz(
@@ -147,4 +270,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
