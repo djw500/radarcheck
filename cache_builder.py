@@ -172,16 +172,29 @@ def get_latest_hrrr_run() -> tuple[str, str, str]:
     """Backward-compatible wrapper for the latest HRRR run."""
     return get_latest_model_run("hrrr")
 
-def fetch_grib(
-    model_id: str,
-    variable_id: str,
-    date_str: str,
-    init_hour: str,
-    forecast_hour: str,
-    run_id: str,
-    location_config: Optional[dict[str, Any]] = None, # Kept for signature compatibility but ignored for fetch region
-) -> str:
+def fetch_grib(*args: Any, **kwargs: Any) -> str:
     """Download and cache the GRIB file for a specific forecast hour in the central GRIB cache."""
+    if kwargs:
+        model_id = kwargs.get("model_id")
+        variable_id = kwargs.get("variable_id")
+        date_str = kwargs.get("date_str")
+        init_hour = kwargs.get("init_hour")
+        forecast_hour = kwargs.get("forecast_hour")
+        run_id = kwargs.get("run_id")
+        location_config = kwargs.get("location_config")
+    elif len(args) == 5:
+        date_str, init_hour, forecast_hour, location_config, run_id = args
+        model_id = "hrrr"
+        variable_id = "refc"
+    elif len(args) == 7:
+        model_id, variable_id, date_str, init_hour, forecast_hour, location_config, run_id = args
+    else:
+        raise TypeError("fetch_grib expects 5 legacy args or 7 model-aware args")
+
+    if model_id is None:
+        model_id = "hrrr"
+    if variable_id is None:
+        variable_id = "refc"
     model_config = repomap["MODELS"][model_id]
     variable_config = repomap["WEATHER_VARIABLES"][variable_id]
 
