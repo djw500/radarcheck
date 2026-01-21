@@ -969,6 +969,8 @@ def api_table_multimodel():
 
     rows_by_time: dict[str, dict[str, Any]] = {}
     model_payloads: dict[str, Any] = {}
+    variables_found: set[str] = set()
+    models_skipped: dict[str, str] = {}
     for model_id in sorted(models_with_runs.keys()):
         runs = models_with_runs[model_id]
         chosen_run = None
@@ -980,12 +982,15 @@ def api_table_multimodel():
                 chosen_vars_info = info
                 break
         if not chosen_run:
+            models_skipped[model_id] = "no_matching_variables"
             continue
+        variables_found.update([var_id for var_id in variable_ids if var_id in chosen_vars_info])
 
         run_meta = load_tile_run_metadata(repomap["TILES_DIR"], region_id, res, model_id, chosen_run)
         init_time_utc = run_meta.get("init_time_utc")
         init_dt = parse_init_time_utc(init_time_utc, chosen_run)
         if not init_dt:
+            models_skipped[model_id] = "missing_init_time"
             continue
         if not init_time_utc:
             init_time_utc = init_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -1043,6 +1048,14 @@ def api_table_multimodel():
             "stat": stat,
             "lat": lat,
             "lon": lon,
+        },
+        "diagnostics": {
+            "models_with_runs": models_with_runs,
+            "models_skipped": models_skipped,
+            "variables_considered": variable_ids,
+            "variables_found": sorted(variables_found),
+            "rows_returned": len(rows),
+            "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg"),
         },
         "variables": variables_meta,
         "models": model_payloads,
