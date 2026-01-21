@@ -308,7 +308,11 @@ def extract_center_value(
     center_lon: float,
     variable_config: dict[str, Any],
 ) -> tuple[Optional[float], Optional[str]]:
-    """Extract the forecast value at the center point from a GRIB file."""
+    """Extract the forecast value at the center point from a GRIB file.
+
+    Handles both 1D indexed coordinates and 2D coordinate arrays (e.g., Lambert
+    conformal projection used by HRRR).
+    """
     ds = None
     try:
         ds = xr.open_dataset(grib_path, engine="cfgrib")
@@ -325,11 +329,21 @@ def extract_center_value(
         elif lon_max > 180 and center_lon < 0:
             target_lon = center_lon + 360
 
-        center_value = data.sel(
-            latitude=center_lat,
-            longitude=target_lon,
-            method="nearest"
-        ).values
+        # Check if coordinates are 2D (projected data like HRRR Lambert conformal)
+        if data.latitude.ndim == 2:
+            # Find nearest point using distance calculation on 2D arrays
+            lat_diff = data.latitude.values - center_lat
+            lon_diff = data.longitude.values - target_lon
+            distance = np.sqrt(lat_diff**2 + lon_diff**2)
+            min_idx = np.unravel_index(np.argmin(distance), distance.shape)
+            center_value = data.values[min_idx]
+        else:
+            # Standard 1D indexed coordinates
+            center_value = data.sel(
+                latitude=center_lat,
+                longitude=target_lon,
+                method="nearest"
+            ).values
 
         value = float(center_value)
         if np.isnan(value):

@@ -486,6 +486,11 @@ def extract_point_value(
     lon: float,
     variable_config: dict[str, Any],
 ) -> tuple[Optional[float], Optional[str]]:
+    """Extract forecast value at a lat/lon point.
+
+    Handles both 1D indexed coordinates and 2D coordinate arrays (e.g., Lambert
+    conformal projection used by HRRR).
+    """
     ds = xr.open_dataset(grib_path, engine="cfgrib")
     try:
         data = select_variable_from_dataset(ds, variable_config)
@@ -501,7 +506,18 @@ def extract_point_value(
         elif lon_max > 180 and lon < 0:
             target_lon = lon + 360
 
-        point_value = data.sel(latitude=lat, longitude=target_lon, method="nearest").values
+        # Check if coordinates are 2D (projected data like HRRR Lambert conformal)
+        if data.latitude.ndim == 2:
+            # Find nearest point using distance calculation on 2D arrays
+            lat_diff = data.latitude.values - lat
+            lon_diff = data.longitude.values - target_lon
+            distance = np.sqrt(lat_diff**2 + lon_diff**2)
+            min_idx = np.unravel_index(np.argmin(distance), distance.shape)
+            point_value = data.values[min_idx]
+        else:
+            # Standard 1D indexed coordinates
+            point_value = data.sel(latitude=lat, longitude=target_lon, method="nearest").values
+
         value = float(point_value)
         if np.isnan(value):
             return None, data.attrs.get("units")
