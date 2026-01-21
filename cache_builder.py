@@ -33,12 +33,17 @@ from utils import (
 )
 
 # Set up logging
+os.makedirs('logs', exist_ok=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create logs directory if it doesn't exist
-# Create logs directory if it doesn't exist
-os.makedirs('logs', exist_ok=True)
+# Add file handler
+from logging.handlers import RotatingFileHandler
+file_handler = RotatingFileHandler('logs/cache_builder.log', maxBytes=1024*1024, backupCount=5)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s %(levelname)s: %(message)s'
+))
+logger.addHandler(file_handler)
 
 def log_memory_usage(context: str = "") -> None:
     """Log current memory usage."""
@@ -681,6 +686,10 @@ def main() -> None:
     
     logger.info("Cache building complete")
     
+    # If running in latest-only mode (e.g. testing or manual run), exit immediately
+    if args.latest_only:
+        return
+
     # In production (supervisord), sleep before exiting so we don't hammer NOAA
     # HRRR updates hourly, so checking every 15 minutes is sufficient
     import time
