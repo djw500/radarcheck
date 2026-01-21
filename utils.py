@@ -37,17 +37,59 @@ def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> N
     if not os.path.exists(local_path):
         logger.info(f"Downloading from: {url}")
         response = requests.get(url, stream=True, timeout=timeout)
-        response.raise_for_status()
+        status = response.status_code
+        ctype = response.headers.get("Content-Type", "")
+        clen = response.headers.get("Content-Length")
+        logger.info(f"HTTP status={status}, content-type='{ctype}', content-length={clen}")
+        # Raise for obvious HTTP errors early
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as http_err:
+            # Log brief body preview if available
+            try:
+                preview = next(response.iter_content(chunk_size=512))
+            except Exception:
+                preview = b""
+            if preview:
+                logger.error(f"HTTP error body preview: {preview[:120]!r}")
+            raise
+
+        # Heuristic guard: reject textual/error responses
+        if "text/html" in ctype or ctype.startswith("text/"):
+            try:
+                preview = next(response.iter_content(chunk_size=512))
+            except Exception:
+                preview = b""
+            logger.error("Unexpected textual response for GRIB request; rejecting download.")
+            if preview:
+                logger.error(f"Body preview: {preview[:200]!r}")
+            raise ValueError(f"Unexpected content-type '{ctype}' from server")
+
+        # Heuristic guard: reject very small responses when CL is present
+        if clen is not None:
+            try:
+                if int(clen) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
+                    logger.error(
+                        f"Content-Length too small ({clen} < {repomap['MIN_GRIB_FILE_SIZE_BYTES']}); rejecting download."
+                    )
+                    raise ValueError("Response too small for GRIB")
+            except ValueError:
+                # If header is malformed, ignore and continue
+                pass
 
         # Create directory if it doesn't exist
         dir_path = os.path.dirname(local_path)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
 
+        total = 0
         with open(local_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                total += len(chunk)
                 f.write(chunk)
-        logger.info(f"Downloaded: {local_path}")
+        logger.info(f"Downloaded: {local_path} ({total} bytes)")
     else:
         logger.info(f"Using cached file: {local_path}")
 

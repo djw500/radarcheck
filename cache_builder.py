@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+import random
 
 import pytz
 import requests
@@ -37,13 +38,16 @@ os.makedirs('logs', exist_ok=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Add file handler
+# Add file handler and attach to both module logger and root so submodules log here too
 from logging.handlers import RotatingFileHandler
 file_handler = RotatingFileHandler('logs/cache_builder.log', maxBytes=1024*1024, backupCount=5)
 file_handler.setFormatter(logging.Formatter(
     '%(asctime)s %(levelname)s: %(message)s'
 ))
 logger.addHandler(file_handler)
+# Ensure other module loggers (e.g., plotting, utils) also write to this file
+root_logger = logging.getLogger()
+root_logger.addHandler(file_handler)
 
 def log_memory_usage(context: str = "") -> None:
     """Log current memory usage."""
@@ -205,7 +209,7 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
         except Timeout as exc:
             logger.error(f"Timeout acquiring lock for {filename}: {exc}")
             raise GribValidationError(f"Lock timeout for {filename}") from exc
-        except (OSError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             if "End of resource reached when reading message" in str(exc):
                 logger.error(f"GRIB file corrupted (premature EOF): {filename}")
             else:
@@ -258,7 +262,7 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
         except Timeout as exc:
             logger.error(f"Download attempt {attempt + 1} failed: {str(exc)}", exc_info=True)
             raise GribValidationError(f"Lock timeout for {filename}") from exc
-        except (requests.RequestException, requests.Timeout, OSError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             logger.error(f"Download attempt {attempt + 1} failed: {str(exc)}", exc_info=True)
             if os.path.exists(temp_filename):
                 try:
@@ -266,7 +270,11 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
                 except OSError:
                     pass
             if attempt < repomap["MAX_DOWNLOAD_RETRIES"] - 1:
-                time.sleep(repomap["RETRY_DELAY_SECONDS"])
+                # Exponential backoff with jitter
+                base = repomap["RETRY_DELAY_SECONDS"]
+                delay = base * (2 ** attempt) + random.uniform(0, 1)
+                logger.info(f"Retrying in {delay:.2f}s (attempt {attempt + 2}/{repomap['MAX_DOWNLOAD_RETRIES']})")
+                time.sleep(delay)
     
     raise GribDownloadError("Failed to obtain valid GRIB file after retries")
 

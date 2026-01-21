@@ -105,9 +105,20 @@ def get_colormap(variable_config: dict[str, Any]) -> matplotlib.colors.Colormap:
 def select_variable_from_dataset(ds: xr.Dataset, variable_config: dict[str, Any]) -> xr.DataArray:
     vector_components = variable_config.get("vector_components")
     if vector_components:
+        # Try exact names first
         u_name, v_name = vector_components
         if u_name in ds.data_vars and v_name in ds.data_vars:
             return compute_wind_speed(ds[u_name], ds[v_name])
+
+        # Try configured candidate alternatives
+        candidates = variable_config.get("vector_component_candidates")
+        if candidates and len(candidates) == 2:
+            u_alts, v_alts = candidates
+            found_u = next((name for name in u_alts if name in ds.data_vars), None)
+            found_v = next((name for name in v_alts if name in ds.data_vars), None)
+            if found_u and found_v:
+                return compute_wind_speed(ds[found_u], ds[found_v])
+
         raise ValueError(f"Missing wind components: {vector_components}")
 
     preferred_name = variable_config.get("short_name")
@@ -150,7 +161,13 @@ def create_plot(
                 engine="cfgrib",
                 filter_by_keys={"shortName": variable_config.get("short_name")},
             )
-            logger.info("Successfully loaded dataset with shortName filter")
+            if not ds.data_vars:
+                logger.warning("shortName filter returned empty dataset; reopening without filter")
+                ds.close()
+                ds = xr.open_dataset(grib_path, engine="cfgrib")
+                logger.info("Successfully loaded dataset without filter")
+            else:
+                logger.info("Successfully loaded dataset with shortName filter")
         except (RuntimeError, ValueError) as exc:
             logger.warning(f"Error with shortName filter: {str(exc)}")
             ds = xr.open_dataset(grib_path, engine="cfgrib")

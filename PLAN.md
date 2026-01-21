@@ -204,3 +204,8 @@ python forecast_table.py --location philly --model gfs
 - Interactive filtering by variable category
 - ECMWF integration
 - GEFS ensemble spread visualization
+
+## Related Worklogs
+
+- Cache builder triage and remediation notes (2026-01-20):
+  - docs/worklog/cache-builder-triage-2026-01-20.md

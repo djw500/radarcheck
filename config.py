@@ -112,6 +112,11 @@ WEATHER_VARIABLES = {
         "category": "wind",
         "conversion": "m_s_to_mph",
         "vector_components": ["ugrd", "vgrd"],
+        # Accept common shortName variants from GRIB files
+        "vector_component_candidates": [
+            ["ugrd", "10u", "u10", "UGRD"],  # u-component
+            ["vgrd", "10v", "v10", "VGRD"],  # v-component
+        ],
     },
     "gust": {
         "nomads_params": ["var_GUST"],
@@ -290,7 +295,7 @@ repomap = {
     "FILELOCK_TIMEOUT_SECONDS": 30,
 
     # Parallel download settings
-    "PARALLEL_DOWNLOAD_WORKERS": 4,
+    "PARALLEL_DOWNLOAD_WORKERS": 2,
 
     # Map tile generation settings
     "GENERATE_STATIC_IMAGES": True,
