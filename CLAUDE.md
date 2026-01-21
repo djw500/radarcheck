@@ -6,14 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Radarcheck is a Flask web application that displays HRRR (High-Resolution Rapid Refresh) weather radar forecast data. It fetches GRIB2 files from NOAA's NOMADS server, generates forecast images with matplotlib/cartopy, and serves them through a web interface.
 
-## Common Commands
+## Local Development Setup
 
 ```bash
+# Create and activate virtual environment (required on macOS with Homebrew Python)
+python3 -m venv venv
+source venv/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
+```
 
-# Run the Flask development server
+## Common Commands
+
+All commands below assume the virtual environment is activated (`source venv/bin/activate`).
+
+```bash
+# Run the Flask development server (default port 5000, use -p for alternate port)
 python app.py
+python app.py -p 5001  # if port 5000 is in use (e.g., AirPlay Receiver on macOS)
 
 # Build/refresh the forecast cache (downloads HRRR data and generates images)
 python cache_builder.py
