@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Model & Variable Explainer{% endblock %}
+
+{% block header_content %}
+<div class="explainer-header">
+    <h2>Data Sources & Variables</h2>
+    <p class="subtitle">Understanding the forecast models and weather metrics available in this tool.</p>
+</div>
+{% endblock %}
+
+{% block navigation %}
+<!-- Override nav to just show back link if needed, or keep standard -->
+<div class="location-nav">
+    <a href="/">Home</a>
+    <a href="/table/geo" class="active">Explainer</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="explainer-content">
+    <section class="models-section">
+        <h3>Forecast Models</h3>
+        <div class="models-grid">
+            {% for model_id, model in models.items() %}
+            <div class="model-card">
+                <h4>{{ model.name }} <span class="model-badge">{{ model_id }}</span></h4>
+                <div class="model-details">
+                    <p><strong>Max Forecast:</strong> {{ model.max_forecast_hours }} hours</p>
+                    <p><strong>Update Frequency:</strong> Every {{ model.update_frequency_hours }} hour(s)</p>
+                    <p class="model-desc">
+                        {% if model_id == 'hrrr' %}
+                        High-resolution (3km) model updating hourly. Best for short-term (0-18h) severe weather, wind, and precipitation details.
+                        {% elif model_id == 'nam_nest' %}
+                        High-resolution (3km) North American model. Good for 1-2 day convective outlooks.
+                        {% elif model_id == 'gfs' %}
+                        Global model (25km) for medium-range (up to 16 days). Good for general trends and large systems.
+                        {% elif 'ecmwf' in model_id %}
+                        European model (High Res or Ensemble). Known for high accuracy in medium range.
+                        {% else %}
+                        Regional forecast model.
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="variables-section">
+        <h3>Weather Variables</h3>
+        <p>The following metrics are available for visualization and tabular data.</p>
+        
+        {% for category_id, category in categories.items() %}
+        <div class="variable-category">
+            <h4 class="category-title">{{ category.name }}</h4>
+            <div class="variable-list">
+                {% for var_id in category.variables %}
+                {% set var = variables[var_id] %}
+                <div class="variable-item">
+                    <div class="var-header">
+                        <span class="var-name">{{ var.display_name }}</span>
+                        <span class="var-unit">{{ var.units }}</span>
+                    </div>
+                    <div class="var-meta">
+                        <code>{{ var_id }}</code>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </section>
+</div>
+
+<style>
+    .explainer-header {
+        margin-bottom: 2rem;
+    }
+    .subtitle {
+        color: #666;
+        font-size: 1.1rem;
+    }
+    
+    .models-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 3rem;
+    }
+    
+    .model-card {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    .model-badge {
+        background: #eef2f6;
+        color: #4a90d9;
+        font-size: 0.8rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-left: 8px;
+        font-family: monospace;
+    }
+    
+    .model-details p {
+        margin: 0.5rem 0;
+        color: #444;
+    }
+    
+    .model-desc {
+        margin-top: 1rem !important;
+        font-size: 0.95rem;
+        line-height: 1.4;
+        color: #666 !important;
+    }
+    
+    .variable-category {
+        margin-bottom: 2rem;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 1.5rem;
+    }
+    
+    .category-title {
+        margin-top: 0;
+        margin-bottom: 1rem;
+        color: #2c3e50;
+        border-bottom: 2px solid #e0e0e0;
+        padding-bottom: 0.5rem;
+    }
+    
+    .variable-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+    }
+    
+    .variable-item {
+        background: #fff;
+        padding: 0.75rem;
+        border-radius: 6px;
+        border: 1px solid #eee;
+    }
+    
+    .var-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.25rem;
+    }
+    
+    .var-name {
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    
+    .var-unit {
+        color: #888;
+        font-size: 0.85rem;
+    }
+    
+    .var-meta code {
+        background: #f0f0f0;
+        padding: 2px 4px;
+        border-radius: 3px;
+        color: #666;
+        font-size: 0.8rem;
+    }
+</style>
+{% endblock %}

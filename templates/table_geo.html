@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block title %}Nearby Forecast Table{% endblock %}
+
+{% block extra_head %}
+<style>
+  .panel { background: #f8f9fa; padding: 12px 16px; border-radius: 6px; margin: 12px 0; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  select, input { padding:6px 8px; }
+  table { border-collapse: collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid #ddd; padding:6px 8px; text-align:right; white-space:nowrap; }
+  th { background:#4a90d9; color:#fff; position:sticky; top:0; }
+  td:first-child, td:nth-child(2) { text-align:left; font-weight:500; }
+  .muted { color:#666; }
+  .error { color:#b00020; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div id="status" class="muted">Requesting browser location…</div>
+  <div class="controls">
+    <label>Model
+      <select id="modelSelect"></select>
+    </label>
+    <label>Run
+      <select id="runSelect"></select>
+    </label>
+    <label>Stat
+      <select id="statSelect">
+        <option value="mean">mean</option>
+        <option value="min">min</option>
+        <option value="max">max</option>
+      </select>
+    </label>
+    <button id="refreshBtn">Refresh</button>
+    <span id="coords" class="muted"></span>
+    <a href="/explainer" style="margin-left:auto; font-size:0.9em; text-decoration:none; color:#4a90d9;">Explain Data &rarr;</a>
+  </div>
+  <div class="controls">
+    <label>Lat <input id="latInput" size="8" placeholder="40.0"></label>
+    <label>Lon <input id="lonInput" size="9" placeholder="-75.0"></label>
+    <button id="useInputsBtn">Use Lat/Lon</button>
+    <button id="approxBtn">Use Approximate Location</button>
+  </div>
+</div>
+
+<div id="tableContainer"></div>
+<div class="panel">
+  <details open>
+    <summary>Debug</summary>
+    <div style="margin-bottom:8px; display:flex; gap:8px; align-items:center;">
+      <button id="copyDebugBtn">Copy Debug JSON</button>
+      <span class="muted">Use this to share the exact diagnostic payload.</span>
+    </div>
+    <pre id="debugInfo" style="max-height:300px; overflow:auto; background:#fff; padding:10px; border:1px solid #ddd;"></pre>
+  </details>
+</div>
+
+<script>
+async function fetchJSON(url) {
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function loadModelsAll() {
+  const data = await fetchJSON('/api/models');
+  const sel = document.getElementById('modelSelect');
+  sel.innerHTML = '';
+  for (const [id, meta] of Object.entries(data.models)) {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = meta.name || id;
+    sel.appendChild(opt);
+  }
+}
+
+async function loadTileModels(region, resolution) {
+  const data = await fetchJSON(`/api/tile_models?region=${encodeURIComponent(region)}&resolution=${encodeURIComponent(resolution)}`);
+  const sel = document.getElementById('modelSelect');
+  const current = sel.value;
+  sel.innerHTML = '';
+  const modelIds = Object.keys(data);
+  if (modelIds.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = 'No models with tiles';
+    sel.appendChild(opt);
+    return null;
+  }
+  // Prefer HRRR if available
+  const preferred = modelIds.includes('hrrr') ? 'hrrr' : modelIds[0];
+  for (const id of modelIds) {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = id.toUpperCase();
+    sel.appendChild(opt);
+  }
+  sel.value = modelIds.includes(current) ? current : preferred;
+  return sel.value;
+}
+
+async function loadRuns(model, region, resolution) {
+  const data = await fetchJSON(`/api/tile_runs/${encodeURIComponent(model)}?region=${encodeURIComponent(region)}&resolution=${encodeURIComponent(resolution)}`);
+  const sel = document.getElementById('runSelect');
+  sel.innerHTML = '';
+  for (const r of data.runs) {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    sel.appendChild(opt);
+  }
+  if (!sel.value && data.runs.length) sel.value = data.runs[0];
+}
+
+function renderTable(rows, variables) {
+  if (!rows || !rows.length) return '<p>No data.</p>';
+  const cols = ['hour', 'valid_time', ...variables];
+  let html = '<div class="panel muted">Columns ordered by config; values are per-cell stats.</div>';
+  html += '<div style="overflow-x:auto">';
+  html += '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+  for (const r of rows) {
+    html += '<tr>' + cols.map(c => `<td>${(r[c] ?? '-')}</td>`).join('') + '</tr>';
+  }
+  html += '</tbody></table></div>';
+  return html;
+}
+
+async function refresh(lat, lon, region, resolution) {
+  const status = document.getElementById('status');
+  const table = document.getElementById('tableContainer');
+  const debug = document.getElementById('debugInfo');
+  const model = document.getElementById('modelSelect').value;
+  const run = document.getElementById('runSelect').value;
+  const stat = document.getElementById('statSelect').value;
+  status.textContent = 'Loading data…';
+  try {
+    // Get variables config to define order/units
+    const varsData = await fetchJSON('/api/variables');
+    const ordered = Object.keys(varsData.variables);
+    // Let server infer region; omit resolution as well
+    const data = await fetchJSON(`/api/table/bylatlon?lat=${lat}&lon=${lon}&model=${encodeURIComponent(model)}&run=${encodeURIComponent(run)}&stat=${encodeURIComponent(stat)}`);
+    table.innerHTML = renderTable(data.rows, ordered);
+    status.textContent = `Loaded ${data.rows.length} rows from ${model} ${run} (${stat})`;
+    // Fetch tile run detail for deeper visibility
+    try {
+      const detail = await fetchJSON(`/api/tile_run_detail/${encodeURIComponent(model)}/${encodeURIComponent(data.metadata.run_id)}?region=${encodeURIComponent(data.metadata.region)}&resolution=${encodeURIComponent(data.metadata.resolution_deg)}`);
+      const runs = await fetchJSON(`/api/tile_runs/${encodeURIComponent(model)}?region=${encodeURIComponent(data.metadata.region)}&resolution=${encodeURIComponent(data.metadata.resolution_deg)}`);
+      debug.textContent = JSON.stringify({
+        input: { lat, lon, model, run, stat, regionInferred: data.metadata.region },
+        table_meta: data.metadata,
+        diagnostics: data.diagnostics,
+        tile_runs: runs,
+        tile_run_detail: detail,
+      }, null, 2);
+    } catch (e) {
+      debug.textContent = JSON.stringify({ error: String(e), table_meta: data.metadata, diagnostics: data.diagnostics }, null, 2);
+    }
+  } catch (e) {
+    status.innerHTML = `<span class="error">${e}</span>`;
+    debug.textContent = String(e);
+  }
+}
+
+async function init() {
+  const status = document.getElementById('status');
+  const coordsEl = document.getElementById('coords');
+  await loadModelsAll();
+  const regions = await fetchJSON('/api/regions');
+
+  function inferRegion(lat, lon) {
+    for (const [id, r] of Object.entries(regions)) {
+      if (lat >= r.lat_min && lat <= r.lat_max && lon >= r.lon_min && lon <= r.lon_max) return { id, resolution: r.default_resolution_deg };
+    }
+    // default to first region if none match
+    const first = Object.entries(regions)[0];
+    return first ? { id: first[0], resolution: first[1].default_resolution_deg } : { id: 'ne', resolution: 0.1 };
+  }
+
+  async function setPosition(lat, lon) {
+    window._lastPos = { lat, lon };
+    document.getElementById('coords').textContent = `lat=${lat}, lon=${lon}`;
+    const r = inferRegion(parseFloat(lat), parseFloat(lon));
+    const modelSelected = await loadTileModels(r.id, r.resolution);
+    if (!modelSelected) {
+      document.getElementById('status').textContent = 'No models have tiles for this region.';
+      return;
+    }
+    await loadRuns(modelSelected, r.id, r.resolution);
+    await refresh(lat, lon, r.id, r.resolution);
+  }
+
+  document.getElementById('refreshBtn').onclick = async () => {
+    if (window._lastPos) {
+      await refresh(window._lastPos.lat, window._lastPos.lon, region, resolution);
+    }
+  };
+  document.getElementById('modelSelect').onchange = async () => {
+    if (!window._lastPos) return;
+    const r = inferRegion(parseFloat(window._lastPos.lat), parseFloat(window._lastPos.lon));
+    await loadRuns(document.getElementById('modelSelect').value, r.id, r.resolution);
+    await refresh(window._lastPos.lat, window._lastPos.lon, r.id, r.resolution);
+  };
+  document.getElementById('runSelect').onchange = async () => {
+    if (!window._lastPos) return;
+    const r = inferRegion(parseFloat(window._lastPos.lat), parseFloat(window._lastPos.lon));
+    await refresh(window._lastPos.lat, window._lastPos.lon, r.id, r.resolution);
+  };
+
+  if (!navigator.geolocation) {
+    status.innerHTML = '<span class="error">Geolocation not supported. Enter lat/lon manually.</span>';
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const lat = pos.coords.latitude.toFixed(4);
+    const lon = pos.coords.longitude.toFixed(4);
+    await setPosition(lat, lon);
+  }, async (err) => {
+    status.innerHTML = `<span class=\"error\">Geolocation error: ${err.message}</span>`;
+    // Try approximate location via IP-based services client-side
+    try {
+      const providers = [
+        async () => fetchJSON('https://ipapi.co/json/'),
+        async () => fetchJSON('https://ipwho.is/'),
+      ];
+      for (const p of providers) {
+        try {
+          const d = await p();
+          const lat = (d.latitude || d.lat).toFixed(4);
+          const lon = (d.longitude || d.lon).toFixed(4);
+          await setPosition(lat, lon);
+          status.textContent = 'Approximate location used.';
+          return;
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 });
+
+  document.getElementById('useInputsBtn').onclick = async () => {
+    const lat = document.getElementById('latInput').value || '40.0000';
+    const lon = document.getElementById('lonInput').value || '-75.0000';
+    await setPosition(lat, lon);
+  };
+  document.getElementById('approxBtn').onclick = async () => {
+    const status = document.getElementById('status');
+    status.textContent = 'Resolving approximate location…';
+    try {
+      const d = await fetchJSON('https://ipapi.co/json/');
+      const lat = d.latitude.toFixed(4);
+      const lon = d.longitude.toFixed(4);
+      await setPosition(lat, lon);
+      status.textContent = 'Approximate location used.';
+    } catch (e) {
+      status.innerHTML = '<span class="error">Unable to resolve approximate location.</span>';
+    }
+  };
+
+  document.getElementById('copyDebugBtn').onclick = async () => {
+    const txt = document.getElementById('debugInfo').textContent || '';
+    try {
+      await navigator.clipboard.writeText(txt);
+      document.getElementById('status').textContent = 'Debug JSON copied to clipboard.';
+    } catch (e) {
+      document.getElementById('status').textContent = 'Copy failed.';
+    }
+  };
+}
+
+init();
+</script>
+{% endblock %}

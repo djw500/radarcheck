@@ -21,12 +21,24 @@ except ImportError:
     Swagger = None
 from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
 import pytz
-import xarray as xr
 import numpy as np
 
 from config import repomap
 from alerts import get_alerts_for_location
-from plotting import select_variable_from_dataset, get_colormap
+try:
+    from plotting import select_variable_from_dataset, get_colormap  # type: ignore
+    PLOTTING_AVAILABLE = True
+except Exception:
+    PLOTTING_AVAILABLE = False
+    def select_variable_from_dataset(*args, **kwargs):  # type: ignore
+        raise RuntimeError("Plotting stack not available; install optional deps to enable.")
+    def get_colormap(variable_config):  # type: ignore
+        try:
+            import matplotlib.pyplot as plt  # local import to avoid hard dep at startup
+            return plt.get_cmap(variable_config.get("colormap", "viridis"))
+        except Exception:
+            # Fallback: no matplotlib available
+            raise RuntimeError("Matplotlib not available to build colormap.")
 from summary import summarize_run
 from utils import convert_units, format_forecast_hour
 from forecast_table import (
@@ -40,6 +52,8 @@ from tiles import (
     load_timeseries_for_point,
     load_grid_slice,
     list_tile_runs,
+    list_tile_variables,
+    list_tile_models,
 )
 
 # Set up logging
@@ -587,6 +601,10 @@ def extract_point_value(
     Handles both 1D indexed coordinates and 2D coordinate arrays (e.g., Lambert
     conformal projection used by HRRR).
     """
+    try:
+        import xarray as xr  # defer heavy import until needed
+    except Exception as e:
+        raise RuntimeError("xarray/cfgrib not available; install scientific deps to use GRIB extraction") from e
     ds = xr.open_dataset(grib_path, engine="cfgrib")
     try:
         data = select_variable_from_dataset(ds, variable_config)
@@ -686,22 +704,61 @@ def api_table_bylatlon():
     except (TypeError, ValueError):
         return jsonify({"error": "lat and lon are required"}), 400
     model_id = request.args.get("model", repomap["DEFAULT_MODEL"])
-    region_id = request.args.get("region", "ne")
-    run_id = request.args.get("run")
+    region_id = request.args.get("region")
+    run_id = request.args.get("run") or None
     stat = request.args.get("stat", "mean")
     regions = repomap.get("TILING_REGIONS", {})
+    if not region_id:
+        inferred = infer_region_for_latlon(lat, lon)
+        if not inferred:
+            return jsonify({"error": "Point outside configured regions"}), 400
+        region_id = inferred
     if region_id not in regions:
         return jsonify({"error": "Invalid region"}), 400
     res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+    candidate_runs = []
     if run_id is None:
-        runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
-        if not runs:
-            return jsonify({"error": "No tile runs available"}), 404
-        run_id = runs[0]
+        candidate_runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
+        if not candidate_runs:
+            return jsonify({
+                "error": "No tile runs available",
+                "metadata": {"region": region_id, "model_id": model_id, "lat": lat, "lon": lon, "resolution_deg": res},
+                "diagnostics": {
+                    "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg"),
+                    "models_with_runs": list_tile_models(repomap["TILES_DIR"], region_id, res),
+                }
+            }), 404
+    else:
+        candidate_runs = [run_id]
 
-    variables = repomap["WEATHER_VARIABLES"].keys()
+    chosen_run = None
+    chosen_vars_info = {}
+    for cand in candidate_runs:
+        info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, cand)
+        if info:
+            chosen_run = cand
+            chosen_vars_info = info
+            break
+    if not chosen_run:
+        return jsonify({
+            "error": "No variables present in available tile runs",
+            "metadata": {"region": region_id, "model_id": model_id, "lat": lat, "lon": lon, "resolution_deg": res},
+            "candidate_runs": candidate_runs,
+            "diagnostics": {
+                "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg"),
+                "models_with_runs": list_tile_models(repomap["TILES_DIR"], region_id, res),
+                "model_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id),
+            }
+        }), 404
+    run_id = chosen_run
+
+    # Limit to variables present in tiles for this run
+    variables = list(chosen_vars_info.keys()) or list(repomap["WEATHER_VARIABLES"].keys())
     rows_by_hour: dict[int, dict[str, Any]] = {}
     first_hours = None
+    variables_considered = list(repomap["WEATHER_VARIABLES"].keys())
+    variables_found: list[str] = []
+    tile_cell_info = None
     for var_id in variables:
         try:
             hours, values = load_timeseries_for_point(
@@ -709,18 +766,69 @@ def api_table_bylatlon():
             )
         except FileNotFoundError:
             continue
+        # Compute and record tile cell lat/lon center for first found variable
+        if tile_cell_info is None:
+            # read meta to compute cell center
+            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+            meta_path = os.path.join(
+                repomap["TILES_DIR"], region_id, res_dir, model_id, run_id, f"{var_id}.meta.json"
+            )
+            try:
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+                lat_min_m = float(meta.get('lat_min'))
+                lon_min_index = float(meta.get('index_lon_min', meta.get('lon_min')))
+                lon_0_360 = bool(meta.get('lon_0_360', False))
+                res_deg_m = float(meta.get('resolution_deg', res))
+                # recompute iy/ix consistent with tiles
+                iy = int((lat - lat_min_m) // res_deg_m)
+                target_lon = lon + 360.0 if (lon_0_360 and lon < 0) else lon
+                ix = int((target_lon - lon_min_index) // res_deg_m)
+                # cell center
+                lat_center = lat_min_m + (iy + 0.5) * res_deg_m
+                lon_center = (lon_min_index + (ix + 0.5) * res_deg_m)
+                if lon_0_360 and lon_center > 180:
+                    lon_center = lon_center - 360.0
+                tile_cell_info = {
+                    "iy": iy,
+                    "ix": ix,
+                    "lat_center": lat_center,
+                    "lon_center": lon_center,
+                    "lon_0_360": lon_0_360,
+                }
+            except Exception:
+                tile_cell_info = None
         if first_hours is None:
             first_hours = hours
         for hour, val in zip(hours.tolist(), values.tolist()):
             if hour not in rows_by_hour:
                 rows_by_hour[hour] = {"hour": int(hour)}
             rows_by_hour[hour][var_id] = None if (val is None or (isinstance(val, float) and np.isnan(val))) else val
+        variables_found.append(var_id)
 
     if not rows_by_hour:
-        return jsonify({"error": "No variables available at this point"}), 404
+        return jsonify({
+            "error": "No variables available at this point",
+            "metadata": {
+                "region": region_id,
+                "model_id": model_id,
+                "run_id": run_id,
+                "stat": stat,
+                "resolution_deg": res,
+                "lat": lat,
+                "lon": lon,
+                "tiles_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id, run_id),
+            },
+            "diagnostics": {
+                "candidate_runs": candidate_runs,
+                "variables_present_in_run": list(chosen_vars_info.keys()),
+            },
+        }), 404
 
     hours_sorted = sorted(rows_by_hour.keys())
     rows = [rows_by_hour[h] for h in hours_sorted]
+    missing_variables = [v for v in variables_considered if v not in variables_found]
+    tiles_dir = os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id, run_id) if run_id else None
     return jsonify({
         "metadata": {
             "region": region_id,
@@ -730,8 +838,64 @@ def api_table_bylatlon():
             "resolution_deg": res,
             "lat": lat,
             "lon": lon,
+            "tiles_dir": tiles_dir,
+        },
+        "diagnostics": {
+            "variables_considered": variables_considered,
+            "variables_found": variables_found,
+            "missing_variables": missing_variables,
+            "hours_returned": hours_sorted,
+            "variables_present_in_run": list(chosen_vars_info.keys()),
+            "models_with_runs": list_tile_models(repomap["TILES_DIR"], region_id, res),
+            "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg"),
+            "model_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id),
+            "tile_cell": tile_cell_info,
         },
         "rows": rows,
+    })
+
+@app.route("/table/geo")
+@require_api_key
+def table_geo_view():
+    """Landing page that uses browser geolocation to render a table from tiles."""
+    return render_template("table_geo.html")
+
+@app.route("/explainer")
+@require_api_key
+def explainer_view():
+    """Page explaining available models and variables."""
+    # Get all configured locations to populate the nav
+    locations = get_available_locations()
+    
+    # Get model info
+    models = repomap.get("MODELS", {})
+    
+    # Get variable info categorized
+    var_data = get_variable_categories()
+    
+    return render_template(
+        "explainer.html",
+        models=models,
+        categories=var_data["categories"],
+        variables=var_data["variables"],
+        locations=locations
+    )
+
+@app.route("/api/tile_run_detail/<model_id>/<run_id>")
+@require_api_key
+def api_tile_run_detail(model_id: str, run_id: str):
+    region_id = request.args.get("region", "ne")
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+    vars_info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, run_id)
+    return jsonify({
+        "region": region_id,
+        "resolution_deg": res,
+        "model_id": model_id,
+        "run_id": run_id,
+        "variables": vars_info,
     })
 
 @app.route("/frame/tiles/<region_id>/<model_id>/<run_id>/<variable_id>/<int:hour>")
@@ -1393,6 +1557,25 @@ def api_models():
 def api_layers():
     """API endpoint to get available map overlay layers."""
     return jsonify(get_layer_payload())
+
+
+@app.route("/api/regions")
+@require_api_key
+def api_regions():
+    """Return configured tiling regions and defaults."""
+    return jsonify(repomap.get("TILING_REGIONS", {}))
+
+
+@app.route("/api/tile_models")
+@require_api_key
+def api_tile_models():
+    """Return models that have tile runs under a region/resolution."""
+    region_id = request.args.get("region", "ne")
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+    return jsonify(list_tile_models(repomap["TILES_DIR"], region_id, res))
 
 
 @app.route("/api/summary/<location_id>")
