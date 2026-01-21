@@ -340,7 +340,7 @@ repomap = {
     "FILELOCK_TIMEOUT_SECONDS": 30,
 
     # Parallel download settings
-    "PARALLEL_DOWNLOAD_WORKERS": 2,
+    "PARALLEL_DOWNLOAD_WORKERS": 1,
 
     # Map tile generation settings
     "GENERATE_STATIC_IMAGES": True,

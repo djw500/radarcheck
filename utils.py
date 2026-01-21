@@ -127,6 +127,8 @@ def convert_units(data: Any, conversion: Optional[str]) -> Any:
         return data * 39.3701
     if conversion == "m_to_mi":
         return data * 0.000621371
+    if conversion == "c_to_f":
+        return data * 9 / 5 + 32
     return data
 
 

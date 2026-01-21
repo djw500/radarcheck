@@ -11,6 +11,12 @@ from utils import download_file, format_forecast_hour
 import requests
 import xarray as xr
 from filelock import FileLock, Timeout
+import logging
+
+# Configure debug logging for requests to trace connections
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("urllib3").setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 def _build_variable_query(variable_config: dict[str, Any]) -> str:
@@ -142,6 +148,7 @@ def build_region_tiles(
     variables: Optional[List[str]] = None,
     resolution_deg: Optional[float] = None,
     max_hours: Optional[int] = None,
+    clean_gribs: bool = False,
 ) -> None:
     regions = repomap["TILING_REGIONS"]
     if region_id not in regions:
@@ -212,45 +219,63 @@ def build_region_tiles(
         if not grib_paths:
             continue
 
-        mins, maxs, means, hours, index_meta = build_tiles_for_variable(
-            grib_paths,
-            variable_config,
-            lat_min,
-            lat_max,
-            lon_min,
-            lon_max,
-            res_deg,
-        )
+        try:
+            mins, maxs, means, hours, index_meta = build_tiles_for_variable(
+                grib_paths,
+                variable_config,
+                lat_min,
+                lat_max,
+                lon_min,
+                lon_max,
+                res_deg,
+            )
 
-        meta = {
-            "region_id": region_id,
-            "model_id": model_id,
-            "run_id": run_info["run_id"],
-            "variable_id": variable_id,
-            "lat_min": lat_min,
-            "lat_max": lat_max,
-            "lon_min": lon_min,
-            "lon_max": lon_max,
-            "resolution_deg": res_deg,
-            "units": variable_config.get("units"),
-            "lon_0_360": bool(index_meta.get("lon_0_360", False)),
-            "index_lon_min": float(index_meta.get("index_lon_min", lon_min)),
-        }
+            meta = {
+                "region_id": region_id,
+                "model_id": model_id,
+                "run_id": run_info["run_id"],
+                "variable_id": variable_id,
+                "lat_min": lat_min,
+                "lat_max": lat_max,
+                "lon_min": lon_min,
+                "lon_max": lon_max,
+                "resolution_deg": res_deg,
+                "units": variable_config.get("units"),
+                "lon_0_360": bool(index_meta.get("lon_0_360", False)),
+                "index_lon_min": float(index_meta.get("index_lon_min", lon_min)),
+            }
 
-        out_path = save_tiles_npz(
-            repomap["TILES_DIR"],
-            region_id,
-            res_deg,
-            model_id,
-            run_info["run_id"],
-            variable_id,
-            mins,
-            maxs,
-            means,
-            hours,
-            meta,
-        )
-        print(f"Saved {variable_id} tiles to {out_path}")
+            out_path = save_tiles_npz(
+                repomap["TILES_DIR"],
+                region_id,
+                res_deg,
+                model_id,
+                run_info["run_id"],
+                variable_id,
+                mins,
+                maxs,
+                means,
+                hours,
+                meta,
+            )
+            print(f"Saved {variable_id} tiles to {out_path}")
+        except Exception as e:
+            print(f"Error building tiles for {variable_id} in {run_info['run_id']}: {e}")
+            continue
+
+        if clean_gribs:
+            for path in grib_paths.values():
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except OSError as e:
+                    print(f"Warning: Failed to clean GRIB {path}: {e}")
+            # Try to clean up empty variable directory if possible
+            try:
+                var_dir = os.path.dirname(list(grib_paths.values())[0])
+                os.rmdir(var_dir)
+            except OSError:
+                pass
 
 
 def main() -> None:
@@ -261,6 +286,7 @@ def main() -> None:
     parser.add_argument("--variables", nargs="*", help="Variable IDs (default: all)")
     parser.add_argument("--resolution", type=float, default=None, help="Grid resolution in degrees (default per region)")
     parser.add_argument("--max-hours", type=int, default=None, help="Optional cap on hours")
+    parser.add_argument("--clean-gribs", action="store_true", help="Delete GRIB files after processing to save space")
     args = parser.parse_args()
 
     os.makedirs(repomap["TILES_DIR"], exist_ok=True)
@@ -271,6 +297,7 @@ def main() -> None:
         variables=args.variables,
         resolution_deg=args.resolution,
         max_hours=args.max_hours,
+        clean_gribs=args.clean_gribs,
     )
 
 

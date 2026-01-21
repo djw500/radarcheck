@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 import types
+import sys
 
 import pytest
 
@@ -52,6 +53,85 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
         def close(self):
             pass
 
+    # Stub heavy modules to avoid importing optional plotting deps
+    class _Dummy:
+        def __getattr__(self, name):
+            return _Dummy()
+        def __call__(self, *a, **k):
+            return None
+
+    class _DummyColors:
+        class LinearSegmentedColormap:  # placeholder
+            @staticmethod
+            def from_list(name, colors):
+                return None
+
+    # Create proper dummy modules
+    mpl = types.ModuleType('matplotlib')
+    mpl.use = lambda *a, **k: None
+    mpl.colors = _DummyColors
+    sys.modules['matplotlib'] = mpl
+    mpl_colors = types.ModuleType('matplotlib.colors')
+    mpl_colors.LinearSegmentedColormap = _DummyColors.LinearSegmentedColormap
+    sys.modules['matplotlib.colors'] = mpl_colors
+    sys.modules['matplotlib.pyplot'] = types.ModuleType('matplotlib.pyplot')
+
+    cartopy = types.ModuleType('cartopy')
+    cartopy_crs = types.ModuleType('cartopy.crs')
+    cartopy_crs.PlateCarree = object
+    cartopy.crs = cartopy_crs
+    sys.modules['cartopy'] = cartopy
+    sys.modules['cartopy.crs'] = cartopy_crs
+
+    geopandas = types.ModuleType('geopandas')
+    geopandas.read_file = lambda *a, **k: None
+    sys.modules['geopandas'] = geopandas
+
+    shapely = types.ModuleType('shapely')
+    shapely_geometry = types.ModuleType('shapely.geometry')
+    shapely_geometry.box = lambda *a, **k: None
+    shapely.geometry = shapely_geometry
+    sys.modules['shapely'] = shapely
+    sys.modules['shapely.geometry'] = shapely_geometry
+
+    pil = types.ModuleType('PIL')
+    pil_image = types.ModuleType('PIL.Image')
+    sys.modules['PIL'] = pil
+    sys.modules['PIL.Image'] = pil_image
+
+    # requests used in utils
+    requests_mod = types.ModuleType('requests')
+    requests_mod.head = lambda *a, **k: types.SimpleNamespace(status_code=200)
+    requests_mod.get = lambda *a, **k: types.SimpleNamespace(status_code=200, content=b"", headers={})
+    sys.modules['requests'] = requests_mod
+
+    # filelock used across builder
+    filelock_mod = types.ModuleType('filelock')
+    class DummyLock:
+        def __init__(self, *a, **k):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+    filelock_mod.FileLock = DummyLock
+    class DummyTimeout(Exception):
+        pass
+    filelock_mod.Timeout = DummyTimeout
+    sys.modules['filelock'] = filelock_mod
+
+    # psutil used by cache_builder
+    psutil_mod = types.ModuleType('psutil')
+    class DummyProc:
+        def __init__(self, pid):
+            pass
+        class _Mem:
+            rss = 0
+        def memory_info(self):
+            return types.SimpleNamespace(rss=0)
+    psutil_mod.Process = DummyProc
+    sys.modules['psutil'] = psutil_mod
+
     # Mock xr.open_dataset used inside tiles.build_tiles_for_variable
     import tiles as tiles_module
 
@@ -90,7 +170,9 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
     )
 
     # Verify outputs
-    out_dir = tmp_path / "tiles" / "ne" / "0.1deg" / "hrrr" / "run_20240101_00"
+    # Match the writer's resolution directory (formatted with 3 decimals)
+    res_dir = f"{0.1:.3f}deg"
+    out_dir = tmp_path / "tiles" / "ne" / res_dir / "hrrr" / "run_20240101_00"
     npz_path = out_dir / "refc.npz"
     meta_path = out_dir / "refc.meta.json"
     assert npz_path.exists(), "NPZ tiles not written"
@@ -109,4 +191,3 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
         meta = json.load(f)
     assert meta["resolution_deg"] == 0.1
     assert meta["region_id"] == "ne"
-
