@@ -49,6 +49,14 @@ WEATHER_VARIABLES = {
         "vmax": 6,
         "category": "precipitation",
         "conversion": "kg_m2_to_in",
+        # Common GRIB short names across centers (e.g., ECMWF uses 'tp')
+        "source_short_names": ["tp", "apcp"],
+        # Prefer conversion based on source units when available
+        # e.g., ECMWF 'tp' has units 'm' (meters of water)
+        "unit_conversions_by_units": {
+            "m": "m_to_in",
+            "kg m-2": "kg_m2_to_in",
+        },
         "is_accumulation": True,
     },
     "prate": {
@@ -235,6 +243,24 @@ MODELS = {
         "dir_pattern": "%2Fgfs.{date_str}%2F{init_hour}%2Fatmos",
         "file_pattern": "gfs.t{init_hour}z.pgrb2.0p25.f{forecast_hour}",
         "availability_check_var": "var_TMP",
+        "forecast_hour_digits": 3,
+    },
+    # ECMWF integrations are scaffolded for CDS; downloads require cdsapi credentials.
+    # These entries are not used by NOMADS and will be activated when CDS fetch is configured.
+    "ecmwf_hres": {
+        "name": "ECMWF HRES",
+        "max_forecast_hours": 240,
+        "update_frequency_hours": 12,
+        "source": "cds",
+        "dataset": "ecmwf-high-resolution-forecast",
+        "forecast_hour_digits": 3,
+    },
+    "ecmwf_eps": {
+        "name": "ECMWF EPS",
+        "max_forecast_hours": 360,
+        "update_frequency_hours": 12,
+        "source": "cds",
+        "dataset": "ecmwf-ensemble-forecast",
         "forecast_hour_digits": 3,
     },
 }

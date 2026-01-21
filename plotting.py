@@ -177,7 +177,16 @@ def create_plot(
 
         # --- Step 2: Determine which variable to plot ---
         data_to_plot = select_variable_from_dataset(ds, variable_config)
+        # Choose unit conversion dynamically if source units indicate a better mapping
         conversion = variable_config.get("conversion")
+        by_units = variable_config.get("unit_conversions_by_units", {})
+        src_units = None
+        try:
+            src_units = data_to_plot.attrs.get("units")
+        except Exception:
+            src_units = None
+        if src_units and src_units in by_units:
+            conversion = by_units[src_units]
         if conversion:
             data_to_plot = convert_units(data_to_plot, conversion)
 

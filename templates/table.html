@@ -108,6 +108,14 @@
 
 <div class="selectors">
     <div>
+        <label for="locationSelect">Location:</label>
+        <select id="locationSelect" onchange="updateTable()">
+            {% for loc in locations %}
+            <option value="{{ loc.id }}" {% if loc.id == location_id %}selected{% endif %}>{{ loc.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
         <label for="modelSelect">Model:</label>
         <select id="modelSelect" onchange="updateTable()">
             {% for mid, model in models.items() %}
@@ -171,9 +179,10 @@
 {% block scripts %}
 <script>
 function updateTable() {
+    const loc = document.getElementById('locationSelect').value;
     const model = document.getElementById('modelSelect').value;
     const run = document.getElementById('runSelect').value;
-    window.location.href = `/table/{{ location_id }}/${model}/${run}`;
+    window.location.href = `/table/${loc}/${model}/${run}`;
 }
 </script>
 {% endblock %}

@@ -183,22 +183,43 @@ def get_available_locations(model_id: Optional[str] = None) -> list[dict[str, An
             if os.path.exists(run_dir):
                 metadata = read_metadata(run_dir)
 
-                # Check if forecast frames exist
-                if model_id in repomap["MODELS"]:
-                    default_variable = repomap["DEFAULT_VARIABLE"]
-                    frame_dir = os.path.join(run_dir, default_variable)
-                else:
-                    frame_dir = run_dir
+                # Check if any variable has data (frames, valid_times, or center_values)
+                has_any_data = False
+                try:
+                    for var_id in repomap["WEATHER_VARIABLES"].keys():
+                        vdir = os.path.join(run_dir, var_id)
+                        if not os.path.isdir(vdir):
+                            continue
+                        # any valid PNG frame
+                        for name in os.listdir(vdir):
+                            if name.startswith("frame_") and name.endswith(".png"):
+                                fpath = os.path.join(vdir, name)
+                                if os.path.getsize(fpath) >= repomap["MIN_PNG_FILE_SIZE_BYTES"]:
+                                    has_any_data = True
+                                    break
+                        if has_any_data:
+                            break
+                        # valid_times.txt with content
+                        vt = os.path.join(vdir, "valid_times.txt")
+                        if os.path.exists(vt) and os.path.getsize(vt) > 0:
+                            has_any_data = True
+                            break
+                        # center_values.json with any values
+                        cv = os.path.join(vdir, "center_values.json")
+                        if os.path.exists(cv):
+                            try:
+                                with open(cv, "r") as f:
+                                    payload = json.load(f)
+                                vals = payload.get("values", [])
+                                if isinstance(vals, list) and len(vals) > 0:
+                                    has_any_data = True
+                                    break
+                            except Exception:
+                                pass
+                except Exception:
+                    has_any_data = False
 
-                max_hours = repomap["MODELS"].get(model_id, {}).get("max_forecast_hours", 24)
-                has_frames = any(
-                    os.path.exists(
-                        os.path.join(frame_dir, f"frame_{format_forecast_hour(hour, model_id)}.png")
-                    )
-                    for hour in range(1, max_hours + 1)
-                )
-                
-                if has_frames:
+                if has_any_data:
                     locations.append({
                         "id": location_id,
                         "name": location_config["name"],
@@ -430,6 +451,76 @@ def get_model_payload() -> dict[str, Any]:
         }
     }
 
+
+def get_available_models_for_location(location_id: str) -> dict[str, Any]:
+    """Return model metadata filtered to models that have runs for this location."""
+    all_models = get_model_payload()["models"]
+    available: dict[str, Any] = {}
+    for model_id in repomap["MODELS"].keys():
+        runs = get_location_runs(location_id, model_id)
+        if runs:
+            available[model_id] = all_models.get(model_id, {
+                "name": repomap["MODELS"][model_id]["name"],
+                "max_forecast_hours": repomap["MODELS"][model_id]["max_forecast_hours"],
+                "update_frequency_hours": repomap["MODELS"][model_id]["update_frequency_hours"],
+            })
+    return available
+
+def get_available_variables_for_run(location_id: str, model_id: str, run_id: str) -> list[str]:
+    """Detect which variables have data for a given run by inspecting cache."""
+    available: list[str] = []
+    run_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id, run_id)
+    if not os.path.isdir(run_dir):
+        legacy_dir = os.path.join(repomap["CACHE_DIR"], location_id, run_id)
+        if os.path.isdir(legacy_dir):
+            run_dir = legacy_dir
+        else:
+            return available
+
+    for var_id in repomap["WEATHER_VARIABLES"].keys():
+        vdir = os.path.join(run_dir, var_id)
+        if not os.path.isdir(vdir):
+            continue
+        # valid_times.txt with any lines
+        vt = os.path.join(vdir, "valid_times.txt")
+        has_valid_times = os.path.exists(vt) and os.path.getsize(vt) > 0
+        # center_values.json with any values
+        has_values = False
+        cv = os.path.join(vdir, "center_values.json")
+        if os.path.exists(cv):
+            try:
+                with open(cv, "r") as f:
+                    payload = json.load(f)
+                vals = payload.get("values", [])
+                has_values = isinstance(vals, list) and len(vals) > 0
+            except Exception:
+                has_values = False
+        # any frame PNG
+        has_frames = False
+        try:
+            for name in os.listdir(vdir):
+                if name.startswith("frame_") and name.endswith(".png"):
+                    fpath = os.path.join(vdir, name)
+                    if os.path.getsize(fpath) >= repomap["MIN_PNG_FILE_SIZE_BYTES"]:
+                        has_frames = True
+                        break
+        except Exception:
+            pass
+        if has_valid_times or has_values or has_frames:
+            available.append(var_id)
+    return sorted(available)
+
+def get_variable_categories_filtered(allowed_vars: list[str]) -> dict[str, Any]:
+    """Build variable categories limited to allowed variable IDs."""
+    base = get_variable_categories()
+    allowed = set(allowed_vars)
+    categories = {}
+    for cat_id, cat in base["categories"].items():
+        filtered = [vid for vid in cat.get("variables", []) if vid in allowed]
+        if filtered:
+            categories[cat_id] = {"name": cat.get("name", cat_id), "variables": filtered}
+    variables_payload = {vid: base["variables"][vid] for vid in allowed if vid in base["variables"]}
+    return {"categories": categories, "variables": variables_payload}
 
 def get_layer_payload() -> dict[str, Any]:
     layers = repomap.get("MAP_LAYERS", {})
@@ -747,13 +838,16 @@ def location_view(location_id: str):
     if location_id not in repomap["LOCATIONS"]:
         return handle_error(f"Location '{location_id}' not found", 404)
 
-    model_id = request.args.get('model', repomap["DEFAULT_MODEL"])
-    if model_id not in repomap["MODELS"]:
-        return handle_error(f"Model '{model_id}' not found", 404)
+    requested_model = request.args.get('model', repomap["DEFAULT_MODEL"])
+    # Filter models to those available for this location
+    models_available = get_available_models_for_location(location_id)
+    if not models_available:
+        return handle_error("Forecast data not available for this location", 404)
+    model_id = requested_model if requested_model in models_available else next(iter(models_available))
 
     variable_id = request.args.get('variable', repomap["DEFAULT_VARIABLE"])
     if variable_id not in repomap["WEATHER_VARIABLES"]:
-        return handle_error(f"Variable '{variable_id}' not found", 404)
+        variable_id = repomap["DEFAULT_VARIABLE"]
 
     # Get all runs for this location
     runs = get_location_runs(location_id, model_id)
@@ -789,7 +883,15 @@ def location_view(location_id: str):
             variable_id,
         )
     
-    # Get all available locations for the navigation
+    # Determine available variables for this run and filter categories
+    available_vars = get_available_variables_for_run(location_id, model_id, run_id)
+    # Ensure selected variable is valid; if not, pick the first available
+    if available_vars and variable_id not in available_vars:
+        variable_id = available_vars[0]
+        valid_times = get_run_valid_times(location_id, run_id, model_id, variable_id)
+    variables_filtered = get_variable_categories_filtered(available_vars) if available_vars else get_variable_categories()
+
+    # Get all available locations for the navigation (based on current model)
     locations = get_available_locations(model_id)
     
     return render_template(
@@ -801,8 +903,8 @@ def location_view(location_id: str):
         model_id=model_id,
         variable_id=variable_id,
         model_name=repomap["MODELS"][model_id]["name"],
-        models=get_model_payload()["models"],
-        variables=get_variable_categories(),
+        models=models_available,
+        variables=variables_filtered,
         runs=runs,
         locations=locations,
         all_valid_times=all_valid_times,
@@ -884,6 +986,7 @@ def table_view(location_id: str, model_id: Optional[str] = None, run_id: Optiona
     # Get all runs for navigation
     runs = get_location_runs(location_id, model_id)
     locations = get_available_locations(model_id)
+    models_available = get_available_models_for_location(location_id)
 
     # Determine output format
     output_format = request.args.get("format", "html")
@@ -908,7 +1011,7 @@ def table_view(location_id: str, model_id: Optional[str] = None, run_id: Optiona
         init_time=data["metadata"].get("init_time", "Unknown"),
         runs=runs,
         locations=locations,
-        models=get_model_payload()["models"],
+        models=models_available,
         variables=data.get("variables", {}),
         variable_order=[v for v in get_variable_display_order() if v in data.get("variables", {})],
         rows=rows,

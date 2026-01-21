@@ -17,6 +17,13 @@
 <h2>{{ location_name }}</h2>
 
 <div class="run-selector">
+    <strong>Select Location:</strong>
+    <select id="locationSelect" onchange="onLocationChange()">
+        {% for loc in locations %}
+        <option value="{{ loc.id }}" {% if loc.id == location_id %}selected{% endif %}>{{ loc.name }}</option>
+        {% endfor %}
+    </select>
+
     <strong>Select Model:</strong>
     <select id="modelSelect">
         {% for model_key, model in models.items() %}
@@ -221,6 +228,15 @@
         lon: {{ map_center_lon }},
         zoom: {{ map_zoom }}
     };
+
+    function onLocationChange() {
+        const loc = document.getElementById('locationSelect').value;
+        const model = document.getElementById('modelSelect').value;
+        const variable = document.getElementById('variableSelect').value;
+        const params = new URLSearchParams({ model, variable });
+        if (apiKey) params.set('api_key', apiKey);
+        window.location.href = `/location/${loc}?${params.toString()}`;
+    }
 </script>
 <script src="{{ url_for('static', filename='js/preferences.js') }}"></script>
 <script src="{{ url_for('static', filename='js/interactiveMap.js') }}"></script>

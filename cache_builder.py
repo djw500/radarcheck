@@ -22,6 +22,7 @@ import numpy as np
 import psutil
 
 from config import repomap
+from ecmwf import fetch_grib_cds  # scaffolding for ECMWF CDS
 from plotting import create_plot, select_variable_from_dataset
 from utils import (
     GribDownloadError,
@@ -178,6 +179,55 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
 
     model_config = repomap["MODELS"][model_id]
     variable_config = repomap["WEATHER_VARIABLES"][variable_id]
+
+    location_id = location_config['id']
+    run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id, run_id, variable_id)
+    os.makedirs(run_cache_dir, exist_ok=True)
+
+    filename = os.path.join(run_cache_dir, f"grib_{forecast_hour}.grib2")
+
+    # ECMWF CDS download path
+    if model_config.get("source") == "cds":
+        # Attempt CDS retrieval directly to temp file, then validate like NOMADS flow
+        temp_filename = f"{filename}.tmp"
+        try:
+            fetch_grib_cds(
+                model_id,
+                variable_id,
+                date_str,
+                init_hour,
+                forecast_hour,
+                location_config,
+                run_id,
+                temp_filename,
+            )
+        except Exception as exc:
+            logger.error(f"CDS fetch failed for {model_id} {variable_id} hour {forecast_hour}: {exc}")
+            raise GribDownloadError(str(exc)) from exc
+
+        # Verify file via xarray open and move into place
+        try:
+            if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
+                raise ValueError(f"Downloaded file is missing or too small: {temp_filename}")
+
+            ds = xr.open_dataset(temp_filename, engine="cfgrib")
+            data_to_plot = select_variable_from_dataset(ds, variable_config)
+            data_to_plot.load()
+            ds.close()
+            with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
+                os.replace(temp_filename, filename)
+                logger.info(f"Successfully downloaded and verified GRIB file (CDS): {filename}")
+                return filename
+        except Exception as exc:
+            logger.error(f"CDS verification failed: {exc}")
+            try:
+                if os.path.exists(temp_filename):
+                    os.remove(temp_filename)
+            except OSError:
+                pass
+            raise GribValidationError(str(exc)) from exc
+
+    # NOMADS download path
     variable_query = build_variable_query(variable_config)
     url = build_model_url(
         model_config,
@@ -187,12 +237,6 @@ def fetch_grib(*args: Any, **kwargs: Any) -> str:
         variable_query,
         location_config,
     )
-
-    location_id = location_config['id']
-    run_cache_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id, run_id, variable_id)
-    os.makedirs(run_cache_dir, exist_ok=True)
-
-    filename = os.path.join(run_cache_dir, f"grib_{forecast_hour}.grib2")
     
     def try_load_grib(filename: str) -> bool:
         """Try to load and validate a GRIB file"""
@@ -330,7 +374,16 @@ def extract_center_value(
     try:
         ds = xr.open_dataset(grib_path, engine="cfgrib")
         data = select_variable_from_dataset(ds, variable_config)
+        # Dynamic unit conversion based on source units when available
         conversion = variable_config.get("conversion")
+        by_units = variable_config.get("unit_conversions_by_units", {})
+        src_units = None
+        try:
+            src_units = data.attrs.get("units")
+        except Exception:
+            src_units = None
+        if src_units and src_units in by_units:
+            conversion = by_units[src_units]
         if conversion:
             data = convert_units(data, conversion)
 
@@ -372,6 +425,7 @@ def generate_forecast_images(
     model_id: str,
     run_info: Optional[dict[str, str]] = None,
     variable_ids: Optional[list[str]] = None,
+    max_hours_override: Optional[int] = None,
 ) -> bool:
     """Generate forecast images for a specific location and model run."""
     try:
@@ -442,6 +496,11 @@ def generate_forecast_images(
 
         # Download and process each forecast hour
         max_hours = model_config["max_forecast_hours"]
+        if max_hours_override is not None:
+            try:
+                max_hours = min(max_hours, int(max_hours_override))
+            except Exception:
+                pass
         for variable_id in variable_ids:
             variable_config = repomap["WEATHER_VARIABLES"][variable_id]
             valid_times = []
@@ -455,6 +514,8 @@ def generate_forecast_images(
                 run_id,
                 max_hours,
             )
+            # Initialize default units from config; will be updated if source indicates
+            units = variable_config.get("units")
             for hour in range(1, max_hours + 1):
                 hour_str = format_forecast_hour(hour, model_id)
                 logger.info(
@@ -524,12 +585,15 @@ def generate_forecast_images(
                             contour_path = os.path.join(variable_cache_dir, f"contours_{hour_str}.geojson")
                             tile_helpers["save_geojson"](contours, contour_path)
 
-                    center_value, units = extract_center_value(
+                    center_value, detected_units = extract_center_value(
                         grib_path,
                         location_config['center_lat'],
                         location_config['center_lon'],
                         variable_config,
                     )
+                    # Keep first detected non-empty units if available
+                    if detected_units:
+                        units = detected_units
 
                     # Record valid time mapping
                     valid_times.append({
@@ -624,8 +688,10 @@ def main() -> None:
     parser.add_argument("--location", help="Specific location ID to process (default: all)")
     parser.add_argument("--runs", type=int, default=5, help="Number of model runs to process (default: 5)")
     parser.add_argument("--latest-only", action="store_true", help="Process only the latest run")
-    parser.add_argument("--model", default=repomap["DEFAULT_MODEL"], help="Model ID to process")
+    parser.add_argument("--model", default=repomap["DEFAULT_MODEL"], help="Model ID to process (use 'all' to process every model)")
+    parser.add_argument("--models", nargs="*", help="List of model IDs to process (overrides --model)")
     parser.add_argument("--variables", nargs="*", help="Variable IDs to process (default: all)")
+    parser.add_argument("--max-hours", type=int, default=None, help="Override max forecast hours to process")
     args = parser.parse_args()
     
     # Ensure cache directory exists
@@ -637,60 +703,66 @@ def main() -> None:
     counties = gpd.read_file(shp_path)
     log_memory_usage("after_shapefile_load")
     
-    # Get available model runs
-    if args.latest_only:
-        available_runs = get_available_model_runs(args.model, max_runs=1)
+    # Determine models to process
+    if args.models:
+        models_to_process = [m for m in args.models if m in repomap["MODELS"]]
+    elif args.model == "all":
+        models_to_process = list(repomap["MODELS"].keys())
     else:
-        available_runs = get_available_model_runs(args.model, max_runs=args.runs)
-    
-    logger.info(f"Found {len(available_runs)} available {args.model} runs")
+        models_to_process = [args.model]
+
     variable_ids = args.variables or list(repomap["WEATHER_VARIABLES"].keys())
-    
-    # Process locations
-    if args.location:
-        # Process single location
-        if args.location in repomap["LOCATIONS"]:
-            # Create a copy to avoid mutating the global config
-            location_config = repomap["LOCATIONS"][args.location].copy()
-            location_config['id'] = args.location
-            logger.info(f"Processing single location: {location_config['name']}")
 
-            for run_info in available_runs:
-                generate_forecast_images(
-                    location_config,
-                    counties,
-                    args.model,
-                    run_info,
-                    variable_ids=variable_ids,
-                )
-                log_memory_usage(f"after_run_{run_info['run_id']}")
-                gc.collect()
-
-            # Clean up old runs
-            cleanup_old_runs(args.location, args.model)
+    # Iterate models and process locations
+    for model_id in models_to_process:
+        # Get available model runs
+        if args.latest_only:
+            available_runs = get_available_model_runs(model_id, max_runs=1)
         else:
-            logger.error(f"Location ID '{args.location}' not found in configuration")
-    else:
-        # Process all locations
-        logger.info(f"Processing all {len(repomap['LOCATIONS'])} configured locations")
-        for location_id, location_config_orig in repomap["LOCATIONS"].items():
-            # Create a copy to avoid mutating the global config
-            location_config = location_config_orig.copy()
-            location_config['id'] = location_id
+            available_runs = get_available_model_runs(model_id, max_runs=args.runs)
+        logger.info(f"Found {len(available_runs)} available {model_id} runs")
 
-            for run_info in available_runs:
-                generate_forecast_images(
-                    location_config,
-                    counties,
-                    args.model,
-                    run_info,
-                    variable_ids=variable_ids,
-                )
-                log_memory_usage(f"after_run_{run_info['run_id']}")
-                gc.collect()
+        # Process locations
+        if args.location:
+            if args.location in repomap["LOCATIONS"]:
+                location_config = repomap["LOCATIONS"][args.location].copy()
+                location_config['id'] = args.location
+                logger.info(f"Processing single location: {location_config['name']} (model {model_id})")
 
-            # Clean up old runs
-            cleanup_old_runs(location_id, args.model)
+                for run_info in available_runs:
+                    generate_forecast_images(
+                        location_config,
+                        counties,
+                        model_id,
+                        run_info,
+                        variable_ids=variable_ids,
+                        max_hours_override=args.max_hours,
+                    )
+                    log_memory_usage(f"after_run_{run_info['run_id']}")
+                    gc.collect()
+
+                cleanup_old_runs(args.location, model_id)
+            else:
+                logger.error(f"Location ID '{args.location}' not found in configuration")
+        else:
+            logger.info(f"Processing all {len(repomap['LOCATIONS'])} configured locations (model {model_id})")
+            for location_id, location_config_orig in repomap["LOCATIONS"].items():
+                location_config = location_config_orig.copy()
+                location_config['id'] = location_id
+
+                for run_info in available_runs:
+                    generate_forecast_images(
+                        location_config,
+                        counties,
+                        model_id,
+                        run_info,
+                        variable_ids=variable_ids,
+                        max_hours_override=args.max_hours,
+                    )
+                    log_memory_usage(f"after_run_{run_info['run_id']}")
+                    gc.collect()
+
+                cleanup_old_runs(location_id, model_id)
     
     logger.info("Cache building complete")
     
