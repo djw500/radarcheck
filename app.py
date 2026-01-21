@@ -672,7 +672,37 @@ def infer_region_for_latlon(lat: float, lon: float) -> Optional[str]:
             and r.get("lon_min") <= lon <= r.get("lon_max")
         ):
             return region_id
+    return next(iter(regions.keys()), None)
+
+
+def match_region_for_latlon(lat: float, lon: float) -> Optional[str]:
+    regions = repomap.get("TILING_REGIONS", {})
+    for region_id, r in regions.items():
+        if (
+            r.get("lat_min") <= lat <= r.get("lat_max")
+            and r.get("lon_min") <= lon <= r.get("lon_max")
+        ):
+            return region_id
     return None
+
+
+def load_tile_run_metadata(
+    base_dir: str,
+    region_id: str,
+    resolution_deg: float,
+    model_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    vars_info = list_tile_variables(base_dir, region_id, resolution_deg, model_id, run_id)
+    for info in vars_info.values():
+        meta_path = info.get("meta")
+        if meta_path and os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r") as f:
+                    return json.load(f)
+            except (OSError, json.JSONDecodeError):
+                return {}
+    return {}
 
 
 def parse_run_id_to_init_dt(run_id: str) -> Optional[datetime]:
@@ -680,6 +710,26 @@ def parse_run_id_to_init_dt(run_id: str) -> Optional[datetime]:
         _, d, h = run_id.split("_")
         return datetime.strptime(f"{d}{h}", "%Y%m%d%H").replace(tzinfo=pytz.UTC)
     except Exception:
+        return None
+
+
+def parse_init_time_utc(init_time_utc: Optional[str], run_id: str) -> Optional[datetime]:
+    if init_time_utc:
+        try:
+            return datetime.strptime(init_time_utc, "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC)
+        except ValueError:
+            pass
+    return parse_run_id_to_init_dt(run_id)
+
+
+def normalize_value(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, float) and np.isnan(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
         return None
 
 @app.route("/api/tile_runs/<model_id>")
@@ -693,6 +743,25 @@ def api_tile_runs(model_id: str):
     res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
     runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
     return jsonify({"region": region_id, "resolution_deg": res, "runs": runs})
+
+@app.route("/api/infer_region")
+@require_api_key
+def api_infer_region():
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+    regions = repomap.get("TILING_REGIONS", {})
+    matched = match_region_for_latlon(lat, lon)
+    region_id = matched or next(iter(regions.keys()), None)
+    if not region_id:
+        return jsonify({"error": "No regions configured"}), 400
+    return jsonify({
+        "region": region_id,
+        "matched": bool(matched),
+        "resolution_deg": regions[region_id].get("default_resolution_deg", 0.1),
+    })
 
 @app.route("/api/table/bylatlon")
 @require_api_key
@@ -711,7 +780,7 @@ def api_table_bylatlon():
     if not region_id:
         inferred = infer_region_for_latlon(lat, lon)
         if not inferred:
-            return jsonify({"error": "Point outside configured regions"}), 400
+            return jsonify({"error": "No regions configured"}), 400
         region_id = inferred
     if region_id not in regions:
         return jsonify({"error": "Invalid region"}), 400
@@ -759,6 +828,7 @@ def api_table_bylatlon():
     variables_considered = list(repomap["WEATHER_VARIABLES"].keys())
     variables_found: list[str] = []
     tile_cell_info = None
+    init_time_utc = None
     for var_id in variables:
         try:
             hours, values = load_timeseries_for_point(
@@ -780,6 +850,7 @@ def api_table_bylatlon():
                 lon_min_index = float(meta.get('index_lon_min', meta.get('lon_min')))
                 lon_0_360 = bool(meta.get('lon_0_360', False))
                 res_deg_m = float(meta.get('resolution_deg', res))
+                init_time_utc = meta.get("init_time_utc")
                 # recompute iy/ix consistent with tiles
                 iy = int((lat - lat_min_m) // res_deg_m)
                 target_lon = lon + 360.0 if (lon_0_360 and lon < 0) else lon
@@ -828,12 +899,16 @@ def api_table_bylatlon():
     hours_sorted = sorted(rows_by_hour.keys())
     rows = [rows_by_hour[h] for h in hours_sorted]
     missing_variables = [v for v in variables_considered if v not in variables_found]
+    if init_time_utc is None and run_id:
+        parsed = parse_run_id_to_init_dt(run_id)
+        init_time_utc = parsed.strftime("%Y-%m-%d %H:%M:%S") if parsed else None
     tiles_dir = os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id, run_id) if run_id else None
     return jsonify({
         "metadata": {
             "region": region_id,
             "model_id": model_id,
             "run_id": run_id,
+            "init_time_utc": init_time_utc,
             "stat": stat,
             "resolution_deg": res,
             "lat": lat,
@@ -851,6 +926,126 @@ def api_table_bylatlon():
             "model_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id),
             "tile_cell": tile_cell_info,
         },
+        "rows": rows,
+    })
+
+
+@app.route("/api/table/multimodel")
+@require_api_key
+def api_table_multimodel():
+    """Return a multi-model merged table by valid time for a lat/lon."""
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+    stat = request.args.get("stat", "mean")
+    region_id = request.args.get("region")
+    regions = repomap.get("TILING_REGIONS", {})
+    if not region_id:
+        region_id = infer_region_for_latlon(lat, lon)
+    if not region_id:
+        return jsonify({"error": "No regions configured"}), 400
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+
+    variable_ids = ["apcp", "snod", "t2m"]
+    variables_meta = {
+        var_id: {
+            "display_name": repomap["WEATHER_VARIABLES"][var_id].get("display_name", var_id),
+            "units": repomap["WEATHER_VARIABLES"][var_id].get("units"),
+        }
+        for var_id in variable_ids
+        if var_id in repomap["WEATHER_VARIABLES"]
+    }
+
+    models_with_runs = list_tile_models(repomap["TILES_DIR"], region_id, res)
+    if not models_with_runs:
+        return jsonify({
+            "error": "No tile models available for region",
+            "metadata": {"region": region_id, "resolution_deg": res},
+        }), 404
+
+    rows_by_time: dict[str, dict[str, Any]] = {}
+    model_payloads: dict[str, Any] = {}
+    for model_id in sorted(models_with_runs.keys()):
+        runs = models_with_runs[model_id]
+        chosen_run = None
+        chosen_vars_info: dict[str, Any] = {}
+        for candidate in runs:
+            info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, candidate)
+            if any(var_id in info for var_id in variable_ids):
+                chosen_run = candidate
+                chosen_vars_info = info
+                break
+        if not chosen_run:
+            continue
+
+        run_meta = load_tile_run_metadata(repomap["TILES_DIR"], region_id, res, model_id, chosen_run)
+        init_time_utc = run_meta.get("init_time_utc")
+        init_dt = parse_init_time_utc(init_time_utc, chosen_run)
+        if not init_dt:
+            continue
+        if not init_time_utc:
+            init_time_utc = init_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        model_hours: set[int] = set()
+        for var_id in variable_ids:
+            if var_id not in chosen_vars_info:
+                continue
+            try:
+                hours, values = load_timeseries_for_point(
+                    repomap["TILES_DIR"],
+                    region_id,
+                    res,
+                    model_id,
+                    chosen_run,
+                    var_id,
+                    lat,
+                    lon,
+                    stat=stat,
+                )
+            except FileNotFoundError:
+                continue
+            for hour, value in zip(hours.tolist(), values.tolist()):
+                model_hours.add(int(hour))
+                valid_dt = init_dt + timedelta(hours=int(hour))
+                valid_time = valid_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                row = rows_by_time.setdefault(valid_time, {"valid_time_utc": valid_time, "models": {}})
+                row["models"].setdefault(model_id, {})[var_id] = normalize_value(value)
+
+        model_payloads[model_id] = {
+            "name": repomap["MODELS"].get(model_id, {}).get("name", model_id),
+            "run_id": chosen_run,
+            "init_time_utc": init_time_utc,
+            "hours": sorted(model_hours),
+            "available_variables": [var_id for var_id in variable_ids if var_id in chosen_vars_info],
+        }
+
+    if not model_payloads:
+        return jsonify({
+            "error": "No tile data available for requested models",
+            "metadata": {"region": region_id, "resolution_deg": res},
+        }), 404
+
+    for row in rows_by_time.values():
+        for model_id in model_payloads.keys():
+            model_entry = row["models"].setdefault(model_id, {})
+            for var_id in variable_ids:
+                model_entry.setdefault(var_id, None)
+
+    rows = sorted(rows_by_time.values(), key=lambda r: r["valid_time_utc"])
+    return jsonify({
+        "metadata": {
+            "region": region_id,
+            "resolution_deg": res,
+            "stat": stat,
+            "lat": lat,
+            "lon": lon,
+        },
+        "variables": variables_meta,
+        "models": model_payloads,
         "rows": rows,
     })
 
@@ -1246,9 +1441,16 @@ def location_view(location_id: str):
     )
 
 @app.route("/forecast")
+@require_api_key
 def forecast():
-    """Legacy endpoint for GIF - redirect to main page"""
-    return redirect(url_for('index'))
+    """Multi-model forecast table view."""
+    regions = repomap.get("TILING_REGIONS", {})
+    default_region = next(iter(regions.keys()), "ne")
+    return render_template(
+        "forecast.html",
+        default_region=default_region,
+        regions=regions,
+    )
 
 
 @app.route("/summary/<location_id>")

@@ -27,6 +27,10 @@ primary_region = 'ewr'
     method = 'GET'
     path = '/health'
 
+[processes]
+  app = "gunicorn app:app"
+  tile_builder = "python scripts/build_tiles_scheduled.py"
+
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'

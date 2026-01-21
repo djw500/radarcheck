@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block title %}Multi-Model Forecast{% endblock %}
+
+{% block navigation %}
+<div class="location-nav">
+  <a href="/forecast" class="active">Forecast</a>
+  <a href="/table/geo">Tile Debug</a>
+  <a href="/explainer">Explain Data</a>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+  .panel { background: #f8f9fa; padding: 14px 18px; border-radius: 8px; margin: 12px 0; }
+  .controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .controls label { font-weight: 600; }
+  input, select, button { padding:6px 8px; font-size: 14px; }
+  #status { margin-top: 8px; }
+  #suggestions { position: relative; }
+  .suggestions-list { position: absolute; background: #fff; border: 1px solid #ddd; border-radius: 6px; margin-top: 4px; width: 100%; z-index: 5; }
+  .suggestions-list button { display:block; width:100%; text-align:left; padding:8px 10px; background: none; border: none; cursor: pointer; }
+  .suggestions-list button:hover { background: #eef4ff; }
+  table { border-collapse: collapse; width:100%; font-size: 13px; }
+  th, td { border:1px solid #ddd; padding:6px 8px; text-align:right; white-space:nowrap; }
+  th { background:#4a90d9; color:#fff; position:sticky; top:0; }
+  td:first-child { text-align:left; font-weight:600; }
+  .muted { color: #666; }
+  .error { color: #b00020; }
+  .table-wrap { overflow-x: auto; }
+  .model-head { text-transform: uppercase; letter-spacing: 0.03em; }
+  .init-times { font-size: 12px; color: #555; }
+  .pill { background: #eef1f6; padding: 4px 8px; border-radius: 999px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="controls">
+    <div style="min-width: 280px; flex: 1;">
+      <label for="locationInput">Location</label>
+      <div id="suggestions">
+        <input id="locationInput" type="text" placeholder="Search city, state…" autocomplete="off" style="width:100%;">
+        <div id="suggestionsList" class="suggestions-list" hidden></div>
+      </div>
+    </div>
+    <button id="useLocationBtn" type="button">Use My Location</button>
+    <label>Stat
+      <select id="statSelect">
+        <option value="mean">mean</option>
+        <option value="min">min</option>
+        <option value="max">max</option>
+      </select>
+    </label>
+    <button id="refreshBtn" type="button">Refresh</button>
+  </div>
+  <div class="controls" style="margin-top: 10px;">
+    <label>Lat <input id="latInput" size="9" placeholder="40.0"></label>
+    <label>Lon <input id="lonInput" size="10" placeholder="-75.0"></label>
+    <span id="regionBadge" class="pill muted"></span>
+    <span id="coords" class="muted"></span>
+  </div>
+  <div id="status" class="muted">Waiting for location…</div>
+</div>
+
+<div class="panel">
+  <div id="initTimes" class="init-times"></div>
+</div>
+
+<div id="tableContainer" class="table-wrap"></div>
+
+<script>
+const suggestionsList = document.getElementById('suggestionsList');
+let autocompleteTimer = null;
+
+function toUtcDate(utcString) {
+  if (!utcString) return new Date('invalid');
+  const normalized = utcString.includes('T') ? utcString : `${utcString.replace(' ', 'T')}Z`;
+  return new Date(normalized);
+}
+
+function formatLocalTime(utcString) {
+  const date = toUtcDate(utcString);
+  if (Number.isNaN(date.getTime())) return utcString;
+  return date.toLocaleString('en-US', {
+    weekday: 'short', hour: 'numeric', minute: '2-digit'
+  });
+}
+
+function formatValue(value) {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'number') return value.toFixed(2);
+  return value;
+}
+
+async function fetchJSON(url) {
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function inferRegion(lat, lon) {
+  try {
+    const data = await fetchJSON(`/api/infer_region?lat=${lat}&lon=${lon}`);
+    return data;
+  } catch (e) {
+    return { region: '{{ default_region }}', matched: false, resolution_deg: 0.1 };
+  }
+}
+
+function renderTable(data) {
+  if (!data.rows || data.rows.length === 0) {
+    return '<p class="muted">No data available.</p>';
+  }
+  const modelIds = Object.keys(data.models || {});
+  const variables = ['apcp', 'snod', 't2m'];
+  let html = '<table><thead><tr><th rowspan="2">Local Time</th>';
+  for (const modelId of modelIds) {
+    html += `<th class="model-head" colspan="${variables.length}">${modelId}</th>`;
+  }
+  html += '</tr><tr>';
+  for (const modelId of modelIds) {
+    for (const varId of variables) {
+      const meta = data.variables[varId];
+      const label = meta ? `${meta.display_name} (${meta.units || ''})` : varId;
+      html += `<th>${label}</th>`;
+    }
+  }
+  html += '</tr></thead><tbody>';
+  for (const row of data.rows) {
+    html += `<tr><td>${formatLocalTime(row.valid_time_utc)}</td>`;
+    for (const modelId of modelIds) {
+      const modelEntry = row.models[modelId] || {};
+      for (const varId of variables) {
+        html += `<td>${formatValue(modelEntry[varId])}</td>`;
+      }
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderInitTimes(models) {
+  const entries = Object.entries(models || {});
+  if (!entries.length) return '';
+  return entries.map(([id, meta]) => {
+    const initTime = meta.init_time_utc ? formatLocalTime(meta.init_time_utc) : 'Unknown';
+    return `<span class="pill">${id.toUpperCase()} init: ${initTime}</span>`;
+  }).join(' ');
+}
+
+async function refresh(lat, lon) {
+  const status = document.getElementById('status');
+  const stat = document.getElementById('statSelect').value;
+  status.textContent = 'Loading forecast…';
+  try {
+    const data = await fetchJSON(`/api/table/multimodel?lat=${lat}&lon=${lon}&stat=${stat}`);
+    document.getElementById('tableContainer').innerHTML = renderTable(data);
+    document.getElementById('initTimes').innerHTML = renderInitTimes(data.models);
+    document.getElementById('coords').textContent = `lat=${lat}, lon=${lon}`;
+    const regionInfo = await inferRegion(lat, lon);
+    document.getElementById('regionBadge').textContent = `region: ${regionInfo.region}`;
+    status.textContent = `Loaded ${data.rows.length} rows.`;
+  } catch (e) {
+    status.innerHTML = `<span class="error">${e}</span>`;
+  }
+}
+
+function setLatLon(lat, lon) {
+  document.getElementById('latInput').value = lat;
+  document.getElementById('lonInput').value = lon;
+  refresh(lat, lon);
+}
+
+async function geolocate() {
+  const status = document.getElementById('status');
+  if (!navigator.geolocation) {
+    status.innerHTML = '<span class="error">Geolocation not supported.</span>';
+    return;
+  }
+  status.textContent = 'Locating…';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude.toFixed(4);
+      const lon = pos.coords.longitude.toFixed(4);
+      setLatLon(lat, lon);
+    },
+    (err) => {
+      status.innerHTML = `<span class="error">Geolocation error: ${err.message}</span>`;
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 }
+  );
+}
+
+async function lookupLocation(query) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(query)}`;
+  return fetchJSON(url);
+}
+
+function showSuggestions(results) {
+  suggestionsList.innerHTML = '';
+  if (!results.length) {
+    suggestionsList.hidden = true;
+    return;
+  }
+  for (const item of results) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = item.display_name;
+    btn.onclick = () => {
+      suggestionsList.hidden = true;
+      document.getElementById('locationInput').value = item.display_name;
+      setLatLon(parseFloat(item.lat).toFixed(4), parseFloat(item.lon).toFixed(4));
+    };
+    suggestionsList.appendChild(btn);
+  }
+  suggestionsList.hidden = false;
+}
+
+document.getElementById('locationInput').addEventListener('input', (event) => {
+  const query = event.target.value.trim();
+  if (autocompleteTimer) clearTimeout(autocompleteTimer);
+  if (query.length < 3) {
+    suggestionsList.hidden = true;
+    return;
+  }
+  autocompleteTimer = setTimeout(async () => {
+    try {
+      const results = await lookupLocation(query);
+      showSuggestions(results);
+    } catch (e) {
+      suggestionsList.hidden = true;
+    }
+  }, 400);
+});
+
+document.addEventListener('click', (event) => {
+  if (!document.getElementById('suggestions').contains(event.target)) {
+    suggestionsList.hidden = true;
+  }
+});
+
+document.getElementById('refreshBtn').onclick = () => {
+  const lat = document.getElementById('latInput').value;
+  const lon = document.getElementById('lonInput').value;
+  if (lat && lon) {
+    refresh(lat, lon);
+  }
+};
+
+document.getElementById('useLocationBtn').onclick = geolocate;
+
+document.getElementById('statSelect').onchange = () => {
+  const lat = document.getElementById('latInput').value;
+  const lon = document.getElementById('lonInput').value;
+  if (lat && lon) {
+    refresh(lat, lon);
+  }
+};
+
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  const lat = params.get('lat');
+  const lon = params.get('lon');
+  if (lat && lon) {
+    setLatLon(lat, lon);
+  } else {
+    geolocate();
+  }
+});
+</script>
+{% endblock %}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from config import repomap
@@ -37,6 +38,15 @@ def _build_model_url(model_config: dict[str, Any], date_str: str, init_hour: str
         f"leftlon={location_config['lon_min']}&rightlon={location_config['lon_max']}&"
         f"toplat={location_config['lat_max']}&bottomlat={location_config['lat_min']}&"
     )
+
+
+def _init_time_from_run_id(run_id: str) -> str:
+    try:
+        _, date_str, init_hour = run_id.split("_")
+        init_dt = datetime.strptime(f"{date_str}{init_hour}", "%Y%m%d%H").replace(tzinfo=timezone.utc)
+        return init_dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ""
 
 
 def _get_available_model_runs(model_id: str, max_runs: int = 1) -> list[dict[str, str]]:
@@ -141,6 +151,19 @@ def _download_all_hours_parallel(model_id: str, variable_id: str, date_str: str,
     return results
 
 
+def download_all_hours_parallel(
+    model_id: str,
+    variable_id: str,
+    date_str: str,
+    init_hour: str,
+    location_config: dict[str, Any],
+    run_id: str,
+    max_hours: int,
+) -> dict[int, str]:
+    _ = location_config
+    return _download_all_hours_parallel(model_id, variable_id, date_str, init_hour, run_id, max_hours)
+
+
 def build_region_tiles(
     region_id: str,
     model_id: str,
@@ -175,7 +198,7 @@ def build_region_tiles(
         run_info = {
             "date_str": date_str,
             "init_hour": init_hour,
-            "init_time": "",
+            "init_time": _init_time_from_run_id(run_id),
             "run_id": run_id,
         }
 
@@ -199,6 +222,7 @@ def build_region_tiles(
     }
 
     var_ids = variables or list(repomap["WEATHER_VARIABLES"].keys())
+    init_time_utc = run_info.get("init_time") or _init_time_from_run_id(run_info["run_id"])
     for variable_id in var_ids:
         variable_config = repomap["WEATHER_VARIABLES"][variable_id]
         
@@ -208,11 +232,12 @@ def build_region_tiles(
             continue
 
         # Download GRIBs for all hours for the region (actually CONUS now)
-        grib_paths = _download_all_hours_parallel(
+        grib_paths = download_all_hours_parallel(
             model_id,
             variable_id,
             run_info["date_str"],
             run_info["init_hour"],
+            location_config,
             run_info["run_id"],
             max_hours,
         )
@@ -235,6 +260,7 @@ def build_region_tiles(
                 "model_id": model_id,
                 "run_id": run_info["run_id"],
                 "variable_id": variable_id,
+                "init_time_utc": init_time_utc or None,
                 "lat_min": lat_min,
                 "lat_max": lat_max,
                 "lon_min": lon_min,
