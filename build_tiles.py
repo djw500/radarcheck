@@ -6,7 +6,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from config import repomap
-from tiles import build_tiles_for_variable, save_tiles_npz
+from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust
 from utils import download_file, format_forecast_hour
 import requests
 import xarray as xr
@@ -84,7 +84,7 @@ def _fetch_grib(model_id: str, variable_id: str, date_str: str, init_hour: str, 
     # Cached valid?
     if os.path.exists(filename) and os.path.getsize(filename) >= repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
         try:
-            ds = xr.open_dataset(filename, engine="cfgrib")
+            ds = open_dataset_robust(filename)
             ds.close()
             return filename
         except Exception:
@@ -97,7 +97,7 @@ def _fetch_grib(model_id: str, variable_id: str, date_str: str, init_hour: str, 
     download_file(url, temp_filename)
     if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
         raise RuntimeError(f"Downloaded file is missing or too small: {temp_filename}")
-    ds = xr.open_dataset(temp_filename, engine="cfgrib")
+    ds = open_dataset_robust(temp_filename)
     ds.close()
     with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
         os.replace(temp_filename, filename)

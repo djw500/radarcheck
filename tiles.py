@@ -141,6 +141,26 @@ def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarra
     return min_grid.reshape(ny, nx), max_grid.reshape(ny, nx), mean_grid.reshape(ny, nx)
 
 
+def open_dataset_robust(path: str) -> xr.Dataset:
+    """
+    Open a GRIB file with xarray/cfgrib, handling common index ambiguity errors.
+    """
+    try:
+        return xr.open_dataset(path, engine="cfgrib")
+    except Exception as e:
+        if "multiple values for unique key" in str(e):
+            # Try to resolve ambiguity by filtering stepType
+            try:
+                return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepType': 'instant'}})
+            except Exception:
+                try:
+                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepType': 'avg'}})
+                except Exception:
+                    # If that fails, try typeOfLevel surface (common for weasd/csnow)
+                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface'}})
+        raise e
+
+
 def build_tiles_for_variable(
     grib_paths_by_hour: Dict[int, str],
     variable_config: Dict[str, Any],
@@ -161,7 +181,7 @@ def build_tiles_for_variable(
 
     # Open first hour to get grid and precompute mapping
     first_path = grib_paths_by_hour[hours_sorted[0]]
-    ds0 = xr.open_dataset(first_path, engine="cfgrib")
+    ds0 = open_dataset_robust(first_path)
     da0 = _select_variable_from_dataset(ds0, variable_config)
 
     # Determine conversion based on units if specified
@@ -176,6 +196,11 @@ def build_tiles_for_variable(
 
     lat2d = np.array(da0.latitude)
     lon2d = np.array(da0.longitude)
+    
+    # Handle 1D coordinates (e.g. GFS) by broadcasting to 2D
+    if lat2d.ndim == 1 and lon2d.ndim == 1:
+        lat2d, lon2d = np.meshgrid(lat2d, lon2d, indexing='ij')
+
     order, starts, unique_ids, valid_mask_flat, n_cells, ny, nx = _prep_cell_index(
         lat2d, lon2d, lat_min, lat_max, lon_min, lon_max, res_deg
     )
@@ -192,7 +217,7 @@ def build_tiles_for_variable(
 
     for ti, hour in enumerate(hours_sorted):
         path = grib_paths_by_hour[hour]
-        ds = xr.open_dataset(path, engine="cfgrib")
+        ds = open_dataset_robust(path)
         da = _select_variable_from_dataset(ds, variable_config)
         if conversion:
             da = convert_units(da, conversion)

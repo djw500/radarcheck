@@ -27,6 +27,7 @@ import psutil
 from config import repomap
 from ecmwf import fetch_grib_cds  # scaffolding for ECMWF CDS
 from plotting import create_plot, select_variable_from_dataset
+from tiles import open_dataset_robust
 from utils import (
     GribDownloadError,
     GribValidationError,
@@ -252,7 +253,7 @@ def fetch_grib(
         try:
             with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
                 # Try to open the file without chunks first
-                ds = xr.open_dataset(filename, engine="cfgrib")
+                ds = open_dataset_robust(filename)
                 data_to_plot = select_variable_from_dataset(ds, variable_config)
                 data_to_plot.values
                 ds.close()
@@ -299,7 +300,7 @@ def fetch_grib(
                 raise ValueError(f"Downloaded file is missing or too small: {temp_filename}")
             
             # Try to open with xarray to verify it's valid
-            ds = xr.open_dataset(temp_filename, engine="cfgrib")
+            ds = open_dataset_robust(temp_filename)
             data_to_plot = select_variable_from_dataset(ds, variable_config)
             data_to_plot.load()
             ds.close()
