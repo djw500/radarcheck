@@ -290,6 +290,7 @@ MAP_LAYERS = {
 
 repomap = {
     "CACHE_DIR": "cache",
+    "TILES_DIR": "cache/tiles",
     "DEFAULT_MODEL": "hrrr",
     "DEFAULT_VARIABLE": "refc",
     "WEATHER_VARIABLES": WEATHER_VARIABLES,
@@ -329,6 +330,20 @@ repomap = {
     "GENERATE_VECTOR_CONTOURS": False,
     "TILE_MIN_ZOOM": 4,
     "TILE_MAX_ZOOM": 10,
+
+    # Region tiling (grid statistics) configuration
+    "TILING_REGIONS": {
+        # Northeast US box used for coarse 0.1° tiles
+        "ne": {
+            "name": "Northeast US",
+            "lat_min": 38.0,
+            "lat_max": 47.0,
+            "lon_min": -80.0,
+            "lon_max": -66.0,
+            "default_resolution_deg": 0.1,
+            "stats": ["min", "max", "mean"],
+        }
+    },
 
     # Location configurations
     "LOCATIONS": {

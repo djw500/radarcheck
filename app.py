@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 from typing import Any, Optional
@@ -26,7 +26,7 @@ import numpy as np
 
 from config import repomap
 from alerts import get_alerts_for_location
-from plotting import select_variable_from_dataset
+from plotting import select_variable_from_dataset, get_colormap
 from summary import summarize_run
 from utils import convert_units, format_forecast_hour
 from forecast_table import (
@@ -35,6 +35,11 @@ from forecast_table import (
     format_table_html,
     format_table_json,
     get_variable_display_order,
+)
+from tiles import (
+    load_timeseries_for_point,
+    load_grid_slice,
+    list_tile_runs,
 )
 
 # Set up logging
@@ -639,6 +644,131 @@ def add_cache_headers(response):
 
 # --- Flask Endpoints ---
 
+# --- Helpers for tile-backed rendering ---
+
+def infer_region_for_latlon(lat: float, lon: float) -> Optional[str]:
+    regions = repomap.get("TILING_REGIONS", {})
+    for region_id, r in regions.items():
+        if (
+            r.get("lat_min") <= lat <= r.get("lat_max")
+            and r.get("lon_min") <= lon <= r.get("lon_max")
+        ):
+            return region_id
+    return None
+
+
+def parse_run_id_to_init_dt(run_id: str) -> Optional[datetime]:
+    try:
+        _, d, h = run_id.split("_")
+        return datetime.strptime(f"{d}{h}", "%Y%m%d%H").replace(tzinfo=pytz.UTC)
+    except Exception:
+        return None
+
+@app.route("/api/tile_runs/<model_id>")
+@require_api_key
+def api_tile_runs(model_id: str):
+    """List available tile runs for a model (using default region/resolution)."""
+    region_id = request.args.get("region", "ne")
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+    runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
+    return jsonify({"region": region_id, "resolution_deg": res, "runs": runs})
+
+@app.route("/api/table/bylatlon")
+@require_api_key
+def api_table_bylatlon():
+    """Return table-like timeseries for all variables at a lat/lon using tiles."""
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+    model_id = request.args.get("model", repomap["DEFAULT_MODEL"])
+    region_id = request.args.get("region", "ne")
+    run_id = request.args.get("run")
+    stat = request.args.get("stat", "mean")
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+    if run_id is None:
+        runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
+        if not runs:
+            return jsonify({"error": "No tile runs available"}), 404
+        run_id = runs[0]
+
+    variables = repomap["WEATHER_VARIABLES"].keys()
+    rows_by_hour: dict[int, dict[str, Any]] = {}
+    first_hours = None
+    for var_id in variables:
+        try:
+            hours, values = load_timeseries_for_point(
+                repomap["TILES_DIR"], region_id, res, model_id, run_id, var_id, lat, lon, stat=stat
+            )
+        except FileNotFoundError:
+            continue
+        if first_hours is None:
+            first_hours = hours
+        for hour, val in zip(hours.tolist(), values.tolist()):
+            if hour not in rows_by_hour:
+                rows_by_hour[hour] = {"hour": int(hour)}
+            rows_by_hour[hour][var_id] = None if (val is None or (isinstance(val, float) and np.isnan(val))) else val
+
+    if not rows_by_hour:
+        return jsonify({"error": "No variables available at this point"}), 404
+
+    hours_sorted = sorted(rows_by_hour.keys())
+    rows = [rows_by_hour[h] for h in hours_sorted]
+    return jsonify({
+        "metadata": {
+            "region": region_id,
+            "model_id": model_id,
+            "run_id": run_id,
+            "stat": stat,
+            "resolution_deg": res,
+            "lat": lat,
+            "lon": lon,
+        },
+        "rows": rows,
+    })
+
+@app.route("/frame/tiles/<region_id>/<model_id>/<run_id>/<variable_id>/<int:hour>")
+@require_api_key
+def frame_from_tiles(region_id: str, model_id: str, run_id: str, variable_id: str, hour: int):
+    """Render a PNG for a given tiles slice (stat=mean|min|max)."""
+    stat = request.args.get("stat", "mean")
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return handle_error("Invalid region", 400)
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+    try:
+        arr2d, bounds = load_grid_slice(repomap["TILES_DIR"], region_id, res, model_id, run_id, variable_id, hour, stat=stat)
+    except (FileNotFoundError, IndexError) as exc:
+        return handle_error(str(exc), 404)
+
+    # Render via matplotlib to PNG in-memory
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from io import BytesIO
+
+    var_cfg = repomap["WEATHER_VARIABLES"].get(variable_id, {})
+    cmap = get_colormap(var_cfg)
+    vmin = var_cfg.get("vmin")
+    vmax = var_cfg.get("vmax")
+    fig, ax = plt.subplots(figsize=(6, 5))
+    extent = [bounds["lon_min"], bounds["lon_max"], bounds["lat_min"], bounds["lat_max"]]
+    im = ax.imshow(arr2d, origin='lower', extent=extent, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.set_title(f"{model_id.upper()} {variable_id} h{hour:02d} ({stat})")
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    buf = BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
+
 @app.route("/frame/<location_id>/<model_id>/<run_id>/<variable_id>/<int:hour>")
 @require_api_key
 @limiter.limit("100 per minute")
@@ -672,7 +802,44 @@ def get_frame(location_id: str, model_id: str, run_id: str, variable_id: str, ho
             
         # Format hour as two digits
         hour_str = format_forecast_hour(hour, model_id)
-        
+
+        # Prefer tile-backed rendering when available
+        loc_cfg = repomap["LOCATIONS"][location_id]
+        region_id = infer_region_for_latlon(loc_cfg["center_lat"], loc_cfg["center_lon"]) or next(iter(repomap.get("TILING_REGIONS", {}) or {}), None)
+        if region_id:
+            res = repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1)
+            effective_run_id = run_id
+            if effective_run_id == "latest":
+                runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
+                if runs:
+                    effective_run_id = runs[0]
+            if effective_run_id and isinstance(effective_run_id, str):
+                try:
+                    arr2d, bounds = load_grid_slice(
+                        repomap["TILES_DIR"], region_id, res, model_id, effective_run_id, variable_id, hour, stat=request.args.get("stat", "mean")
+                    )
+                    # Render quickly
+                    import matplotlib
+                    matplotlib.use('Agg')
+                    import matplotlib.pyplot as plt
+                    from io import BytesIO
+                    var_cfg = repomap["WEATHER_VARIABLES"].get(variable_id, {})
+                    cmap = get_colormap(var_cfg)
+                    vmin = var_cfg.get("vmin")
+                    vmax = var_cfg.get("vmax")
+                    fig, ax = plt.subplots(figsize=(6, 5))
+                    extent = [bounds["lon_min"], bounds["lon_max"], bounds["lat_min"], bounds["lat_max"]]
+                    im = ax.imshow(arr2d, origin='lower', extent=extent, cmap=cmap, vmin=vmin, vmax=vmax)
+                    ax.set_title(f"{model_id.upper()} {variable_id} h{hour:02d} (tiles)")
+                    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+                    buf = BytesIO()
+                    plt.savefig(buf, format='png', bbox_inches='tight')
+                    plt.close(fig)
+                    buf.seek(0)
+                    return send_file(buf, mimetype='image/png')
+                except (FileNotFoundError, IndexError):
+                    pass  # Fall back to legacy frame files
+
         # Handle "latest" run_id
         if run_id == "latest":
             latest_link = os.path.join(repomap["CACHE_DIR"], location_id, model_id, "latest")
@@ -975,16 +1142,76 @@ def table_view(location_id: str, model_id: Optional[str] = None, run_id: Optiona
     if model_id not in repomap["MODELS"]:
         return handle_error(f"Model '{model_id}' not found", 404)
 
-    # Load forecast data
-    data = load_all_center_values(repomap["CACHE_DIR"], location_id, model_id, run_id)
-    if not data.get("variables"):
-        return handle_error("No forecast data available for this location/model", 404)
+    # Try tile-backed rows first
+    loc = repomap["LOCATIONS"][location_id]
+    region_id = infer_region_for_latlon(loc["center_lat"], loc["center_lon"]) or next(iter(repomap.get("TILING_REGIONS", {}) or {}), None)
+    rows = []
+    variables_present: list[str] = []
+    tile_run_list = []
+    init_time = "Unknown"
+    if region_id:
+        res = repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1)
+        tile_runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
+        tile_run_list = [
+            {"run_id": r, "init_time": parse_run_id_to_init_dt(r).strftime("%Y-%m-%d %H:%M:%S") if parse_run_id_to_init_dt(r) else r}
+            for r in tile_runs
+        ]
+        if not run_id and tile_runs:
+            run_id = tile_runs[0]
+        if run_id:
+            # Accumulate variable timeseries
+            vals_by_var: dict[str, dict[int, float]] = {}
+            hours_union: set[int] = set()
+            for var_id in repomap["WEATHER_VARIABLES"].keys():
+                try:
+                    hours, vals = load_timeseries_for_point(
+                        repomap["TILES_DIR"], region_id, res, model_id, run_id, var_id, loc["center_lat"], loc["center_lon"], stat="mean"
+                    )
+                except FileNotFoundError:
+                    continue
+                hlist = hours.tolist()
+                vlist = vals.tolist()
+                if not hlist:
+                    continue
+                vals_by_var[var_id] = {int(h): float(v) for h, v in zip(hlist, vlist)}
+                hours_union.update(int(h) for h in hlist)
+            if hours_union:
+                variables_present = list(vals_by_var.keys())
+                init_dt = parse_run_id_to_init_dt(run_id)
+                if init_dt:
+                    init_time = init_dt.strftime("%Y-%m-%d %H:%M:%S")
+                for h in sorted(hours_union):
+                    row = {"hour": h, "valid_time": None}
+                    if init_dt is not None:
+                        row["valid_time"] = (init_dt + timedelta(hours=h)).strftime("%Y-%m-%d %H:%M:%S")
+                    for var_id in variables_present:
+                        val = vals_by_var[var_id].get(h)
+                        cfg = repomap["WEATHER_VARIABLES"][var_id]
+                        if val is None or np.isnan(val):
+                            row[var_id] = "-"
+                        else:
+                            if cfg.get("units") in ("in", "in/hr", "mi"):
+                                row[var_id] = f"{val:.2f} {cfg.get('units','')}"
+                            elif cfg.get("units") in ("°F", "mph"):
+                                row[var_id] = f"{val:.1f} {cfg.get('units','')}"
+                            elif cfg.get("units") in ("dBZ", "J/kg", "m²/s²", "%"):
+                                row[var_id] = f"{val:.0f} {cfg.get('units','')}"
+                            else:
+                                row[var_id] = f"{val:.1f} {cfg.get('units','')}"
+                    rows.append(row)
 
-    # Build table rows
-    rows = build_forecast_table(data)
+    # Fallback to legacy center_values
+    data = None
+    if not rows:
+        data = load_all_center_values(repomap["CACHE_DIR"], location_id, model_id, run_id)
+        if not data.get("variables"):
+            return handle_error("No forecast data available for this location/model", 404)
+        rows = build_forecast_table(data)
+        variables_present = [v for v in get_variable_display_order() if v in data.get("variables", {})]
+        init_time = data["metadata"].get("init_time", "Unknown")
 
     # Get all runs for navigation
-    runs = get_location_runs(location_id, model_id)
+    runs = tile_run_list or get_location_runs(location_id, model_id)
     locations = get_available_locations(model_id)
     models_available = get_available_models_for_location(location_id)
 
@@ -1007,13 +1234,13 @@ def table_view(location_id: str, model_id: Optional[str] = None, run_id: Optiona
         location_name=location_config["name"],
         model_id=model_id,
         model_name=repomap["MODELS"][model_id]["name"],
-        run_id=data["metadata"].get("run_id", "unknown"),
-        init_time=data["metadata"].get("init_time", "Unknown"),
+        run_id=run_id or (data["metadata"].get("run_id", "unknown") if data else "unknown"),
+        init_time=init_time,
         runs=runs,
         locations=locations,
         models=models_available,
-        variables=data.get("variables", {}),
-        variable_order=[v for v in get_variable_display_order() if v in data.get("variables", {})],
+        variables=repomap["WEATHER_VARIABLES"],
+        variable_order=variables_present,
         rows=rows,
         weather_variables=repomap["WEATHER_VARIABLES"],
     )
@@ -1194,10 +1421,18 @@ def api_summary(location_id: str, model_id: Optional[str] = None, run_id: Option
 @app.route("/health")
 def health_check():
     """Health check endpoint for monitoring"""
+    # Also report tile runs for default model/region
+    regions = repomap.get("TILING_REGIONS", {})
+    default_region = next(iter(regions)) if regions else None
+    tile_runs = []
+    if default_region:
+        res = regions[default_region].get("default_resolution_deg", 0.1)
+        tile_runs = list_tile_runs(repomap["TILES_DIR"], default_region, res, repomap["DEFAULT_MODEL"])
     return jsonify({
         "status": "ok",
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "locations_count": len(get_available_locations())
+        "locations_count": len(get_available_locations()),
+        "tile_runs": tile_runs,
     })
 
 
