@@ -55,6 +55,7 @@ WEATHER_VARIABLES = {
         "vmax": 36,
         "category": "winter",
         "conversion": "m_to_in",
+        "dwd_var": "h_snow",
     },
     "apcp": {
         "nomads_params": ["var_APCP"],
@@ -67,6 +68,7 @@ WEATHER_VARIABLES = {
         "vmax": 6,
         "category": "precipitation",
         "conversion": "kg_m2_to_in",
+        "dwd_var": "tot_prec",
         # Common GRIB short names across centers (e.g., ECMWF uses 'tp')
         "source_short_names": ["tp", "apcp"],
         # Prefer conversion based on source units when available
@@ -101,6 +103,7 @@ WEATHER_VARIABLES = {
         "vmax": 110,
         "category": "temperature",
         "conversion": "k_to_f",
+        "dwd_var": "t_2m",
         "source_short_names": ["t2m", "2t", "tmp"],
         "unit_conversions_by_units": {
             "K": "k_to_f",
@@ -277,6 +280,17 @@ MODELS = {
         "file_pattern": "blend.t{init_hour}z.core.f{forecast_hour}.co.grib2",
         "availability_check_var": "var_TMP",
         "forecast_hour_digits": 3,
+    },
+    "icon": {
+        "name": "ICON (DWD)",
+        "max_forecast_hours": 180,
+        "update_frequency_hours": 6,
+        "source": "dwd",
+        "nomads_url": "https://opendata.dwd.de", # Base URL for DWD
+        "dir_pattern": "weather/nwp/icon/grib/{init_hour}/{dwd_var}",
+        "file_pattern": "icon_global_icosahedral_single-level_{date_str}{init_hour}_{forecast_hour}_{dwd_var_upper}.grib2.bz2",
+        "forecast_hour_digits": 3,
+        "availability_check_var": "t_2m", # Used for dwd_var in check
     },
     # ECMWF integrations are scaffolded for CDS; downloads require cdsapi credentials.
     # These entries are not used by NOMADS and will be activated when CDS fetch is configured.

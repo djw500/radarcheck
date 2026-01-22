@@ -196,6 +196,7 @@ def fetch_grib(
 
     # ECMWF CDS download path
     if model_config.get("source") == "cds":
+        # ... (existing CDS logic) ...
         # Attempt CDS retrieval directly to temp file, then validate like NOMADS flow
         temp_filename = f"{filename}.tmp"
         try:
@@ -234,6 +235,78 @@ def fetch_grib(
             except OSError:
                 pass
             raise GribValidationError(str(exc)) from exc
+
+    # DWD Open Data download path
+    if model_config.get("source") == "dwd":
+        dwd_var = variable_config.get("dwd_var")
+        if not dwd_var:
+            raise GribDownloadError(f"Variable {variable_id} not configured for DWD (missing dwd_var)")
+        
+        # Pattern: https://opendata.dwd.de/weather/nwp/icon/grib/HH/var/icon_global_icosahedral_single-level_YYYYMMDDHH_FH_VAR_UPPER.grib2.bz2
+        # dir_pattern should be: "weather/nwp/icon/grib/{init_hour}/{dwd_var}"
+        # file_pattern should be: "icon_global_icosahedral_single-level_{date_str}{init_hour}_{forecast_hour}_{dwd_var_upper}.grib2.bz2"
+        
+        base_url = model_config["nomads_url"] # Reuse field for base URL
+        dir_path = model_config["dir_pattern"].format(init_hour=init_hour, dwd_var=dwd_var)
+        file_name = model_config["file_pattern"].format(
+            date_str=date_str, 
+            init_hour=init_hour, 
+            forecast_hour=forecast_hour, 
+            dwd_var_upper=dwd_var.upper()
+        )
+        url = f"{base_url}/{dir_path}/{file_name}"
+        
+        # Download and decompress
+        import bz2
+        
+        temp_bz2 = f"{filename}.bz2.tmp"
+        temp_grib = f"{filename}.tmp"
+        
+        try:
+            download_file(url, temp_bz2)
+            
+            # Decompress
+            if not os.path.exists(temp_bz2):
+                 raise GribDownloadError(f"Failed to download DWD file: {url}")
+                 
+            with open(temp_bz2, 'rb') as f_in, open(temp_grib, 'wb') as f_out:
+                decompressor = bz2.BZ2Decompressor()
+                for data in iter(lambda: f_in.read(100 * 1024), b''):
+                    f_out.write(decompressor.decompress(data))
+            
+            os.remove(temp_bz2) # Cleanup compressed file
+            
+            # Verify
+            if not os.path.exists(temp_grib) or os.path.getsize(temp_grib) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
+                raise ValueError("Decompressed file is too small")
+                
+            # DWD GRIBs are unstructured. cfgrib needs to open them.
+            # Warning: This verification might be slow or memory intensive for global unstructured grids.
+            # But we must verify.
+            # Note: We rely on tiles.py/prep_cell_index to handle the 1D coords later.
+            
+            ds = open_dataset_robust(temp_grib, preferred) # use preferred filter from config
+            # Check variable existence (fast load)
+            # DWD variable names might differ from config short_name?
+            # select_variable_from_dataset handles candidates.
+            # For ICON, T_2M -> t2m usually works or we add candidates.
+            data_to_plot = select_variable_from_dataset(ds, variable_config)
+            # data_to_plot.load() # Skip full load for global unstructured to save RAM?
+            # Just check shape/coords
+            if data_to_plot.size == 0:
+                 raise ValueError("Empty variable")
+            ds.close()
+            
+            with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
+                os.replace(temp_grib, filename)
+                logger.info(f"Successfully downloaded and verified GRIB file (DWD): {filename}")
+                return filename
+
+        except Exception as exc:
+            logger.error(f"DWD fetch failed: {exc}")
+            if os.path.exists(temp_bz2): os.remove(temp_bz2)
+            if os.path.exists(temp_grib): os.remove(temp_grib)
+            raise GribDownloadError(str(exc)) from exc
 
     # NOMADS download path
     variable_query = build_variable_query(variable_config)
