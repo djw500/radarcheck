@@ -14,9 +14,8 @@ import xarray as xr
 from filelock import FileLock, Timeout
 import logging
 
-# Configure debug logging for requests to trace connections
+# Configure logging
 logging.basicConfig(level=logging.INFO)
-logging.getLogger("urllib3").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
