@@ -246,6 +246,14 @@ def fetch_grib(
         download_region,
     )
     
+    preferred = None
+    if variable_config.get("is_accumulation"):
+        preferred = {'stepType': 'accum'}
+    if variable_config.get("preferred_step_type"):
+        preferred = {'stepType': variable_config.get("preferred_step_type")}
+    if variable_config.get("short_name") == "prate" and not preferred:
+        preferred = {'stepType': 'instant'}
+    
     def try_load_grib(filename: str) -> bool:
         """Try to load and validate a GRIB file"""
         if not os.path.exists(filename) or os.path.getsize(filename) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
@@ -253,7 +261,7 @@ def fetch_grib(
         try:
             with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
                 # Try to open the file without chunks first
-                ds = open_dataset_robust(filename)
+                ds = open_dataset_robust(filename, preferred)
                 data_to_plot = select_variable_from_dataset(ds, variable_config)
                 data_to_plot.values
                 ds.close()
@@ -300,7 +308,7 @@ def fetch_grib(
                 raise ValueError(f"Downloaded file is missing or too small: {temp_filename}")
             
             # Try to open with xarray to verify it's valid
-            ds = open_dataset_robust(temp_filename)
+            ds = open_dataset_robust(temp_filename, preferred)
             data_to_plot = select_variable_from_dataset(ds, variable_config)
             data_to_plot.load()
             ds.close()

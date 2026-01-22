@@ -191,9 +191,15 @@ def build_tiles_for_variable(
     # Prefer accumulations for accumulation variables (e.g., APCP, ASNOW)
     if variable_config.get("is_accumulation"):
         preferred = {'stepType': 'accum'}
-    # PRATE should be instant/rate
-    if variable_config.get("short_name") == "prate":
+    
+    # Allow explicit override from config (e.g. for csnow/prate)
+    if variable_config.get("preferred_step_type"):
+        preferred = {'stepType': variable_config.get("preferred_step_type")}
+        
+    # Legacy hardcode fallback (can be removed if config is updated)
+    if variable_config.get("short_name") == "prate" and not preferred:
         preferred = {'stepType': 'instant'}
+        
     ds0 = open_dataset_robust(first_path, preferred)
     da0 = _select_variable_from_dataset(ds0, variable_config)
 

@@ -24,9 +24,13 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 24,
         "category": "winter",
-        "conversion": "kg_m2_to_in",
+        "conversion": "m_to_in",
         "is_accumulation": True,
         "model_exclusions": ["nam_nest", "gfs"],
+        "unit_conversions_by_units": {
+            "m": "m_to_in",
+            "kg m-2": "kg_m2_to_in",
+        },
     },
     "csnow": {
         "nomads_params": ["var_CSNOW"],
@@ -38,6 +42,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 1,
         "category": "winter",
+        "preferred_step_type": "instant",
     },
     "snod": {
         "nomads_params": ["var_SNOD"],
@@ -83,6 +88,7 @@ WEATHER_VARIABLES = {
         "vmax": 2,
         "category": "precipitation",
         "conversion": "kg_m2_s_to_in_hr",
+        "preferred_step_type": "instant",
     },
     "t2m": {
         "nomads_params": ["var_TMP"],
