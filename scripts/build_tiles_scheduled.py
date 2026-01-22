@@ -280,17 +280,13 @@ def build_cycle():
         for i, run_id in enumerate(runs_to_process):
             # Skip if run is too new
             if not run_is_ready(run_id):
-                # Only log skip for very recent runs to avoid noise
-                if i == 0: 
-                    print(f"[{model_id} {i+1}/{num_runs}] Run {run_id} is too new, skipping")
+                print(f"[{model_id} {i+1}/{num_runs}] Skipping {run_id} (too new)")
                 continue
 
             for region_id in REGIONS:
                 # Skip if tiles already exist and are complete
                 if tiles_exist(region_id, model_id, run_id, expected_max_hours=max_hours):
-                    # Reduce noise: don't print for every existing old run
-                    if i < 5: # Only show status for the few most recent
-                        print(f"[{model_id} {i+1}/{num_runs}] Tiles complete for {run_id}")
+                    print(f"[{model_id} {i+1}/{num_runs}] Verified complete: {run_id}")
                     continue
 
                 print(f"[{model_id} {i+1}/{num_runs}] Building/Completing {run_id}...")
