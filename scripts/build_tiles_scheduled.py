@@ -179,12 +179,27 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-        if result.returncode == 0:
+        # Stream output line by line to show progress
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        
+        if process.stdout:
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    logger.info(f"    [{model_id}] {line}")
+        
+        returncode = process.wait(timeout=3600)
+        if returncode == 0:
             logger.info(f"Successfully built tiles for {model_id}/{run_id}")
             return True
         else:
-            logger.error(f"Failed to build tiles for {model_id}/{run_id}: {result.stderr}")
+            logger.error(f"Failed to build tiles for {model_id}/{run_id} (exit code: {returncode})")
             return False
     except subprocess.TimeoutExpired:
         logger.error(f"Timeout building tiles for {model_id}/{run_id}")
@@ -220,18 +235,20 @@ def build_cycle():
             logger.warning(f"No available runs found for {model_id}")
             continue
 
+        num_runs = len(runs_to_process)
         if needs_backfill:
-            logger.info(f"Backfilling {len(runs_to_process)} runs for {model_id} (cache empty)")
+            logger.info(f"Backfilling {num_runs} runs for {model_id} (cache empty)")
         else:
-            logger.info(f"Latest run for {model_id}: {runs_to_process[0]}")
+            logger.info(f"Processing latest run for {model_id}: {runs_to_process[0]}")
 
-        for run_id in runs_to_process:
+        for i, run_id in enumerate(runs_to_process):
             for region_id in REGIONS:
                 # Skip if tiles already exist and are complete
                 if tiles_exist(region_id, model_id, run_id, expected_max_hours=max_hours):
-                    logger.info(f"Tiles already exist and are complete for {model_id}/{run_id} in {region_id}, skipping")
+                    logger.info(f"[{model_id} {i+1}/{num_runs}] Tiles already exist and are complete for {run_id} in {region_id}, skipping")
                     continue
 
+                logger.info(f"[{model_id} {i+1}/{num_runs}] Starting build for {run_id}...")
                 builds_attempted += 1
                 if build_tiles_for_run(region_id, model_id, run_id, max_hours):
                     builds_succeeded += 1
