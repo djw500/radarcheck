@@ -39,15 +39,12 @@ def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> N
         # Raise for obvious HTTP errors early
         try:
             response.raise_for_status()
-        except requests.HTTPError as http_err:
-            # Log brief body preview if available
-            try:
-                preview = next(response.iter_content(chunk_size=512))
-            except Exception:
-                preview = b""
-            if preview:
-                logger.error(f"HTTP error body preview: {preview[:120]!r}")
+        except requests.HTTPError:
+            # Silence body preview logging to reduce noise
             raise
+
+        ctype = response.headers.get("Content-Type", "")
+        clen = response.headers.get("Content-Length")
 
         # Heuristic guard: reject textual/error responses
         if "text/html" in ctype or ctype.startswith("text/"):
@@ -84,9 +81,10 @@ def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> N
                     continue
                 total += len(chunk)
                 f.write(chunk)
-        logger.info(f"Downloaded: {local_path} ({total} bytes)")
+        # logger.info(f"Downloaded: {local_path} ({total} bytes)")
     else:
-        logger.info(f"Using cached file: {local_path}")
+        # logger.info(f"Using cached file: {local_path}")
+        pass
 
 
 def fetch_county_shapefile(cache_dir: str) -> str:
