@@ -191,8 +191,10 @@ const DISPLAY_VARS = [
   { id: 'snod', name: 'Depth', units: 'in', category: 'snow' },
   { id: 't2m', name: 'Temp', units: '°F', category: 'temp' },
   { id: 'dpt', name: 'Dew', units: '°F', category: 'temp' },
+  { id: 'rh', name: 'RH', units: '%', category: 'rh' },
   { id: 'wind_10m', name: 'Wind', units: 'mph', category: 'wind' },
   { id: 'gust', name: 'Gust', units: 'mph', category: 'wind' },
+  { id: 'cape', name: 'CAPE', units: 'J/kg', category: 'cape' },
 ];
 
 // State
@@ -266,6 +268,11 @@ function getColorClass(varId, value) {
     if (value < 15) return 'wind-calm';
     if (value < 30) return 'wind-mod';
     return 'wind-strong';
+  } else if (v.category === 'rh') {
+    if (value > 90) return 'temp-cool';
+  } else if (v.category === 'cape') {
+    if (value > 1000) return 'temp-warm';
+    if (value > 2500) return 'temp-hot';
   }
   return '';
 }
@@ -344,12 +351,7 @@ function renderSummaryCards(data) {
       for (const row of data.rows) {
         const val = row[`${modelId}_${v.id}`];
         if (val !== null && val !== undefined && !isNaN(val)) {
-          if (v.category === 'precip' || v.category === 'snow') {
-            // For accumulations, we want the max
-            allValues.push(val);
-          } else {
-            allValues.push(val);
-          }
+          allValues.push(val);
         }
       }
     }
@@ -371,7 +373,7 @@ function renderSummaryCards(data) {
     const s = summaries.apcp;
     cards.push(`
       <div class="summary-card precip">
-        <div class="label">Total Precip</div>
+        <div class="label">Max Precip</div>
         <div class="value">${s.max.toFixed(2)}"</div>
         <div class="range">${s.min.toFixed(2)} - ${s.max.toFixed(2)} in</div>
       </div>
@@ -382,7 +384,7 @@ function renderSummaryCards(data) {
     const s = summaries.asnow || summaries.snod;
     cards.push(`
       <div class="summary-card snow">
-        <div class="label">Snow</div>
+        <div class="label">Max Snow</div>
         <div class="value">${s.max.toFixed(1)}"</div>
         <div class="range">${s.min.toFixed(1)} - ${s.max.toFixed(1)} in</div>
       </div>
@@ -463,9 +465,7 @@ function renderMultiModelTable(data, maxHours) {
   // Body rows
   html += '<tbody>';
   for (const row of filteredRows) {
-    const firstModel = modelIds[0];
-    const validTimeKey = `${firstModel}_valid_time`;
-    const localTime = formatLocalTime(row[validTimeKey], true);
+    const localTime = formatLocalTime(row.valid_time, true);
 
     html += `<tr><td class="time-col">${localTime}</td>`;
     for (const modelId of modelIds) {
@@ -505,8 +505,7 @@ function exportToCSV(data, maxHours) {
   const filteredRows = data.rows.filter(r => r.hour <= maxHours);
 
   for (const row of filteredRows) {
-    const firstModel = modelIds[0];
-    const validTime = row[`${firstModel}_valid_time`] || '';
+    const validTime = row.valid_time || '';
     const cells = [row.hour, validTime];
 
     for (const modelId of modelIds) {

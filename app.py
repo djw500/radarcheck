@@ -757,10 +757,24 @@ def api_table_multimodel():
             "metadata": {"region": region_id, "lat": lat, "lon": lon},
         }), 404
 
+    # Determine time range for the table
+    # Start from the current hour (UTC)
+    now_utc = datetime.now(pytz.UTC).replace(minute=0, second=0, microsecond=0)
+    # End at 7 days (168 hours) from now
+    end_utc = now_utc + timedelta(hours=168)
+    
+    all_rows_by_time = {}
+    curr = now_utc
+    while curr <= end_utc:
+        t_str = curr.isoformat()
+        all_rows_by_time[t_str] = {
+            "valid_time": t_str,
+            "hour": int((curr - now_utc).total_seconds() // 3600)
+        }
+        curr += timedelta(hours=1)
+
     # Collect data from each model
     models_info = {}
-    all_rows_by_hour = {}
-    all_hours = set()
 
     for model_id, runs in models_with_runs.items():
         if not runs:
@@ -769,6 +783,8 @@ def api_table_multimodel():
         # Use latest run for each model
         run_id = runs[0]
         init_dt = parse_run_id_to_init_dt(run_id)
+        if not init_dt:
+            continue
 
         # Get variables for this model's run
         vars_info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, run_id)
@@ -779,7 +795,7 @@ def api_table_multimodel():
         models_info[model_id] = {
             "name": model_config.get("name", model_id.upper()),
             "run_id": run_id,
-            "init_time_utc": init_dt.isoformat() if init_dt else None,
+            "init_time_utc": init_dt.isoformat(),
             "max_forecast_hours": model_config.get("max_forecast_hours"),
             "variables": list(vars_info.keys()),
         }
@@ -795,33 +811,48 @@ def api_table_multimodel():
 
             for hour, val in zip(hours.tolist(), values.tolist()):
                 hour = int(hour)
-                all_hours.add(hour)
-                if hour not in all_rows_by_hour:
-                    all_rows_by_hour[hour] = {"hour": hour}
-
-                # Key format: model_variable (e.g., "hrrr_t2m")
-                col_key = f"{model_id}_{var_id}"
-                all_rows_by_hour[hour][col_key] = None if (val is None or (isinstance(val, float) and np.isnan(val))) else val
-
-    if not all_rows_by_hour:
-        return jsonify({
-            "error": "No data available from any model",
-            "metadata": {"region": region_id, "lat": lat, "lon": lon},
-            "models_checked": list(models_with_runs.keys()),
-        }), 404
-
-    # Sort hours and build rows
-    hours_sorted = sorted(all_hours)
-    rows = []
-    for hour in hours_sorted:
-        row = all_rows_by_hour[hour]
-        # Add valid_time for each model (different init times = different valid times)
-        for model_id, model_info in models_info.items():
-            if model_info.get("init_time_utc"):
-                init_dt = datetime.fromisoformat(model_info["init_time_utc"])
                 valid_dt = init_dt + timedelta(hours=hour)
-                row[f"{model_id}_valid_time"] = valid_dt.isoformat()
-        rows.append(row)
+                valid_dt = valid_dt.replace(minute=0, second=0, microsecond=0)
+                time_key = valid_dt.isoformat()
+                
+                if time_key in all_rows_by_time:
+                    # Key format: model_variable (e.g., "hrrr_t2m")
+                    col_key = f"{model_id}_{var_id}"
+                    all_rows_by_time[time_key][col_key] = None if (val is None or (isinstance(val, float) and np.isnan(val))) else val
+                    # Store model-specific hour
+                    all_rows_by_time[time_key][f"{model_id}_hour"] = hour
+
+    # Perform snow derivation for models that lack native asnow
+    for model_id in models_info.keys():
+        asnow_key = f"{model_id}_asnow"
+        apcp_key = f"{model_id}_apcp"
+        csnow_key = f"{model_id}_csnow"
+        
+        # Check if we should derive asnow (have apcp+csnow but no native asnow)
+        has_apcp = any(apcp_key in r for r in all_rows_by_time.values())
+        has_asnow = any(asnow_key in r for r in all_rows_by_time.values())
+        has_csnow = any(csnow_key in r for r in all_rows_by_time.values())
+        
+        if has_apcp and has_csnow and not has_asnow:
+            if "asnow" not in models_info[model_id]["variables"]:
+                models_info[model_id]["variables"].append("asnow")
+            
+            for r in all_rows_by_time.values():
+                apcp = r.get(apcp_key)
+                csnow = r.get(csnow_key)
+                if apcp is not None and csnow is not None:
+                    # Derive snowfall: 10:1 ratio if csnow == 1
+                    r[asnow_key] = apcp * 10.0 if csnow > 0.5 else 0.0
+
+    # Sort times and build rows
+    times_sorted = sorted(all_rows_by_time.keys())
+    rows = []
+    for time_key in times_sorted:
+        row = all_rows_by_time[time_key]
+        # Filter: only keep rows that have data from AT LEAST one model
+        has_any_data = any(k.startswith(tuple(models_info.keys())) for k in row.keys())
+        if has_any_data:
+            rows.append(row)
 
     return jsonify({
         "metadata": {
@@ -830,6 +861,7 @@ def api_table_multimodel():
             "resolution_deg": res,
             "lat": lat,
             "lon": lon,
+            "now_utc": now_utc.isoformat(),
         },
         "models": models_info,
         "rows": rows,
