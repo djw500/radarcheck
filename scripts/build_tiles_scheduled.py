@@ -213,6 +213,25 @@ def main():
     """Main entry point for scheduled tile building."""
     logger.info("=" * 60)
     logger.info("Scheduled Tile Builder Starting")
+    
+    # Handle command line args
+    clear_cache = "--clear" in sys.argv
+    once_mode = "--once" in sys.argv
+    
+    if clear_cache:
+        logger.warning("CLEARING TILE CACHE requested via --clear flag")
+        for region_id in REGIONS:
+            res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
+            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+            region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
+            if os.path.exists(region_dir):
+                logger.info(f"Removing {region_dir}...")
+                try:
+                    import shutil
+                    shutil.rmtree(region_dir)
+                except Exception as e:
+                    logger.error(f"Failed to clear cache: {e}")
+    
     logger.info(f"Build interval: {BUILD_INTERVAL_MINUTES} minutes")
     logger.info(f"Models: {[m['id'] for m in MODELS_CONFIG]}")
     logger.info(f"Regions: {REGIONS}")
