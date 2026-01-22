@@ -141,17 +141,23 @@ def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarra
     return min_grid.reshape(ny, nx), max_grid.reshape(ny, nx), mean_grid.reshape(ny, nx)
 
 
-def open_dataset_robust(path: str) -> xr.Dataset:
+def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.Dataset:
     """
     Open a GRIB file with xarray/cfgrib, handling common index ambiguity errors.
     """
     try:
+        if preferred_filter:
+            return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': preferred_filter})
         return xr.open_dataset(path, engine="cfgrib")
     except Exception as e:
         if "multiple values for unique key" in str(e):
             # Try to resolve ambiguity by filtering stepType
             try:
-                return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepType': 'instant'}})
+                # Prefer accumulations for accumulated variables when ambiguous
+                # Fallback cascade: accum -> avg -> instant -> typeOfLevel surface
+                if preferred_filter:
+                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': preferred_filter})
+                return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepType': 'accum'}})
             except Exception:
                 try:
                     return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepType': 'avg'}})
@@ -181,7 +187,14 @@ def build_tiles_for_variable(
 
     # Open first hour to get grid and precompute mapping
     first_path = grib_paths_by_hour[hours_sorted[0]]
-    ds0 = open_dataset_robust(first_path)
+    preferred = None
+    # Prefer accumulations for accumulation variables (e.g., APCP, ASNOW)
+    if variable_config.get("is_accumulation"):
+        preferred = {'stepType': 'accum'}
+    # PRATE should be instant/rate
+    if variable_config.get("short_name") == "prate":
+        preferred = {'stepType': 'instant'}
+    ds0 = open_dataset_robust(first_path, preferred)
     da0 = _select_variable_from_dataset(ds0, variable_config)
 
     # Determine conversion based on units if specified
@@ -217,7 +230,7 @@ def build_tiles_for_variable(
 
     for ti, hour in enumerate(hours_sorted):
         path = grib_paths_by_hour[hour]
-        ds = open_dataset_robust(path)
+        ds = open_dataset_robust(path, preferred)
         da = _select_variable_from_dataset(ds, variable_config)
         if conversion:
             da = convert_units(da, conversion)

@@ -81,6 +81,155 @@ def require_api_key(f):
         return f(*args, **kwargs)
     return decorated
 
+
+# --- Snow derivation helpers ---
+def _temp_to_slr(t_f: np.ndarray) -> np.ndarray:
+    """Conservative temperature-based snow-to-liquid ratio (SLR).
+    Rough guidance from operational rules of thumb:
+      - ≥33°F: rain (0:1)
+      - 31–33°F: 6:1
+      - 28–31°F: 8:1
+      - 22–28°F: 10:1
+      - <22°F: 12:1 (cap)
+    """
+    slr = np.full_like(t_f, 10.0, dtype=float)
+    slr = np.where(t_f >= 33.0, 0.0, slr)
+    slr = np.where((t_f >= 31.0) & (t_f < 33.0), 6.0, slr)
+    slr = np.where((t_f >= 28.0) & (t_f < 31.0), 8.0, slr)
+    slr = np.where((t_f >= 22.0) & (t_f < 28.0), 10.0, slr)
+    slr = np.where(t_f < 22.0, 12.0, slr)
+    return slr
+
+
+def _derive_asnow_timeseries_from_tiles(
+    region_id: str,
+    res: float,
+    model_id: str,
+    run_id: str,
+    lat: float,
+    lon: float,
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Derive accumulated snowfall series from APCP/CSNOW/T2M tiles.
+
+    - Detects whether APCP is cumulative or stepwise and converts to per-step deltas.
+    - Gates by CSNOW when available.
+    - Uses T2M to veto warm periods and modulate SLR.
+    - Returns (hours, cumulative_snow_inches) or (None, None) if inputs missing.
+    """
+    try:
+        h_apcp, v_apcp = load_timeseries_for_point(
+            repomap["TILES_DIR"], region_id, res, model_id, run_id, "apcp", lat, lon
+        )
+    except FileNotFoundError:
+        return None, None
+
+    # Optional gates
+    try:
+        h_csnow, v_csnow = load_timeseries_for_point(
+            repomap["TILES_DIR"], region_id, res, model_id, run_id, "csnow", lat, lon
+        )
+    except FileNotFoundError:
+        # Without CSNOW we won't attempt a derived snowfall to avoid overestimation
+        return None, None
+
+    try:
+        h_t2m, v_t2m = load_timeseries_for_point(
+            repomap["TILES_DIR"], region_id, res, model_id, run_id, "t2m", lat, lon
+        )
+    except FileNotFoundError:
+        h_t2m, v_t2m = None, None
+
+    # Optional cap using SNOD (snow depth)
+    try:
+        h_snod, v_snod = load_timeseries_for_point(
+            repomap["TILES_DIR"], region_id, res, model_id, run_id, "snod", lat, lon
+        )
+    except FileNotFoundError:
+        h_snod, v_snod = None, None
+
+    # Align hours across available series
+    common_hours = h_apcp.copy()
+    if h_csnow is not None:
+        common_hours = np.intersect1d(common_hours, h_csnow)
+    if h_t2m is not None:
+        common_hours = np.intersect1d(common_hours, h_t2m)
+    if common_hours.size == 0:
+        return None, None
+
+    # Build aligned vectors
+    mask_apcp = np.isin(h_apcp, common_hours)
+    apcp_aligned = np.nan_to_num(np.array(v_apcp[mask_apcp], dtype=float), nan=0.0)
+
+    csnow_aligned = None
+    if h_csnow is not None:
+        mask_csnow = np.isin(h_csnow, common_hours)
+        csnow_aligned = np.nan_to_num(np.array(v_csnow[mask_csnow], dtype=float), nan=0.0)
+
+    t2m_aligned = None
+    if h_t2m is not None:
+        mask_t2m = np.isin(h_t2m, common_hours)
+        t2m_aligned = np.nan_to_num(np.array(v_t2m[mask_t2m], dtype=float), nan=32.0)
+
+    # Convert APCP to per-step increments if cumulative
+    diffs = np.diff(apcp_aligned)
+    is_cumulative = np.all(diffs >= -1e-6)
+    if is_cumulative:
+        inc_apcp = np.concatenate(([apcp_aligned[0]], np.maximum(diffs, 0.0)))
+    else:
+        inc_apcp = apcp_aligned
+    # Remove tiny noise to avoid inflating totals
+    inc_apcp = np.where(inc_apcp < 1e-3, 0.0, inc_apcp)
+
+    # Base snow fraction mask
+    snow_frac = np.ones_like(inc_apcp, dtype=float)
+    if csnow_aligned is not None:
+        # Use csnow as a fraction if provided (0..1), else treat as binary mask
+        frac = np.clip(csnow_aligned, 0.0, 1.0)
+        frac = np.where((frac > 0.0) & (frac < 1.0), frac, (csnow_aligned > 0.5).astype(float))
+        snow_frac *= frac
+
+    # Temperature veto and SLR modulation
+    if t2m_aligned is not None:
+        slr = _temp_to_slr(t2m_aligned)
+        warm_mask = (slr <= 0.0).astype(float)
+        # Zero out warm periods entirely
+        snow_frac *= (1.0 - warm_mask)
+    else:
+        # Without temperature, fall back to conservative 8:1
+        slr = np.full_like(inc_apcp, 8.0, dtype=float)
+
+    snow_step = inc_apcp * snow_frac * slr
+    snow_cum = np.cumsum(snow_step)
+
+    # If snow depth is available, cap accumulation to a modest multiple of depth change
+    if h_snod is not None:
+        try:
+            # Robust alignment using searchsorted
+            # h_snod and common_hours are sorted
+            idx = np.searchsorted(h_snod, common_hours)
+            idx = np.clip(idx, 0, len(h_snod) - 1)
+            # Identify which common_hours actually exist in h_snod
+            matches = (h_snod[idx] == common_hours)
+            
+            # Create aligned array initialized with NaN
+            snod_aligned = np.full(common_hours.shape, np.nan)
+            snod_aligned[matches] = np.array(v_snod[idx[matches]], dtype=float)
+
+            # Apply cap only where SNOD data exists
+            valid_mask = ~np.isnan(snod_aligned)
+            if np.any(valid_mask):
+                # Use first valid depth as baseline
+                baseline = snod_aligned[valid_mask][0]
+                snod_accum = np.maximum(0.0, snod_aligned - baseline)
+                cap = 1.5 * snod_accum
+                
+                # Apply cap only to valid indices
+                snow_cum[valid_mask] = np.minimum(snow_cum[valid_mask], cap[valid_mask])
+        except Exception:
+            pass
+
+    return common_hours, snow_cum
+
 def parse_metadata_file(filepath: str) -> dict[str, str]:
     """Safely parse a metadata file with key=value format."""
     metadata = {}
@@ -831,6 +980,7 @@ def api_table_multimodel():
         asnow_key = f"{model_id}_asnow"
         apcp_key = f"{model_id}_apcp"
         csnow_key = f"{model_id}_csnow"
+        t2m_key = f"{model_id}_t2m"
         
         # Check if we should derive asnow (have apcp+csnow but no native asnow)
         has_apcp = any(apcp_key in r for r in all_rows_by_time.values())
@@ -844,9 +994,24 @@ def api_table_multimodel():
             for r in all_rows_by_time.values():
                 apcp = r.get(apcp_key)
                 csnow = r.get(csnow_key)
+                t2m = r.get(t2m_key)
                 if apcp is not None and csnow is not None:
-                    # Derive snowfall: 10:1 ratio if csnow == 1
-                    r[asnow_key] = apcp * 10.0 if csnow > 0.5 else 0.0
+                    # Temperature-aware SLR; veto warm periods
+                    if (t2m is not None and t2m >= 34.0) or csnow <= 0.5:
+                        r[asnow_key] = 0.0
+                    else:
+                        # Piecewise SLR similar to _temp_to_slr
+                        if t2m is None:
+                            slr = 10.0
+                        elif t2m >= 31.0:
+                            slr = 8.0
+                        elif t2m >= 28.0:
+                            slr = 10.0
+                        elif t2m >= 20.0:
+                            slr = 12.0
+                        else:
+                            slr = 14.0
+                        r[asnow_key] = apcp * slr
 
     # Sort times and build rows
     times_sorted = sorted(all_rows_by_time.keys())
@@ -1842,34 +2007,11 @@ def api_timeseries_multirun():
                     repomap["TILES_DIR"], region_id, res, model_id, run_id, variable_id, lat, lon
                 )
             except FileNotFoundError:
-                # Fallback: Derivation for asnow (Snowfall)
                 if variable_id == "asnow":
-                    try:
-                        # Load Precip and Categorical Snow
-                        h_apcp, v_apcp = load_timeseries_for_point(
-                            repomap["TILES_DIR"], region_id, res, model_id, run_id, "apcp", lat, lon
-                        )
-                        h_csnow, v_csnow = load_timeseries_for_point(
-                            repomap["TILES_DIR"], region_id, res, model_id, run_id, "csnow", lat, lon
-                        )
-                        
-                        # Align arrays (intersection of hours)
-                        common_hours = np.intersect1d(h_apcp, h_csnow)
-                        if common_hours.size > 0:
-                            # Create aligned value arrays
-                            # Note: This assumes hours are sorted and unique, which they are from tiles.py
-                            mask_apcp = np.isin(h_apcp, common_hours)
-                            mask_csnow = np.isin(h_csnow, common_hours)
-                            
-                            v_apcp_aligned = v_apcp[mask_apcp]
-                            v_csnow_aligned = v_csnow[mask_csnow]
-                            
-                            # Derive: Snow = Precip * 10 where Categorical Snow is True (> 0.5)
-                            # Using 10:1 ratio as standard approximation
-                            values = np.where(v_csnow_aligned > 0.5, v_apcp_aligned * 10.0, 0.0)
-                            hours = common_hours
-                    except FileNotFoundError:
-                        pass
+                    # Temperature-aware derived snowfall
+                    hours, values = _derive_asnow_timeseries_from_tiles(
+                        region_id, res, model_id, run_id, lat, lon
+                    )
             
             if hours is not None and values is not None:
                 series = []
