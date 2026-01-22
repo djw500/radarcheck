@@ -455,33 +455,56 @@ def download_all_hours_parallel(
     run_id: str,
     max_hours: int,
 ) -> dict[int, str]:
-    """Download GRIB files in parallel using a thread pool."""
+    """Download GRIB files in parallel using a thread pool.
+    Short-circuits if a 404 is encountered, as subsequent hours won't be ready.
+    """
     results: dict[int, str] = {}
     max_workers = repomap["PARALLEL_DOWNLOAD_WORKERS"]
     model_config = repomap["MODELS"][model_id]
     digits = model_config.get("forecast_hour_digits", 2)
+    
+    # Track if we've hit a 404 to stop subsequent attempts
+    # We use a list for a mutable reference in the closure
+    first_missing_hour = [999] 
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        def fetch_with_check(h):
+            if h >= first_missing_hour[0]:
+                return None
+            try:
+                res = fetch_grib(
+                    model_id,
+                    variable_id,
+                    date_str,
+                    init_hour,
+                    f"{h:0{digits}d}",
+                    run_id,
+                )
+                return res
+            except Exception as e:
+                if "404" in str(e):
+                    first_missing_hour[0] = min(first_missing_hour[0], h)
+                raise e
+
         futures = {
-            executor.submit(
-                fetch_grib,
-                model_id,
-                variable_id,
-                date_str,
-                init_hour,
-                f"{hour:0{digits}d}",
-                run_id,
-            ): hour
+            executor.submit(fetch_with_check, hour): hour
             for hour in range(1, max_hours + 1)
         }
-        for future in as_completed(futures):
+        
+        for future in sorted(futures.keys(), key=lambda f: futures[future]):
             hour = futures[future]
+            if hour >= first_missing_hour[0]:
+                continue
+                
             try:
-                results[hour] = future.result()
+                val = future.result()
+                if val:
+                    results[hour] = val
             except Exception as exc:
                 # Concise one-liner for errors
-                if "404 Client Error" in str(exc):
+                if "404" in str(exc):
                     # logger.info(f"Hour {hour} not available")
-                    pass
+                    first_missing_hour[0] = min(first_missing_hour[0], hour)
                 else:
                     logger.warning(f"Hour {hour} failed: {str(exc)[:100]}")
     
