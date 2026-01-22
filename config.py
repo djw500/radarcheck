@@ -232,13 +232,15 @@ WEATHER_CATEGORIES = {
 MODELS = {
     "hrrr": {
         "name": "HRRR",
-        "max_forecast_hours": 24,
+        "max_forecast_hours": 48,  # Synoptic runs; non-synoptic are 18h
         "update_frequency_hours": 1,
         "nomads_url": "https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl",
         "dir_pattern": "%2Fhrrr.{date_str}%2Fconus",
         "file_pattern": "hrrr.t{init_hour}z.wrfsfcf{forecast_hour}.grib2",
         "availability_check_var": "var_REFC",
         "forecast_hour_digits": 2,
+        # HRRR: synoptic runs (00,06,12,18z) have 48h, others have 18h
+        "max_hours_by_init": {"00": 48, "06": 48, "12": 48, "18": 48, "default": 18},
     },
     "nam_nest": {
         "name": "NAM 3km CONUS",

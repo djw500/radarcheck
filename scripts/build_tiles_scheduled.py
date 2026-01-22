@@ -64,11 +64,32 @@ logging.getLogger("cfgrib").setLevel(logging.ERROR)
 
 # Configuration from environment with defaults
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
-MAX_HOURS_HRRR = int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "24"))
+MAX_HOURS_HRRR = int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "48"))
 MAX_HOURS_NAM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))
 MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
 MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
 KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
+
+
+def get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
+    """Get max forecast hours for a specific run, accounting for init-hour variations.
+
+    Some models (like HRRR) have different forecast lengths depending on init hour:
+    - HRRR synoptic runs (00, 06, 12, 18z): 48 hours
+    - HRRR non-synoptic runs: 18 hours
+    """
+    model_config = repomap["MODELS"].get(model_id, {})
+    max_hours_by_init = model_config.get("max_hours_by_init")
+
+    if not max_hours_by_init:
+        return default_max
+
+    # Extract init hour from run_id (format: run_YYYYMMDD_HH)
+    try:
+        init_hour = run_id.split("_")[2]
+        return max_hours_by_init.get(init_hour, max_hours_by_init.get("default", default_max))
+    except (IndexError, KeyError):
+        return default_max
 
 # Models to build tiles for (in priority order)
 MODELS_CONFIG = [
@@ -284,15 +305,18 @@ def build_cycle():
                 print(f"[{model_id} {i+1}/{num_runs}] Skipping {run_id} (too new)")
                 continue
 
+            # Get run-specific max hours (e.g., HRRR synoptic vs non-synoptic)
+            run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
+
             for region_id in REGIONS:
                 # Skip if tiles already exist and are complete
-                if tiles_exist(region_id, model_id, run_id, expected_max_hours=max_hours):
+                if tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
                     print(f"[{model_id} {i+1}/{num_runs}] Verified complete: {run_id}")
                     continue
 
                 print(f"[{model_id} {i+1}/{num_runs}] Building/Completing {run_id}...")
                 builds_attempted += 1
-                if build_tiles_for_run(region_id, model_id, run_id, max_hours):
+                if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
                     builds_succeeded += 1
 
                 # Rate limit between builds
