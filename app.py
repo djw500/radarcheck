@@ -170,13 +170,27 @@ def _derive_asnow_timeseries_from_tiles(
         mask_t2m = np.isin(h_t2m, common_hours)
         t2m_aligned = np.nan_to_num(np.array(v_t2m[mask_t2m], dtype=float), nan=32.0)
 
-    # Convert APCP to per-step increments if cumulative
+    # Convert APCP to per-step increments
+    # This handles:
+    # 1. Purely cumulative (strictly increasing): diffs are positive -> use diffs.
+    # 2. Cumulative with bucket resets (sawtooth): diffs negative at reset -> use value itself.
+    # 3. Purely incremental: diffs mixed -> use values directly?
+    # Wait, if purely incremental (e.g. 0.1, 0.05), diff is -0.05. Logic "use value" gives 0.05. Correct.
+    # If purely incremental (0.1, 0.2), diff is 0.1. Logic "use diff" gives 0.1.
+    # WRONG. If purely incremental 0.1, 0.2 -> Total should be 0.3.
+    # My logic "use diff" gives 0.1 + 0.1 = 0.2.
+    # So we MUST distinguish "Accumulating" vs "Instant".
+    #
+    # GFS/HRRR/NAM APCP is always "Accumulated" (either since start or since bucket reset).
+    # It is NEVER "Instant" (PRATE is instant).
+    # So we can assume the "sawtooth" model (Cumulative with Resets).
+    
     diffs = np.diff(apcp_aligned)
-    is_cumulative = np.all(diffs >= -1e-6)
-    if is_cumulative:
-        inc_apcp = np.concatenate(([apcp_aligned[0]], np.maximum(diffs, 0.0)))
-    else:
-        inc_apcp = apcp_aligned
+    # If diff is negative, it's a reset: increment is the new value (assuming reset to 0).
+    # If diff is positive, it's accumulation: increment is the diff.
+    inc_apcp_steps = np.where(diffs >= 0, diffs, apcp_aligned[1:])
+    inc_apcp = np.concatenate(([apcp_aligned[0]], inc_apcp_steps))
+    
     # Remove tiny noise to avoid inflating totals
     inc_apcp = np.where(inc_apcp < 1e-3, 0.0, inc_apcp)
 
@@ -201,32 +215,8 @@ def _derive_asnow_timeseries_from_tiles(
     snow_step = inc_apcp * snow_frac * slr
     snow_cum = np.cumsum(snow_step)
 
-    # If snow depth is available, cap accumulation to a modest multiple of depth change
-    if h_snod is not None:
-        try:
-            # Robust alignment using searchsorted
-            # h_snod and common_hours are sorted
-            idx = np.searchsorted(h_snod, common_hours)
-            idx = np.clip(idx, 0, len(h_snod) - 1)
-            # Identify which common_hours actually exist in h_snod
-            matches = (h_snod[idx] == common_hours)
-            
-            # Create aligned array initialized with NaN
-            snod_aligned = np.full(common_hours.shape, np.nan)
-            snod_aligned[matches] = np.array(v_snod[idx[matches]], dtype=float)
-
-            # Apply cap only where SNOD data exists
-            valid_mask = ~np.isnan(snod_aligned)
-            if np.any(valid_mask):
-                # Use first valid depth as baseline
-                baseline = snod_aligned[valid_mask][0]
-                snod_accum = np.maximum(0.0, snod_aligned - baseline)
-                cap = 1.5 * snod_accum
-                
-                # Apply cap only to valid indices
-                snow_cum[valid_mask] = np.minimum(snow_cum[valid_mask], cap[valid_mask])
-        except Exception:
-            pass
+    # Removed SNOD capping logic to prevent accumulation from decreasing during melt/compaction events.
+    # The temperature-based SLR and CSNOW gating provide sufficient constraints.
 
     return common_hours, snow_cum
 
