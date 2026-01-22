@@ -288,33 +288,36 @@ def cleanup_old_runs(max_runs_to_keep: int = 48):
                     
                     # Tier 1: Keep everything from the last 12 hours
                     if age_hours <= 12:
+                        logger.info(f"  [KEEP] {model_id}/{run_id}: Recent (age: {age_hours:.1f}h)")
                         kept_runs.append(run_id)
                         continue
                     
                     # Tier 2: Keep synoptic runs (00, 06, 12, 18) for up to 3 days
                     if age_hours <= 72:
                         init_hour = int(parts[2])
-                        # Check if it's a synoptic hour and we haven't kept one for this 6h window yet
-                        # We prefer the one closest to the synoptic hour if multiple exist
                         bucket = (parts[1], (init_hour // 6) * 6)
                         if init_hour % 6 == 0 and bucket not in filled_6h_buckets:
+                            logger.info(f"  [KEEP] {model_id}/{run_id}: Synoptic bucket {bucket[1]}z (age: {age_hours:.1f}h)")
                             kept_runs.append(run_id)
                             filled_6h_buckets.add(bucket)
                             continue
 
                     # If it doesn't fit a tier, it's a candidate for removal
-                    # But we always keep at least a few most recent runs regardless of age
                     if len(kept_runs) < 5:
+                        logger.info(f"  [KEEP] {model_id}/{run_id}: Safety minimum (count: {len(kept_runs)})")
                         kept_runs.append(run_id)
                     else:
+                        logger.info(f"  [DROP] {model_id}/{run_id}: Outside retention policy (age: {age_hours:.1f}h)")
                         runs_to_remove.append(run_id)
-                except:
-                    # If we can't parse the date, keep it to be safe or if it's too old remove it
+                except Exception as e:
                     if len(kept_runs) < 5:
                         kept_runs.append(run_id)
                     else:
                         runs_to_remove.append(run_id)
 
+            if runs_to_remove:
+                logger.info(f"Cleanup summary for {model_id}: Keeping {len(kept_runs)}, Removing {len(runs_to_remove)}")
+            
             for old_run in runs_to_remove:
                 old_run_dir = os.path.join(model_dir, old_run)
                 logger.info(f"Tiered cleanup: Removing old run {old_run}")
