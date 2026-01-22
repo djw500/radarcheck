@@ -207,7 +207,6 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
         )
         
         if process.stdout:
-            import sys
             last_was_newline = True
             while True:
                 char = process.stdout.read(1)
