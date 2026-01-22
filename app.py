@@ -101,6 +101,54 @@ def _temp_to_slr(t_f: np.ndarray) -> np.ndarray:
     return slr
 
 
+def _forward_fill_nan(arr: np.ndarray) -> np.ndarray:
+    """Forward-fill NaNs in a 1D numpy array. 
+    Leading NaNs are converted to 0.0.
+    """
+    if arr.size == 0:
+        return arr
+    mask = np.isnan(arr)
+    if not np.any(mask):
+        return arr
+    
+    # Create index array that stays at the last non-NaN index
+    idx = np.where(~mask, np.arange(len(arr)), 0)
+    # We use accumulate to keep the last seen valid index
+    # However, leading NaNs will stay at index 0.
+    np.maximum.accumulate(idx, out=idx)
+    out = arr[idx]
+    
+    # Handle leading NaNs by converting to 0.0
+    if mask[0]:
+        # Find first non-NaN if possible, else it's all NaNs
+        first_valid = np.where(~mask)[0]
+        if first_valid.size > 0:
+            out[:first_valid[0]] = 0.0
+        else:
+            out[:] = 0.0
+    return out
+
+
+def _accumulate_timeseries(values: np.ndarray) -> np.ndarray:
+    """Convert potentially incremental/resetting cumulative series to strictly monotonic total accumulation."""
+    # Forward-fill NaNs to avoid treating missing steps in a cumulative series as resets.
+    # Leading NaNs become 0.
+    vals = _forward_fill_nan(np.array(values, dtype=float))
+    
+    diffs = np.diff(vals)
+    # If diff >= 0, it's accumulation. If diff < 0, it's reset.
+    # On reset, we assume the new value IS the increment (since 0).
+    inc = np.where(diffs >= 0, diffs, vals[1:])
+    
+    # First value is initial accumulation
+    total_inc = np.concatenate(([vals[0]], inc))
+    
+    # Remove tiny noise
+    total_inc = np.where(total_inc < 1e-3, 0.0, total_inc)
+    
+    return np.cumsum(total_inc)
+
+
 def _derive_asnow_timeseries_from_tiles(
     region_id: str,
     res: float,
@@ -147,47 +195,52 @@ def _derive_asnow_timeseries_from_tiles(
     except FileNotFoundError:
         h_snod, v_snod = None, None
 
-    # Align hours across available series
-    common_hours = h_apcp.copy()
+    # Align hours across available series using union to avoid losing data from sparse models (e.g. GFS)
+    # We use union instead of intersection, then interpolate missing values.
+    all_hour_sets = [h_apcp]
     if h_csnow is not None:
-        common_hours = np.intersect1d(common_hours, h_csnow)
+        all_hour_sets.append(h_csnow)
     if h_t2m is not None:
-        common_hours = np.intersect1d(common_hours, h_t2m)
+        all_hour_sets.append(h_t2m)
+    
+    common_hours = np.unique(np.concatenate(all_hour_sets))
+    common_hours = np.sort(common_hours)
+
     if common_hours.size == 0:
         return None, None
 
-    # Build aligned vectors
-    mask_apcp = np.isin(h_apcp, common_hours)
-    apcp_aligned = np.nan_to_num(np.array(v_apcp[mask_apcp], dtype=float), nan=0.0)
+    def align_and_interpolate(h, v, target_h, fill_value=0.0):
+        if h is None or v is None:
+            return np.full_like(target_h, fill_value, dtype=float)
+        
+        # Drop NaNs so interp can bridge gaps linearly instead of creating steps
+        h_arr = np.array(h, dtype=float)
+        v_arr = np.array(v, dtype=float)
+        mask = ~np.isnan(v_arr)
+        if not np.any(mask):
+            return np.full_like(target_h, fill_value, dtype=float)
+            
+        return np.interp(target_h, h_arr[mask], v_arr[mask], left=fill_value, right=v_arr[mask][-1])
 
+    # Build aligned vectors using interpolation
+    apcp_aligned = align_and_interpolate(h_apcp, v_apcp, common_hours, fill_value=0.0)
+    
     csnow_aligned = None
     if h_csnow is not None:
-        mask_csnow = np.isin(h_csnow, common_hours)
-        csnow_aligned = np.nan_to_num(np.array(v_csnow[mask_csnow], dtype=float), nan=0.0)
+        csnow_aligned = align_and_interpolate(h_csnow, v_csnow, common_hours, fill_value=0.0)
 
     t2m_aligned = None
     if h_t2m is not None:
-        mask_t2m = np.isin(h_t2m, common_hours)
-        t2m_aligned = np.nan_to_num(np.array(v_t2m[mask_t2m], dtype=float), nan=32.0)
+        # Default temperature to freezing if missing
+        t2m_aligned = align_and_interpolate(h_t2m, v_t2m, common_hours, fill_value=32.0)
 
-    # Convert APCP to per-step increments
-    # This handles:
-    # 1. Purely cumulative (strictly increasing): diffs are positive -> use diffs.
-    # 2. Cumulative with bucket resets (sawtooth): diffs negative at reset -> use value itself.
-    # 3. Purely incremental: diffs mixed -> use values directly?
-    # Wait, if purely incremental (e.g. 0.1, 0.05), diff is -0.05. Logic "use value" gives 0.05. Correct.
-    # If purely incremental (0.1, 0.2), diff is 0.1. Logic "use diff" gives 0.1.
-    # WRONG. If purely incremental 0.1, 0.2 -> Total should be 0.3.
-    # My logic "use diff" gives 0.1 + 0.1 = 0.2.
-    # So we MUST distinguish "Accumulating" vs "Instant".
-    #
-    # GFS/HRRR/NAM APCP is always "Accumulated" (either since start or since bucket reset).
-    # It is NEVER "Instant" (PRATE is instant).
-    # So we can assume the "sawtooth" model (Cumulative with Resets).
+    # Convert APCP to per-step increments using shared helper logic for resets
+    # But we need to do it carefully because we apply SLR *after* increment calc.
+    # _accumulate_timeseries returns cumsum. We want increments.
+    # Replicating logic here for access to increments:
     
     diffs = np.diff(apcp_aligned)
-    # If diff is negative, it's a reset: increment is the new value (assuming reset to 0).
-    # If diff is positive, it's accumulation: increment is the diff.
+    # If diff is negative, it's a reset: increment is the new value
     inc_apcp_steps = np.where(diffs >= 0, diffs, apcp_aligned[1:])
     inc_apcp = np.concatenate(([apcp_aligned[0]], inc_apcp_steps))
     
@@ -949,6 +1002,10 @@ def api_table_multimodel():
                 hours, values = load_timeseries_for_point(
                     repomap["TILES_DIR"], region_id, res, model_id, run_id, var_id, lat, lon, stat=stat
                 )
+                # Ensure strictly monotonic accumulation for accumulation variables (e.g. asnow, apcp)
+                var_cfg = repomap["WEATHER_VARIABLES"].get(var_id, {})
+                if var_cfg.get("is_accumulation") and values is not None:
+                    values = _accumulate_timeseries(values)
             except FileNotFoundError:
                 continue
 
@@ -1996,6 +2053,12 @@ def api_timeseries_multirun():
                 hours, values = load_timeseries_for_point(
                     repomap["TILES_DIR"], region_id, res, model_id, run_id, variable_id, lat, lon
                 )
+                # If variable is accumulation type (e.g. asnow, apcp), ensure strictly monotonic
+                # accumulation to handle resets in source data (e.g. NBM 6h buckets).
+                var_cfg = repomap["WEATHER_VARIABLES"].get(variable_id, {})
+                if var_cfg.get("is_accumulation") and values is not None:
+                    values = _accumulate_timeseries(values)
+
             except FileNotFoundError:
                 if variable_id == "asnow":
                     # Temperature-aware derived snowfall

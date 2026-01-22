@@ -30,6 +30,7 @@ WEATHER_VARIABLES = {
         "unit_conversions_by_units": {
             "m": "m_to_in",
             "kg m-2": "kg_m2_to_in",
+            "kg m**-2": "kg_m2_to_in",
         },
     },
     "csnow": {
@@ -77,6 +78,7 @@ WEATHER_VARIABLES = {
         "unit_conversions_by_units": {
             "m": "m_to_in",
             "kg m-2": "kg_m2_to_in",
+            "kg m**-2": "kg_m2_to_in",
         },
         "is_accumulation": True,
     },
