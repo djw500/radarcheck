@@ -188,6 +188,7 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
 
     cmd = [
         sys.executable,
+        "-u", # Unbuffered output
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build_tiles.py"),
         "--region", region_id,
         "--model", model_id,
