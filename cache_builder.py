@@ -467,6 +467,7 @@ def download_all_hours_parallel(
     # We use a list for a mutable reference in the closure
     first_missing_hour = [999] 
 
+    print(f"Downloading {max_hours} hours ", end="", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         def fetch_with_check(h):
             if h >= first_missing_hour[0]:
@@ -500,16 +501,20 @@ def download_all_hours_parallel(
                 val = future.result()
                 if val:
                     results[hour] = val
+                    # Simple one-character progress indicator
+                    print(".", end="", flush=True)
             except Exception as exc:
                 # Concise one-liner for errors
                 if "404" in str(exc):
-                    # logger.info(f"Hour {hour} not available")
                     first_missing_hour[0] = min(first_missing_hour[0], hour)
+                    print("x", end="", flush=True)
                 else:
-                    logger.warning(f"Hour {hour} failed: {str(exc)[:100]}")
+                    print("!", end="", flush=True)
     
     if results:
-        logger.info(f"Downloaded {len(results)}/{max_hours} hours for {model_id} {variable_id}")
+        print(f" Done. ({len(results)}/{max_hours} hours)")
+    else:
+        print(" Failed.")
     return results
 
 def extract_center_value(

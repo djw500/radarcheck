@@ -72,9 +72,9 @@ def build_region_tiles(
         
         # Check for model-specific exclusions
         if model_id in variable_config.get("model_exclusions", []):
-            print(f"Skipping variable {variable_id} for model {model_id} (excluded in config)")
             continue
 
+        print(f"--- Processing {variable_id} ---")
         # Download GRIBs for all hours using cache_builder logic
         grib_paths = download_all_hours_parallel(
             model_id,
