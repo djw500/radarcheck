@@ -1442,6 +1442,13 @@ def forecast_view():
     return render_template("forecast.html", locations=get_available_locations())
 
 
+@app.route("/snow")
+@require_api_key
+def snow_view():
+    """Accumulated snowfall comparison plot."""
+    return render_template("snow.html", locations=get_available_locations())
+
+
 @app.route("/summary/<location_id>")
 @require_api_key
 def summary_view(location_id: str):
@@ -1767,6 +1774,132 @@ def api_tile_models():
         return jsonify({"error": "Invalid region"}), 400
     res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
     return jsonify(list_tile_models(repomap["TILES_DIR"], region_id, res))
+
+
+@app.route("/api/timeseries/multirun")
+@require_api_key
+def api_timeseries_multirun():
+    """Return timeseries for multiple runs of a model at a lat/lon point."""
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+
+    requested_model = request.args.get("model", "all")
+    variable_id = request.args.get("variable", "asnow")
+    region_id = request.args.get("region")
+    # Default to last 24 hours of runs to keep the chart readable when showing multiple models
+    days_back = float(request.args.get("days", 1.0))
+
+    # Infer region if not provided
+    if not region_id:
+        region_id = infer_region_for_latlon(lat, lon)
+        if not region_id:
+            return jsonify({"error": "Point outside configured regions"}), 400
+
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+
+    # Determine which models to query
+    models_to_query = []
+    if requested_model == "all":
+        # Get all models that have tiles in this region
+        tile_models = list_tile_models(repomap["TILES_DIR"], region_id, res)
+        models_to_query = list(tile_models.keys())
+    elif requested_model in repomap["MODELS"]:
+        models_to_query = [requested_model]
+    else:
+        return jsonify({"error": "Invalid model"}), 400
+
+    results = {}
+    cutoff = datetime.now(pytz.UTC) - timedelta(days=days_back)
+
+    for model_id in models_to_query:
+        all_runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
+        
+        # Select recent runs
+        selected_runs = []
+        for run_id in all_runs:
+            init_dt = parse_run_id_to_init_dt(run_id)
+            if init_dt and init_dt >= cutoff:
+                selected_runs.append(run_id)
+        
+        for run_id in selected_runs:
+            init_dt = parse_run_id_to_init_dt(run_id)
+            if not init_dt:
+                continue
+
+            hours = None
+            values = None
+            
+            # Try loading variable directly
+            try:
+                hours, values = load_timeseries_for_point(
+                    repomap["TILES_DIR"], region_id, res, model_id, run_id, variable_id, lat, lon
+                )
+            except FileNotFoundError:
+                # Fallback: Derivation for asnow (Snowfall)
+                if variable_id == "asnow":
+                    try:
+                        # Load Precip and Categorical Snow
+                        h_apcp, v_apcp = load_timeseries_for_point(
+                            repomap["TILES_DIR"], region_id, res, model_id, run_id, "apcp", lat, lon
+                        )
+                        h_csnow, v_csnow = load_timeseries_for_point(
+                            repomap["TILES_DIR"], region_id, res, model_id, run_id, "csnow", lat, lon
+                        )
+                        
+                        # Align arrays (intersection of hours)
+                        common_hours = np.intersect1d(h_apcp, h_csnow)
+                        if common_hours.size > 0:
+                            # Create aligned value arrays
+                            # Note: This assumes hours are sorted and unique, which they are from tiles.py
+                            mask_apcp = np.isin(h_apcp, common_hours)
+                            mask_csnow = np.isin(h_csnow, common_hours)
+                            
+                            v_apcp_aligned = v_apcp[mask_apcp]
+                            v_csnow_aligned = v_csnow[mask_csnow]
+                            
+                            # Derive: Snow = Precip * 10 where Categorical Snow is True (> 0.5)
+                            # Using 10:1 ratio as standard approximation
+                            values = np.where(v_csnow_aligned > 0.5, v_apcp_aligned * 10.0, 0.0)
+                            hours = common_hours
+                    except FileNotFoundError:
+                        pass
+            
+            if hours is not None and values is not None:
+                series = []
+                for h, v in zip(hours.tolist(), values.tolist()):
+                    if v is None or (isinstance(v, float) and np.isnan(v)):
+                        continue
+                    valid_time = init_dt + timedelta(hours=int(h))
+                    series.append({
+                        "valid_time": valid_time.isoformat(),
+                        "forecast_hour": int(h),
+                        "value": v
+                    })
+                
+                if series:
+                    # Key structure: model_id/run_id to ensure uniqueness
+                    key = f"{model_id}/{run_id}"
+                    results[key] = {
+                        "model_id": model_id,
+                        "run_id": run_id,
+                        "init_time": init_dt.isoformat(),
+                        "series": series
+                    }
+
+    return jsonify({
+        "lat": lat,
+        "lon": lon,
+        "variable": variable_id,
+        "region": region_id,
+        "runs": results
+    })
 
 
 @app.route("/api/summary/<location_id>")
