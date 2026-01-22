@@ -780,16 +780,20 @@ def api_table_multimodel():
         if not runs:
             continue
 
-        # Use latest run for each model
-        run_id = runs[0]
-        init_dt = parse_run_id_to_init_dt(run_id)
-        if not init_dt:
+        # Find the latest run that actually has variables (handle race conditions/partial writes)
+        run_id = None
+        vars_info = {}
+        for candidate_run_id in runs:
+            info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, candidate_run_id)
+            if info:
+                run_id = candidate_run_id
+                vars_info = info
+                break
+        
+        if not run_id:
             continue
 
-        # Get variables for this model's run
-        vars_info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, run_id)
-        if not vars_info:
-            continue
+        init_dt = parse_run_id_to_init_dt(run_id)
 
         model_config = repomap["MODELS"].get(model_id, {})
         models_info[model_id] = {

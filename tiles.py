@@ -294,6 +294,33 @@ def load_timeseries_for_point(
     iy = max(0, min(ny - 1, iy))
     ix = max(0, min(nx - 1, ix))
     values = arr[:, iy, ix]
+
+    # If the exact point is missing (NaN) due to sparse grid vs tile resolution mismatch,
+    # search for the nearest valid neighbor within a small radius.
+    # This handles cases like GFS (0.25 deg) on 0.1 deg tiles where many cells are empty.
+    if np.all(np.isnan(values)):
+        search_radius = 3
+        best_dist_sq = float('inf')
+        
+        # Search a box around the point
+        y_min = max(0, iy - search_radius)
+        y_max = min(ny - 1, iy + search_radius)
+        x_min = max(0, ix - search_radius)
+        x_max = min(nx - 1, ix + search_radius)
+
+        for cy in range(y_min, y_max + 1):
+            for cx in range(x_min, x_max + 1):
+                if cy == iy and cx == ix:
+                    continue
+                
+                # Check if this candidate cell has any valid data
+                cand_vals = arr[:, cy, cx]
+                if not np.all(np.isnan(cand_vals)):
+                    dist_sq = (cy - iy)**2 + (cx - ix)**2
+                    if dist_sq < best_dist_sq:
+                        best_dist_sq = dist_sq
+                        values = cand_vals
+                        
     return hours, values
 
 
