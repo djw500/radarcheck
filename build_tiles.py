@@ -14,7 +14,14 @@ import xarray as xr
 from filelock import FileLock, Timeout
 import logging
 
-# Configure logging - internals go to file (via parent)
+# Configure logging - all logs go to file, console gets only prints
+os.makedirs('logs', exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    filename='logs/build_tiles.log',
+    filemode='a'
+)
 logger = logging.getLogger(__name__)
 
 # Suppress noisy external libraries

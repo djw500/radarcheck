@@ -40,19 +40,17 @@ from utils import (
 
 # Set up logging
 os.makedirs('logs', exist_ok=True)
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Add file handler and attach to both module logger and root so submodules log here too
+# Add file handler
 from logging.handlers import RotatingFileHandler
 file_handler = RotatingFileHandler('logs/cache_builder.log', maxBytes=1024*1024, backupCount=5)
 file_handler.setFormatter(logging.Formatter(
     '%(asctime)s %(levelname)s: %(message)s'
 ))
 logger.addHandler(file_handler)
-# Ensure other module loggers (e.g., plotting, utils) also write to this file
-root_logger = logging.getLogger()
-root_logger.addHandler(file_handler)
+# We don't call logging.basicConfig here because it would add a console handler.
+# The entry point scripts (build_tiles.py, etc) handle the root config.
 
 def log_memory_usage(context: str = "") -> None:
     """Log current memory usage."""
@@ -492,7 +490,7 @@ def download_all_hours_parallel(
             for hour in range(1, max_hours + 1)
         }
         
-        for future in sorted(futures.keys(), key=lambda f: futures[future]):
+        for future in sorted(futures.keys(), key=lambda f: futures[f]):
             hour = futures[future]
             if hour >= first_missing_hour[0]:
                 continue

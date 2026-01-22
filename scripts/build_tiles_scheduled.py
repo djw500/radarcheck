@@ -46,21 +46,16 @@ file_handler = logging.FileHandler(detailed_log_path)
 file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
 root_logger.addHandler(file_handler)
 
-# Console logger for clean CLI output
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(logging.Formatter('%(asctime)s %(message)s', datefmt='%H:%M:%S'))
-# Only show our messages on console, not library noise
-console_handler.setLevel(logging.INFO)
+# Main logger for scheduler (only to file)
 logger = logging.getLogger("scheduler")
-logger.propagate = False # Don't send to root logger to avoid double-printing
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
+logger.setLevel(logging.INFO)
+# No console handler added here
 
 # Suppress noisy external libraries in console (but they'll still be in file if we lowered root level)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
-logging.getLogger("cfgrib").setLevel(logging.WARNING)
+logging.getLogger("cfgrib").setLevel(logging.ERROR)
 
 # Configuration from environment with defaults
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
