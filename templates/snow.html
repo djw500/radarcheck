@@ -12,7 +12,9 @@
   .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
   
   /* Inputs */
-  input[type="text"] { padding: 8px 12px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; flex: 1; min-width: 200px; }
+  input[type="text"], select { padding: 8px 12px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; }
+  input[type="text"] { flex: 1; min-width: 200px; }
+  select { background: white; cursor: pointer; }
   
   /* Buttons */
   button { padding: 8px 16px; background: #4a90d9; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; transition: background 0.2s; }
@@ -67,7 +69,7 @@
 {% block content %}
 <div class="panel">
   <div class="page-header">
-    <h2 class="page-title">Snowfall Accumulation Analysis</h2>
+    <h2 class="page-title">Snowfall Analysis</h2>
     <div id="locationChip" class="location-chip" style="display: none;">
       <span id="locName"></span>
       <span id="locCoords" class="coords"></span>
@@ -83,6 +85,10 @@
     
     <div style="flex-grow: 1;"></div>
     
+    <select id="variableSelect">
+      <option value="asnow" selected>Accumulated Snow (asnow)</option>
+      <option value="snod">Snow Depth (snod)</option>
+    </select>
     <button id="refreshBtn">Refresh</button>
   </div>
   
@@ -131,7 +137,7 @@ function initChart() {
         intersect: false,
       },
       plugins: {
-        title: { display: true, text: 'Accumulated Snowfall - Multi-Model Comparison' },
+        title: { display: true, text: 'Snowfall Analysis' },
         tooltip: {
           position: 'nearest',
           callbacks: {
@@ -147,7 +153,7 @@ function initChart() {
               return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}"`;
             }
           },
-          itemSort: (a, b) => b.parsed.y - a.parsed.y // Sort tooltip by snowfall amount
+          itemSort: (a, b) => b.parsed.y - a.parsed.y // Sort tooltip by amount
         },
         zoom: {
           zoom: {
@@ -177,7 +183,7 @@ function initChart() {
           grid: { color: 'rgba(0,0,0,0.05)' }
         },
         y: {
-          title: { display: true, text: 'Accumulated Snow (in)' },
+          title: { display: true, text: 'Amount (in)' },
           beginAtZero: true,
           grid: { color: 'rgba(0,0,0,0.05)' }
         }
@@ -247,6 +253,13 @@ function updateChart(data) {
   });
 
   chartInstance.data.datasets = datasets;
+  
+  // Update titles based on variable
+  const varSelect = document.getElementById('variableSelect');
+  const varName = varSelect.options[varSelect.selectedIndex].text;
+  chartInstance.options.plugins.title.text = `Multi-Model Analysis: ${varName}`;
+  chartInstance.options.scales.y.title.text = varName.includes("Depth") ? "Snow Depth (in)" : "Accumulated Snow (in)";
+  
   chartInstance.update();
   chartInstance.resetZoom();
 }
@@ -273,14 +286,15 @@ function updateLocationDisplay() {
 async function loadData() {
   if (!currentLat || !currentLon) return;
   
-  showStatus('Loading multi-model data...', 'loading');
+  const variable = document.getElementById('variableSelect').value;
+  showStatus(`Loading multi-model data for ${variable}...`, 'loading');
   
   try {
     // Fetch ALL models
-    const data = await fetchJSON(`/api/timeseries/multirun?lat=${currentLat}&lon=${currentLon}&model=all&variable=asnow&days=1`);
+    const data = await fetchJSON(`/api/timeseries/multirun?lat=${currentLat}&lon=${currentLon}&model=all&variable=${variable}&days=1`);
     
     if (Object.keys(data.runs).length === 0) {
-      showStatus('No snowfall data available from any model.', 'error');
+      showStatus(`No data available for ${variable} from any model.`, 'error');
       if (chartInstance) {
         chartInstance.data.datasets = [];
         chartInstance.update();
@@ -372,6 +386,7 @@ document.getElementById('geolocateBtn').addEventListener('click', () => {
 });
 
 document.getElementById('refreshBtn').addEventListener('click', loadData);
+document.getElementById('variableSelect').addEventListener('change', loadData);
 
 // Init
 function init() {
