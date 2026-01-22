@@ -161,22 +161,23 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
     # Check if the run is complete enough
     try:
         import numpy as np
-        d = np.load(npz_path)
-        hours = d.get('hours', [])
-        actual_hours = len(hours)
+        with np.load(npz_path) as d:
+            if 'hours' not in d:
+                return False
+            hours = d['hours']
+            actual_hours = len(hours)
         
-        # If we have at least 80% of expected hours, or it's an old run, consider it done.
-        # Otherwise, we might want to retry to pick up new hours as they arrive on NOMADS.
-        if actual_hours >= expected_max_hours * 0.8:
+        # If we have at least 90% of expected hours, consider it complete
+        if actual_hours >= expected_max_hours * 0.9:
             return True
             
-        # If the run is older than 6 hours, it's probably as complete as it will ever be
+        # If the run is older than 8 hours, it's as complete as it will ever be
         try:
             # run_id format: run_YYYYMMDD_HH
             parts = run_id.split('_')
             run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
             now = datetime.datetime.now(datetime.timezone.utc)
-            if (now - run_dt).total_seconds() > 6 * 3600:
+            if (now - run_dt).total_seconds() > 8 * 3600:
                 return True
         except:
             pass
