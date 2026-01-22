@@ -502,11 +502,13 @@ def download_all_hours_parallel(
                     # Simple one-character progress indicator
                     print(".", end="", flush=True)
             except Exception as exc:
-                # Concise one-liner for errors
+                # Any failure (404, 500, etc.) means subsequent hours are likely missing too
+                first_missing_hour[0] = min(first_missing_hour[0], hour)
                 if "404" in str(exc):
-                    first_missing_hour[0] = min(first_missing_hour[0], hour)
                     print("x", end="", flush=True)
                 else:
+                    # Log detail to file but keep CLI short
+                    logger.warning(f"Hour {hour} failed: {exc}")
                     print("!", end="", flush=True)
     
     if results:
