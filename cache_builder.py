@@ -461,14 +461,15 @@ def download_all_hours_parallel(
     model_config = repomap["MODELS"][model_id]
     digits = model_config.get("forecast_hour_digits", 2)
     
-    # Track if we've hit a 404 to stop subsequent attempts
-    # We use a list for a mutable reference in the closure
+    # Track missing hours to allow bridging small gaps (e.g. GFS/NBM 3h/6h jumps)
+    missing_hours = set()
     first_missing_hour = [999] 
 
     print(f"Downloading {max_hours} hours: ", end="", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         def fetch_with_check(h):
-            if h >= first_missing_hour[0]:
+            # If we've already determined the run ended way back, skip
+            if h > first_missing_hour[0] + 6: # Allow a 6-hour "buffer" for long-range jumps
                 return None
             try:
                 res = fetch_grib(
@@ -482,7 +483,16 @@ def download_all_hours_parallel(
                 return res
             except Exception as e:
                 if "404" in str(e):
-                    first_missing_hour[0] = min(first_missing_hour[0], h)
+                    missing_hours.add(h)
+                    # Check for 3 consecutive misses to determine if run has truly ended
+                    if {h-1, h-2}.issubset(missing_hours):
+                        first_missing_hour[0] = min(first_missing_hour[0], h - 2)
+                else:
+                    # Non-404 errors (like 500) are more likely to be transient or fatal, 
+                    # but we apply the same "3-miss" rule to be safe but efficient.
+                    missing_hours.add(h)
+                    if {h-1, h-2}.issubset(missing_hours):
+                        first_missing_hour[0] = min(first_missing_hour[0], h - 2)
                 raise e
 
         futures = {
@@ -492,7 +502,7 @@ def download_all_hours_parallel(
         
         for future in sorted(futures.keys(), key=lambda f: futures[f]):
             hour = futures[future]
-            if hour >= first_missing_hour[0]:
+            if hour > first_missing_hour[0] + 6:
                 continue
                 
             try:
@@ -502,8 +512,6 @@ def download_all_hours_parallel(
                     # Simple one-character progress indicator
                     print(".", end="", flush=True)
             except Exception as exc:
-                # Any failure (404, 500, etc.) means subsequent hours are likely missing too
-                first_missing_hour[0] = min(first_missing_hour[0], hour)
                 if "404" in str(exc):
                     print("x", end="", flush=True)
                 else:
