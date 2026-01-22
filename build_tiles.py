@@ -14,8 +14,7 @@ import xarray as xr
 from filelock import FileLock, Timeout
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - internals go to file (via parent)
 logger = logging.getLogger(__name__)
 
 # Suppress noisy external libraries

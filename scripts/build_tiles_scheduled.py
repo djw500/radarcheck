@@ -35,19 +35,32 @@ from config import repomap
 from utils import format_forecast_hour
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ]
-)
-logger = logging.getLogger(__name__)
+os.makedirs('logs', exist_ok=True)
+detailed_log_path = 'logs/scheduler_detailed.log'
 
-# Suppress noisy external libraries
+# Root logger gets everything and sends to file
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+file_handler = logging.FileHandler(detailed_log_path)
+file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+root_logger.addHandler(file_handler)
+
+# Console logger for clean CLI output
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(logging.Formatter('%(asctime)s %(message)s', datefmt='%H:%M:%S'))
+# Only show our messages on console, not library noise
+console_handler.setLevel(logging.INFO)
+logger = logging.getLogger("scheduler")
+logger.propagate = False # Don't send to root logger to avoid double-printing
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
+
+# Suppress noisy external libraries in console (but they'll still be in file if we lowered root level)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
+logging.getLogger("cfgrib").setLevel(logging.WARNING)
 
 # Configuration from environment with defaults
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
@@ -197,7 +210,10 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
             for line in process.stdout:
                 line = line.strip()
                 if line:
-                    logger.info(f"    [{model_id}] {line}")
+                    # Print to console for user
+                    print(f"    [{model_id}] {line}")
+                    # Still log to file
+                    logger.debug(f"[{model_id}] {line}")
         
         returncode = process.wait(timeout=3600)
         if returncode == 0:
@@ -250,10 +266,10 @@ def build_cycle():
             for region_id in REGIONS:
                 # Skip if tiles already exist and are complete
                 if tiles_exist(region_id, model_id, run_id, expected_max_hours=max_hours):
-                    logger.info(f"[{model_id} {i+1}/{num_runs}] Tiles already exist and are complete for {run_id} in {region_id}, skipping")
+                    print(f"[{model_id} {i+1}/{num_runs}] Tiles complete for {run_id} in {region_id}")
                     continue
 
-                logger.info(f"[{model_id} {i+1}/{num_runs}] Starting build for {run_id}...")
+                print(f"[{model_id} {i+1}/{num_runs}] Starting build for {run_id}...")
                 builds_attempted += 1
                 if build_tiles_for_run(region_id, model_id, run_id, max_hours):
                     builds_succeeded += 1
@@ -261,7 +277,7 @@ def build_cycle():
                 # Rate limit between builds
                 time.sleep(5)
 
-    logger.info(f"Build cycle complete: {builds_succeeded}/{builds_attempted} builds succeeded")
+    print(f"Build cycle complete: {builds_succeeded}/{builds_attempted} succeeded")
     return builds_attempted, builds_succeeded
 
 
@@ -310,7 +326,7 @@ def cleanup_old_runs(max_runs_to_keep: int = 48):
                     
                     # Tier 1: Keep everything from the last 12 hours
                     if age_hours <= 12:
-                        logger.info(f"  [KEEP] {model_id}/{run_id}: Recent (age: {age_hours:.1f}h)")
+                        print(f"  [KEEP] {model_id}/{run_id}: Recent (age: {age_hours:.1f}h)")
                         kept_runs.append(run_id)
                         continue
                     
@@ -319,17 +335,17 @@ def cleanup_old_runs(max_runs_to_keep: int = 48):
                         init_hour = int(parts[2])
                         bucket = (parts[1], (init_hour // 6) * 6)
                         if init_hour % 6 == 0 and bucket not in filled_6h_buckets:
-                            logger.info(f"  [KEEP] {model_id}/{run_id}: Synoptic bucket {bucket[1]}z (age: {age_hours:.1f}h)")
+                            print(f"  [KEEP] {model_id}/{run_id}: Synoptic bucket {bucket[1]}z (age: {age_hours:.1f}h)")
                             kept_runs.append(run_id)
                             filled_6h_buckets.add(bucket)
                             continue
 
                     # If it doesn't fit a tier, it's a candidate for removal
                     if len(kept_runs) < 5:
-                        logger.info(f"  [KEEP] {model_id}/{run_id}: Safety minimum (count: {len(kept_runs)})")
+                        print(f"  [KEEP] {model_id}/{run_id}: Safety minimum")
                         kept_runs.append(run_id)
                     else:
-                        logger.info(f"  [DROP] {model_id}/{run_id}: Outside retention policy (age: {age_hours:.1f}h)")
+                        print(f"  [DROP] {model_id}/{run_id}: Outside retention policy")
                         runs_to_remove.append(run_id)
                 except Exception as e:
                     if len(kept_runs) < 5:
@@ -390,7 +406,7 @@ def main():
             logger.exception(f"Error in build cycle: {e}")
 
         # Sleep until next cycle
-        logger.info(f"Sleeping {BUILD_INTERVAL_MINUTES} minutes until next cycle...")
+        print(f"Sleeping {BUILD_INTERVAL_MINUTES} minutes until next cycle...")
         time.sleep(BUILD_INTERVAL_MINUTES * 60)
 
 
