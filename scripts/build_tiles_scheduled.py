@@ -230,6 +230,20 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
         return False
 
 
+def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
+    """Check if a run is old enough to likely have data available on NOMADS.
+    NOMADS usually takes 45-60 minutes to start publishing GRIBs after the init hour.
+    """
+    try:
+        parts = run_id.split('_')
+        run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        age_mins = (now - run_dt).total_seconds() / 60
+        return age_mins >= min_age_minutes
+    except:
+        return True
+
+
 def build_cycle():
     """Run one build cycle for all models and regions."""
     logger.info("Starting build cycle")
@@ -263,6 +277,10 @@ def build_cycle():
             logger.info(f"Processing latest run for {model_id}: {runs_to_process[0]}")
 
         for i, run_id in enumerate(runs_to_process):
+            if not run_is_ready(run_id):
+                print(f"[{model_id} {i+1}/{num_runs}] Run {run_id} is too new, skipping until next cycle")
+                continue
+
             for region_id in REGIONS:
                 # Skip if tiles already exist and are complete
                 if tiles_exist(region_id, model_id, run_id, expected_max_hours=max_hours):

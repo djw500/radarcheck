@@ -421,10 +421,17 @@ def fetch_grib(
                 return filename
                 
         except Timeout as exc:
-            logger.error(f"Download attempt {attempt + 1} failed: {str(exc)}", exc_info=True)
+            # logger.error(f"Download attempt {attempt + 1} failed: {str(exc)}", exc_info=True)
             raise GribValidationError(f"Lock timeout for {filename}") from exc
+        except requests.exceptions.HTTPError as exc:
+            # Concise one-liner for HTTP errors (like 404)
+            if exc.response.status_code == 404:
+                # If it's a 404, it's not there yet. Don't retry, just fail this hour.
+                raise GribDownloadError(f"Hour {forecast_hour} not available (404)")
+            else:
+                logger.warning(f"Download attempt {attempt + 1} failed: HTTP {exc.response.status_code}")
         except Exception as exc:
-            logger.error(f"Download attempt {attempt + 1} failed: {str(exc)}", exc_info=True)
+            logger.debug(f"Download attempt {attempt + 1} failed: {str(exc)}", exc_info=True)
             if os.path.exists(temp_filename):
                 try:
                     os.remove(temp_filename)
@@ -434,7 +441,7 @@ def fetch_grib(
                 # Exponential backoff with jitter
                 base = repomap["RETRY_DELAY_SECONDS"]
                 delay = base * (2 ** attempt) + random.uniform(0, 1)
-                logger.info(f"Retrying in {delay:.2f}s (attempt {attempt + 2}/{repomap['MAX_DOWNLOAD_RETRIES']})")
+                # logger.info(f"Retrying in {delay:.2f}s (attempt {attempt + 2}/{repomap['MAX_DOWNLOAD_RETRIES']})")
                 time.sleep(delay)
     
     raise GribDownloadError("Failed to obtain valid GRIB file after retries")
@@ -470,8 +477,16 @@ def download_all_hours_parallel(
             hour = futures[future]
             try:
                 results[hour] = future.result()
-            except (GribDownloadError, GribValidationError, requests.RequestException) as exc:
-                logger.error(f"Failed to download hour {hour}: {exc}")
+            except Exception as exc:
+                # Concise one-liner for errors
+                if "404 Client Error" in str(exc):
+                    # logger.info(f"Hour {hour} not available")
+                    pass
+                else:
+                    logger.warning(f"Hour {hour} failed: {str(exc)[:100]}")
+    
+    if results:
+        logger.info(f"Downloaded {len(results)}/{max_hours} hours for {model_id} {variable_id}")
     return results
 
 def extract_center_value(
