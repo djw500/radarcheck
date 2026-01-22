@@ -243,8 +243,12 @@ def build_cycle():
     return builds_attempted, builds_succeeded
 
 
-def cleanup_old_runs(max_runs_per_model: int = 3):
-    """Clean up old tile runs to save disk space."""
+def cleanup_old_runs(max_runs_to_keep: int = 48):
+    """Clean up old tile runs using a tiered retention policy to track evolution:
+    - Keep ALL runs for the last 12 hours (high-res evolution)
+    - Keep one run every 6 hours for the last 3 days (synoptic evolution)
+    - Remove anything older or outside these buckets
+    """
     for region_id in REGIONS:
         res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
         res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
@@ -258,15 +262,62 @@ def cleanup_old_runs(max_runs_per_model: int = 3):
             if not os.path.isdir(model_dir):
                 continue
 
+            # Get runs sorted newest to oldest
             runs = sorted(
                 [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
                 reverse=True
             )
 
-            # Keep only the most recent runs
-            for old_run in runs[max_runs_per_model:]:
+            if not runs:
+                continue
+
+            now = datetime.datetime.now(datetime.timezone.utc)
+            kept_runs = []
+            runs_to_remove = []
+
+            # Track which synoptic 6h buckets we've already filled (00, 06, 12, 18)
+            # Key: (date, bucket_hour)
+            filled_6h_buckets = set()
+
+            for run_id in runs:
+                try:
+                    # run_id format: run_YYYYMMDD_HH
+                    parts = run_id.split('_')
+                    run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
+                    age_hours = (now - run_dt).total_seconds() / 3600
+                    
+                    # Tier 1: Keep everything from the last 12 hours
+                    if age_hours <= 12:
+                        kept_runs.append(run_id)
+                        continue
+                    
+                    # Tier 2: Keep synoptic runs (00, 06, 12, 18) for up to 3 days
+                    if age_hours <= 72:
+                        init_hour = int(parts[2])
+                        # Check if it's a synoptic hour and we haven't kept one for this 6h window yet
+                        # We prefer the one closest to the synoptic hour if multiple exist
+                        bucket = (parts[1], (init_hour // 6) * 6)
+                        if init_hour % 6 == 0 and bucket not in filled_6h_buckets:
+                            kept_runs.append(run_id)
+                            filled_6h_buckets.add(bucket)
+                            continue
+
+                    # If it doesn't fit a tier, it's a candidate for removal
+                    # But we always keep at least a few most recent runs regardless of age
+                    if len(kept_runs) < 5:
+                        kept_runs.append(run_id)
+                    else:
+                        runs_to_remove.append(run_id)
+                except:
+                    # If we can't parse the date, keep it to be safe or if it's too old remove it
+                    if len(kept_runs) < 5:
+                        kept_runs.append(run_id)
+                    else:
+                        runs_to_remove.append(run_id)
+
+            for old_run in runs_to_remove:
                 old_run_dir = os.path.join(model_dir, old_run)
-                logger.info(f"Cleaning up old run: {old_run_dir}")
+                logger.info(f"Tiered cleanup: Removing old run {old_run}")
                 try:
                     import shutil
                     shutil.rmtree(old_run_dir)
@@ -307,8 +358,8 @@ def main():
             # Run build cycle
             build_cycle()
 
-            # Cleanup old runs periodically
-            cleanup_old_runs(max_runs_per_model=KEEP_RUNS)
+            # Cleanup old runs periodically using tiered policy
+            cleanup_old_runs()
 
         except Exception as e:
             logger.exception(f"Error in build cycle: {e}")

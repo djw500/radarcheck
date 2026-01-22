@@ -777,57 +777,113 @@ def generate_forecast_images(
         )
         return False
 
-def cleanup_old_runs(location_id: str, model_id: str) -> None:
-    """Remove old runs to save disk space, keeping only the most recent N runs."""
+def tiered_cleanup_runs(location_id: str, model_id: str) -> None:
+    """Remove old runs using a tiered retention policy:
+    - Keep ALL for 12h
+    - Keep synoptic (6h) for 3 days
+    """
     try:
         location_dir = os.path.join(repomap["CACHE_DIR"], location_id, model_id)
         if not os.path.exists(location_dir):
             return
             
-        # Get all run directories
-        run_dirs = []
-        for item in os.listdir(location_dir):
-            if item.startswith("run_") and os.path.isdir(os.path.join(location_dir, item)):
-                run_dirs.append(item)
-        
-        # Sort by run ID (which includes date and hour)
-        run_dirs.sort(reverse=True)
-        
-        # Remove older runs beyond the limit
-        max_runs = repomap.get("MAX_RUNS_TO_KEEP", 5)
-        if len(run_dirs) > max_runs:
-            for old_run in run_dirs[max_runs:]:
-                old_run_path = os.path.join(location_dir, old_run)
-                logger.info(f"Removing old run: {old_run_path}")
-                shutil.rmtree(old_run_path)
+        run_dirs = sorted([r for r in os.listdir(location_dir) if r.startswith("run_") and os.path.isdir(os.path.join(location_dir, r))], reverse=True)
+        if not run_dirs:
+            return
+
+        now = datetime.now(timezone.utc)
+        kept_runs = []
+        runs_to_remove = []
+        filled_6h_buckets = set()
+
+        for run_id in run_dirs:
+            try:
+                parts = run_id.split('_')
+                run_dt = datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=timezone.utc)
+                age_hours = (now - run_dt).total_seconds() / 3600
+                
+                if age_hours <= 12:
+                    kept_runs.append(run_id)
+                    continue
+                
+                if age_hours <= 72:
+                    init_hour = int(parts[2])
+                    bucket = (parts[1], (init_hour // 6) * 6)
+                    if init_hour % 6 == 0 and bucket not in filled_6h_buckets:
+                        kept_runs.append(run_id)
+                        filled_6h_buckets.add(bucket)
+                        continue
+
+                if len(kept_runs) < 5:
+                    kept_runs.append(run_id)
+                else:
+                    runs_to_remove.append(run_id)
+            except:
+                if len(kept_runs) < 5:
+                    kept_runs.append(run_id)
+                else:
+                    runs_to_remove.append(run_id)
+
+        for old_run in runs_to_remove:
+            old_run_path = os.path.join(location_dir, old_run)
+            logger.info(f"Tiered cleanup: Removing old location run {old_run_path}")
+            shutil.rmtree(old_run_path)
     
-    except (OSError, ValueError, RuntimeError) as exc:
-        logger.error(f"Error cleaning up old runs for {location_id}: {str(exc)}")
+    except Exception as exc:
+        logger.error(f"Error in tiered cleanup for {location_id}: {str(exc)}")
 
 
-def cleanup_old_gribs(model_id: str) -> None:
-    """Remove old GRIBs from the central cache to save disk space."""
+def tiered_cleanup_gribs(model_id: str) -> None:
+    """Remove old GRIBs using a tiered retention policy."""
     try:
         model_dir = os.path.join(repomap["GRIB_CACHE_DIR"], model_id)
         if not os.path.exists(model_dir):
             return
 
-        run_dirs = []
-        for item in os.listdir(model_dir):
-            if item.startswith("run_") and os.path.isdir(os.path.join(model_dir, item)):
-                run_dirs.append(item)
-        
-        run_dirs.sort(reverse=True)
-        max_runs = repomap.get("MAX_RUNS_TO_KEEP", 5)
-        
-        if len(run_dirs) > max_runs:
-            for old_run in run_dirs[max_runs:]:
-                old_run_path = os.path.join(model_dir, old_run)
-                logger.info(f"Removing old centralized GRIBs: {old_run_path}")
-                shutil.rmtree(old_run_path)
+        run_dirs = sorted([r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))], reverse=True)
+        if not run_dirs:
+            return
+
+        now = datetime.now(timezone.utc)
+        kept_runs = []
+        runs_to_remove = []
+        filled_6h_buckets = set()
+
+        for run_id in run_dirs:
+            try:
+                parts = run_id.split('_')
+                run_dt = datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=timezone.utc)
+                age_hours = (now - run_dt).total_seconds() / 3600
+                
+                if age_hours <= 12:
+                    kept_runs.append(run_id)
+                    continue
+                
+                if age_hours <= 72:
+                    init_hour = int(parts[2])
+                    bucket = (parts[1], (init_hour // 6) * 6)
+                    if init_hour % 6 == 0 and bucket not in filled_6h_buckets:
+                        kept_runs.append(run_id)
+                        filled_6h_buckets.add(bucket)
+                        continue
+
+                if len(kept_runs) < 3: # GRIBs are large, keep fewer
+                    kept_runs.append(run_id)
+                else:
+                    runs_to_remove.append(run_id)
+            except:
+                if len(kept_runs) < 3:
+                    kept_runs.append(run_id)
+                else:
+                    runs_to_remove.append(run_id)
+
+        for old_run in runs_to_remove:
+            old_run_path = os.path.join(model_dir, old_run)
+            logger.info(f"Tiered GRIB cleanup: Removing old centralized GRIBs {old_run_path}")
+            shutil.rmtree(old_run_path)
 
     except Exception as exc:
-        logger.error(f"Error cleaning up old GRIBs for {model_id}: {str(exc)}")
+        logger.error(f"Error in tiered GRIB cleanup for {model_id}: {str(exc)}")
 
 
 def main() -> None:
@@ -889,7 +945,7 @@ def main() -> None:
                     log_memory_usage(f"after_run_{run_info['run_id']}")
                     gc.collect()
 
-                cleanup_old_runs(args.location, model_id)
+                tiered_cleanup_runs(args.location, model_id)
             else:
                 logger.error(f"Location ID '{args.location}' not found in configuration")
         else:
@@ -910,10 +966,10 @@ def main() -> None:
                     log_memory_usage(f"after_run_{run_info['run_id']}")
                     gc.collect()
 
-                cleanup_old_runs(location_id, model_id)
+                tiered_cleanup_runs(location_id, model_id)
         
         # Cleanup old GRIBs
-        cleanup_old_gribs(model_id)
+        tiered_cleanup_gribs(model_id)
     
     logger.info("Cache building complete")
     
