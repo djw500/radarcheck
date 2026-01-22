@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+
+{% block title %}Multi-Model Forecast{% endblock %}
+
+{% block extra_head %}
+<style>
+  .panel { background: #f8f9fa; padding: 12px 16px; border-radius: 6px; margin: 12px 0; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  select, input { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+  input[type="text"] { min-width: 200px; }
+  button { padding: 6px 12px; background: #4a90d9; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #357abd; }
+  button:disabled { background: #ccc; cursor: not-allowed; }
+
+  /* Autocomplete dropdown */
+  .autocomplete-container { position: relative; display: inline-block; }
+  .autocomplete-list {
+    position: absolute; top: 100%; left: 0; right: 0;
+    background: white; border: 1px solid #ccc; border-radius: 4px;
+    max-height: 200px; overflow-y: auto; z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .autocomplete-item {
+    padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #eee;
+  }
+  .autocomplete-item:last-child { border-bottom: none; }
+  .autocomplete-item:hover { background: #f0f7ff; }
+  .autocomplete-item .place-name { font-weight: 500; }
+  .autocomplete-item .place-detail { font-size: 0.85em; color: #666; }
+
+  /* Table styling */
+  .table-wrapper { overflow-x: auto; margin-top: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; white-space: nowrap; }
+  th { background: #4a90d9; color: #fff; position: sticky; top: 0; z-index: 10; }
+  th.time-col { text-align: left; min-width: 140px; }
+  td.time-col { text-align: left; font-weight: 500; }
+
+  /* Model header groups */
+  th.model-group { background: #2c5282; text-align: center; }
+  th.var-header { background: #3182ce; font-size: 0.9em; }
+
+  /* Color coding */
+  .temp-cold { background: #cce5ff; }
+  .temp-hot { background: #ffcccc; }
+  .precip-light { background: #e6f3ff; }
+  .precip-heavy { background: #99ccff; }
+  .snow-light { background: #f0e6ff; }
+  .snow-heavy { background: #cc99ff; }
+
+  .muted { color: #666; }
+  .error { color: #b00020; }
+  .model-init { font-size: 0.85em; color: #666; margin-left: 4px; }
+  .status-bar { padding: 8px; margin: 8px 0; border-radius: 4px; }
+  .status-loading { background: #fff3cd; }
+  .status-error { background: #f8d7da; color: #721c24; }
+  .status-success { background: #d4edda; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <h2 style="margin: 0 0 12px 0;">Multi-Model Forecast</h2>
+
+  <div class="controls">
+    <div class="autocomplete-container">
+      <input type="text" id="locationInput" placeholder="Search for a location..." autocomplete="off">
+      <div id="autocompleteList" class="autocomplete-list" style="display: none;"></div>
+    </div>
+    <button id="searchBtn">Search</button>
+    <button id="geolocateBtn">Use My Location</button>
+  </div>
+
+  <div class="controls">
+    <label>Lat <input type="text" id="latInput" size="8" placeholder="40.0"></label>
+    <label>Lon <input type="text" id="lonInput" size="9" placeholder="-75.0"></label>
+    <label>Stat
+      <select id="statSelect">
+        <option value="mean">Mean</option>
+        <option value="min">Min</option>
+        <option value="max">Max</option>
+      </select>
+    </label>
+    <button id="refreshBtn">Refresh</button>
+  </div>
+
+  <div id="locationDisplay" class="muted"></div>
+</div>
+
+<div id="statusBar" class="status-bar status-loading" style="display: none;"></div>
+
+<div id="tableContainer"></div>
+
+<div class="panel">
+  <details>
+    <summary>Debug Info</summary>
+    <pre id="debugInfo" style="max-height: 300px; overflow: auto; background: #fff; padding: 10px; border: 1px solid #ddd; font-size: 12px;"></pre>
+  </details>
+</div>
+
+<script>
+// Utility functions
+async function fetchJSON(url) {
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+function formatLocalTime(isoString) {
+  if (!isoString) return '-';
+  try {
+    const dt = new Date(isoString);
+    return dt.toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch (e) {
+    return isoString;
+  }
+}
+
+function formatInitTime(isoString) {
+  if (!isoString) return '';
+  try {
+    const dt = new Date(isoString);
+    return dt.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      hour12: true,
+      timeZoneName: 'short'
+    });
+  } catch (e) {
+    return isoString;
+  }
+}
+
+function getColorClass(varId, value) {
+  if (value === null || value === undefined) return '';
+
+  if (varId === 't2m' || varId === 'dpt') {
+    if (value < 32) return 'temp-cold';
+    if (value > 80) return 'temp-hot';
+  } else if (varId === 'apcp' || varId === 'prate') {
+    if (value > 0 && value <= 0.1) return 'precip-light';
+    if (value > 0.1) return 'precip-heavy';
+  } else if (varId === 'asnow' || varId === 'snod') {
+    if (value > 0 && value <= 2) return 'snow-light';
+    if (value > 2) return 'snow-heavy';
+  }
+  return '';
+}
+
+function formatValue(varId, value, units) {
+  if (value === null || value === undefined) return '-';
+
+  // Format based on units
+  if (units === 'in' || units === 'in/hr' || units === 'mi') {
+    return value.toFixed(2);
+  } else if (units === 'degF' || units === 'mph') {
+    return value.toFixed(1);
+  } else if (units === 'dBZ' || units === 'J/kg' || units === 'm/s' || units === '%') {
+    return value.toFixed(0);
+  }
+  return value.toFixed(1);
+}
+
+// Variables we care about for the table (in display order)
+const DISPLAY_VARS = [
+  { id: 'apcp', name: 'Precip', units: 'in' },
+  { id: 'asnow', name: 'Snow', units: 'in' },
+  { id: 'snod', name: 'Snow Depth', units: 'in' },
+  { id: 't2m', name: 'Temp', units: 'degF' },
+  { id: 'dpt', name: 'Dew Pt', units: 'degF' },
+  { id: 'wind_10m', name: 'Wind', units: 'mph' },
+  { id: 'gust', name: 'Gusts', units: 'mph' },
+];
+
+function renderMultiModelTable(data) {
+  const { rows, models, metadata } = data;
+  if (!rows || !rows.length) return '<p class="muted">No forecast data available.</p>';
+
+  const modelIds = Object.keys(models).sort();
+  if (!modelIds.length) return '<p class="muted">No models available.</p>';
+
+  // Build header
+  let html = '<div class="table-wrapper"><table>';
+
+  // Row 1: Model names
+  html += '<thead><tr><th class="time-col" rowspan="2">Local Time</th>';
+  for (const modelId of modelIds) {
+    const modelInfo = models[modelId];
+    const varsForModel = DISPLAY_VARS.filter(v => modelInfo.variables.includes(v.id));
+    if (varsForModel.length === 0) continue;
+    const initStr = formatInitTime(modelInfo.init_time_utc);
+    html += `<th class="model-group" colspan="${varsForModel.length}">${modelInfo.name}<span class="model-init">(${initStr})</span></th>`;
+  }
+  html += '</tr>';
+
+  // Row 2: Variable names per model
+  html += '<tr>';
+  for (const modelId of modelIds) {
+    const modelInfo = models[modelId];
+    const varsForModel = DISPLAY_VARS.filter(v => modelInfo.variables.includes(v.id));
+    for (const v of varsForModel) {
+      html += `<th class="var-header">${v.name}</th>`;
+    }
+  }
+  html += '</tr></thead>';
+
+  // Body rows
+  html += '<tbody>';
+  for (const row of rows) {
+    // Use valid time from first model
+    const firstModel = modelIds[0];
+    const validTimeKey = `${firstModel}_valid_time`;
+    const localTime = formatLocalTime(row[validTimeKey]);
+
+    html += `<tr><td class="time-col">${localTime}</td>`;
+    for (const modelId of modelIds) {
+      const modelInfo = models[modelId];
+      const varsForModel = DISPLAY_VARS.filter(v => modelInfo.variables.includes(v.id));
+      for (const v of varsForModel) {
+        const key = `${modelId}_${v.id}`;
+        const value = row[key];
+        const colorClass = getColorClass(v.id, value);
+        const formatted = formatValue(v.id, value, v.units);
+        html += `<td class="${colorClass}">${formatted}</td>`;
+      }
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
+
+  return html;
+}
+
+// Nominatim autocomplete
+let autocompleteTimeout = null;
+const autocompleteCache = {};
+
+async function searchNominatim(query) {
+  if (query.length < 3) return [];
+  if (autocompleteCache[query]) return autocompleteCache[query];
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=us&limit=5`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Radarcheck Weather App' }
+    });
+    if (!res.ok) return [];
+    const results = await res.json();
+    autocompleteCache[query] = results;
+    return results;
+  } catch (e) {
+    console.error('Nominatim search failed:', e);
+    return [];
+  }
+}
+
+function showAutocomplete(results) {
+  const list = document.getElementById('autocompleteList');
+  if (!results.length) {
+    list.style.display = 'none';
+    return;
+  }
+
+  list.innerHTML = results.map(r => `
+    <div class="autocomplete-item" data-lat="${r.lat}" data-lon="${r.lon}">
+      <div class="place-name">${r.display_name.split(',')[0]}</div>
+      <div class="place-detail">${r.display_name.split(',').slice(1, 3).join(',')}</div>
+    </div>
+  `).join('');
+  list.style.display = 'block';
+}
+
+// State
+let currentLat = null;
+let currentLon = null;
+let currentLocationName = null;
+
+async function loadForecast() {
+  const statusBar = document.getElementById('statusBar');
+  const tableContainer = document.getElementById('tableContainer');
+  const debugInfo = document.getElementById('debugInfo');
+  const locationDisplay = document.getElementById('locationDisplay');
+
+  if (!currentLat || !currentLon) {
+    statusBar.className = 'status-bar status-error';
+    statusBar.textContent = 'Please enter or select a location.';
+    statusBar.style.display = 'block';
+    return;
+  }
+
+  statusBar.className = 'status-bar status-loading';
+  statusBar.textContent = 'Loading forecast data...';
+  statusBar.style.display = 'block';
+
+  const stat = document.getElementById('statSelect').value;
+
+  try {
+    const data = await fetchJSON(`/api/table/multimodel?lat=${currentLat}&lon=${currentLon}&stat=${stat}`);
+    tableContainer.innerHTML = renderMultiModelTable(data);
+
+    const modelCount = Object.keys(data.models).length;
+    const rowCount = data.rows.length;
+    statusBar.className = 'status-bar status-success';
+    statusBar.textContent = `Loaded ${rowCount} forecast hours from ${modelCount} model(s)`;
+
+    locationDisplay.textContent = currentLocationName
+      ? `${currentLocationName} (${currentLat}, ${currentLon})`
+      : `${currentLat}, ${currentLon}`;
+
+    debugInfo.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    statusBar.className = 'status-bar status-error';
+    statusBar.textContent = `Error: ${e.message}`;
+    tableContainer.innerHTML = '';
+    debugInfo.textContent = String(e);
+  }
+}
+
+function setLocation(lat, lon, name = null) {
+  currentLat = parseFloat(lat).toFixed(4);
+  currentLon = parseFloat(lon).toFixed(4);
+  currentLocationName = name;
+  document.getElementById('latInput').value = currentLat;
+  document.getElementById('lonInput').value = currentLon;
+  document.getElementById('autocompleteList').style.display = 'none';
+
+  // Update URL without reloading
+  const url = new URL(window.location);
+  url.searchParams.set('lat', currentLat);
+  url.searchParams.set('lon', currentLon);
+  if (name) url.searchParams.set('name', name);
+  window.history.replaceState({}, '', url);
+
+  loadForecast();
+}
+
+// Event handlers
+document.getElementById('locationInput').addEventListener('input', function(e) {
+  clearTimeout(autocompleteTimeout);
+  const query = e.target.value.trim();
+
+  if (query.length < 3) {
+    document.getElementById('autocompleteList').style.display = 'none';
+    return;
+  }
+
+  autocompleteTimeout = setTimeout(async () => {
+    const results = await searchNominatim(query);
+    showAutocomplete(results);
+  }, 300);
+});
+
+document.getElementById('autocompleteList').addEventListener('click', function(e) {
+  const item = e.target.closest('.autocomplete-item');
+  if (!item) return;
+
+  const lat = item.dataset.lat;
+  const lon = item.dataset.lon;
+  const name = item.querySelector('.place-name').textContent;
+  document.getElementById('locationInput').value = name;
+  setLocation(lat, lon, name);
+});
+
+document.getElementById('searchBtn').addEventListener('click', async function() {
+  const query = document.getElementById('locationInput').value.trim();
+  if (!query) return;
+
+  const results = await searchNominatim(query);
+  if (results.length > 0) {
+    const first = results[0];
+    setLocation(first.lat, first.lon, first.display_name.split(',')[0]);
+  }
+});
+
+document.getElementById('geolocateBtn').addEventListener('click', function() {
+  const statusBar = document.getElementById('statusBar');
+
+  if (!navigator.geolocation) {
+    statusBar.className = 'status-bar status-error';
+    statusBar.textContent = 'Geolocation not supported by your browser.';
+    statusBar.style.display = 'block';
+    return;
+  }
+
+  statusBar.className = 'status-bar status-loading';
+  statusBar.textContent = 'Getting your location...';
+  statusBar.style.display = 'block';
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => setLocation(pos.coords.latitude, pos.coords.longitude, 'Current Location'),
+    (err) => {
+      statusBar.className = 'status-bar status-error';
+      statusBar.textContent = `Location error: ${err.message}`;
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+
+document.getElementById('refreshBtn').addEventListener('click', function() {
+  const lat = document.getElementById('latInput').value;
+  const lon = document.getElementById('lonInput').value;
+  if (lat && lon) {
+    setLocation(lat, lon);
+  }
+});
+
+document.getElementById('statSelect').addEventListener('change', loadForecast);
+
+// Close autocomplete when clicking outside
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.autocomplete-container')) {
+    document.getElementById('autocompleteList').style.display = 'none';
+  }
+});
+
+// Initialize from URL params
+function init() {
+  const params = new URLSearchParams(window.location.search);
+  const lat = params.get('lat');
+  const lon = params.get('lon');
+  const name = params.get('name');
+
+  if (lat && lon) {
+    setLocation(lat, lon, name);
+  } else {
+    // Try geolocation by default
+    document.getElementById('geolocateBtn').click();
+  }
+}
+
+init();
+</script>
+{% endblock %}

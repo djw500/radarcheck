@@ -230,6 +230,18 @@ def build_region_tiles(
                 res_deg,
             )
 
+            # Compute init_time_utc from run_info
+            init_time_utc = None
+            if run_info.get("init_time"):
+                init_time_utc = run_info["init_time"]
+            elif run_info.get("date_str") and run_info.get("init_hour"):
+                from datetime import datetime
+                try:
+                    dt = datetime.strptime(f"{run_info['date_str']}{run_info['init_hour']}", "%Y%m%d%H")
+                    init_time_utc = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                except ValueError:
+                    pass
+
             meta = {
                 "region_id": region_id,
                 "model_id": model_id,
@@ -243,6 +255,7 @@ def build_region_tiles(
                 "units": variable_config.get("units"),
                 "lon_0_360": bool(index_meta.get("lon_0_360", False)),
                 "index_lon_min": float(index_meta.get("index_lon_min", lon_min)),
+                "init_time_utc": init_time_utc,
             }
 
             out_path = save_tiles_npz(

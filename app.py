@@ -682,6 +682,160 @@ def parse_run_id_to_init_dt(run_id: str) -> Optional[datetime]:
     except Exception:
         return None
 
+@app.route("/api/infer_region")
+@require_api_key
+def api_infer_region():
+    """Infer the tiling region for a given lat/lon coordinate."""
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+
+    region_id = infer_region_for_latlon(lat, lon)
+    if not region_id:
+        return jsonify({
+            "error": "Point outside configured regions",
+            "lat": lat,
+            "lon": lon,
+            "available_regions": list(repomap.get("TILING_REGIONS", {}).keys()),
+        }), 404
+
+    region = repomap["TILING_REGIONS"][region_id]
+    return jsonify({
+        "region_id": region_id,
+        "region_name": region.get("name", region_id),
+        "lat": lat,
+        "lon": lon,
+        "bounds": {
+            "lat_min": region["lat_min"],
+            "lat_max": region["lat_max"],
+            "lon_min": region["lon_min"],
+            "lon_max": region["lon_max"],
+        },
+        "default_resolution_deg": region.get("default_resolution_deg", 0.1),
+    })
+
+
+@app.route("/api/table/multimodel")
+@require_api_key
+def api_table_multimodel():
+    """Return merged forecast data from all available models at a lat/lon.
+
+    Input: lat, lon, stat (mean/min/max)
+    Output: { rows: [...], models: {...}, metadata: {...} }
+
+    Merges data from all models with tiles for the inferred region.
+    Handles different forecast lengths by padding with null for shorter models.
+    """
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+
+    stat = request.args.get("stat", "mean")
+    region_id = request.args.get("region")
+
+    # Infer region if not provided
+    if not region_id:
+        region_id = infer_region_for_latlon(lat, lon)
+        if not region_id:
+            return jsonify({"error": "Point outside configured regions"}), 400
+
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+
+    # Get all models with tiles for this region
+    models_with_runs = list_tile_models(repomap["TILES_DIR"], region_id, res)
+    if not models_with_runs:
+        return jsonify({
+            "error": "No models with tiles available for this region",
+            "metadata": {"region": region_id, "lat": lat, "lon": lon},
+        }), 404
+
+    # Collect data from each model
+    models_info = {}
+    all_rows_by_hour = {}
+    all_hours = set()
+
+    for model_id, runs in models_with_runs.items():
+        if not runs:
+            continue
+
+        # Use latest run for each model
+        run_id = runs[0]
+        init_dt = parse_run_id_to_init_dt(run_id)
+
+        # Get variables for this model's run
+        vars_info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, run_id)
+        if not vars_info:
+            continue
+
+        model_config = repomap["MODELS"].get(model_id, {})
+        models_info[model_id] = {
+            "name": model_config.get("name", model_id.upper()),
+            "run_id": run_id,
+            "init_time_utc": init_dt.isoformat() if init_dt else None,
+            "max_forecast_hours": model_config.get("max_forecast_hours"),
+            "variables": list(vars_info.keys()),
+        }
+
+        # Load timeseries for each variable
+        for var_id in vars_info.keys():
+            try:
+                hours, values = load_timeseries_for_point(
+                    repomap["TILES_DIR"], region_id, res, model_id, run_id, var_id, lat, lon, stat=stat
+                )
+            except FileNotFoundError:
+                continue
+
+            for hour, val in zip(hours.tolist(), values.tolist()):
+                hour = int(hour)
+                all_hours.add(hour)
+                if hour not in all_rows_by_hour:
+                    all_rows_by_hour[hour] = {"hour": hour}
+
+                # Key format: model_variable (e.g., "hrrr_t2m")
+                col_key = f"{model_id}_{var_id}"
+                all_rows_by_hour[hour][col_key] = None if (val is None or (isinstance(val, float) and np.isnan(val))) else val
+
+    if not all_rows_by_hour:
+        return jsonify({
+            "error": "No data available from any model",
+            "metadata": {"region": region_id, "lat": lat, "lon": lon},
+            "models_checked": list(models_with_runs.keys()),
+        }), 404
+
+    # Sort hours and build rows
+    hours_sorted = sorted(all_hours)
+    rows = []
+    for hour in hours_sorted:
+        row = all_rows_by_hour[hour]
+        # Add valid_time for each model (different init times = different valid times)
+        for model_id, model_info in models_info.items():
+            if model_info.get("init_time_utc"):
+                init_dt = datetime.fromisoformat(model_info["init_time_utc"])
+                valid_dt = init_dt + timedelta(hours=hour)
+                row[f"{model_id}_valid_time"] = valid_dt.isoformat()
+        rows.append(row)
+
+    return jsonify({
+        "metadata": {
+            "region": region_id,
+            "stat": stat,
+            "resolution_deg": res,
+            "lat": lat,
+            "lon": lon,
+        },
+        "models": models_info,
+        "rows": rows,
+    })
+
+
 @app.route("/api/tile_runs/<model_id>")
 @require_api_key
 def api_tile_runs(model_id: str):
@@ -1246,9 +1400,10 @@ def location_view(location_id: str):
     )
 
 @app.route("/forecast")
-def forecast():
-    """Legacy endpoint for GIF - redirect to main page"""
-    return redirect(url_for('index'))
+@require_api_key
+def forecast_view():
+    """Multi-model forecast table view with location search."""
+    return render_template("forecast.html", locations=get_available_locations())
 
 
 @app.route("/summary/<location_id>")

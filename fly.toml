@@ -27,6 +27,12 @@ primary_region = 'ewr'
     method = 'GET'
     path = '/health'
 
+# Environment variables for tile builder (used by supervisor)
+[env]
+  TILE_BUILD_INTERVAL_MINUTES = "15"
+  TILE_BUILD_MAX_HOURS_HRRR = "24"
+  TILE_BUILD_MAX_HOURS_GFS = "168"
+
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
