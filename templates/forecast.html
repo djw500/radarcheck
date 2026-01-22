@@ -4,16 +4,19 @@
 
 {% block extra_head %}
 <style>
+  /* Panel and layout */
   .panel { background: #f8f9fa; padding: 12px 16px; border-radius: 6px; margin: 12px 0; }
   .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-  select, input { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+  select, input { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
   input[type="text"] { min-width: 200px; }
-  button { padding: 6px 12px; background: #4a90d9; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  button { padding: 6px 12px; background: #4a90d9; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
   button:hover { background: #357abd; }
   button:disabled { background: #ccc; cursor: not-allowed; }
+  button.secondary { background: #6c757d; }
+  button.secondary:hover { background: #545b62; }
 
   /* Autocomplete dropdown */
-  .autocomplete-container { position: relative; display: inline-block; }
+  .autocomplete-container { position: relative; flex: 1; max-width: 350px; }
   .autocomplete-list {
     position: absolute; top: 100%; left: 0; right: 0;
     background: white; border: 1px solid #ccc; border-radius: 4px;
@@ -28,33 +31,96 @@
   .autocomplete-item .place-name { font-weight: 500; }
   .autocomplete-item .place-detail { font-size: 0.85em; color: #666; }
 
+  /* Recent locations */
+  .recent-locations { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .recent-chip {
+    padding: 4px 10px; background: #e9ecef; border: 1px solid #ced4da;
+    border-radius: 16px; font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .recent-chip:hover { background: #dee2e6; }
+  .recent-chip .remove { color: #666; font-weight: bold; margin-left: 2px; }
+  .recent-chip .remove:hover { color: #dc3545; }
+
+  /* Summary cards */
+  .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 12px 0; }
+  .summary-card {
+    background: white; border: 1px solid #dee2e6; border-radius: 8px;
+    padding: 12px; text-align: center;
+  }
+  .summary-card .label { font-size: 12px; color: #666; text-transform: uppercase; }
+  .summary-card .value { font-size: 24px; font-weight: 600; margin: 4px 0; }
+  .summary-card .range { font-size: 12px; color: #888; }
+  .summary-card.precip { border-left: 4px solid #3182ce; }
+  .summary-card.snow { border-left: 4px solid #805ad5; }
+  .summary-card.temp { border-left: 4px solid #dd6b20; }
+  .summary-card.wind { border-left: 4px solid #38a169; }
+
+  /* Time period toggles */
+  .time-toggles { display: flex; gap: 4px; }
+  .time-toggle {
+    padding: 4px 12px; background: #e9ecef; border: 1px solid #ced4da;
+    border-radius: 4px; font-size: 13px; cursor: pointer;
+  }
+  .time-toggle:hover { background: #dee2e6; }
+  .time-toggle.active { background: #4a90d9; color: white; border-color: #4a90d9; }
+
   /* Table styling */
-  .table-wrapper { overflow-x: auto; margin-top: 12px; }
+  .table-wrapper { overflow-x: auto; margin-top: 12px; -webkit-overflow-scrolling: touch; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; white-space: nowrap; }
   th { background: #4a90d9; color: #fff; position: sticky; top: 0; z-index: 10; }
-  th.time-col { text-align: left; min-width: 140px; }
-  td.time-col { text-align: left; font-weight: 500; }
+  th.time-col { text-align: left; min-width: 120px; position: sticky; left: 0; z-index: 11; }
+  td.time-col { text-align: left; font-weight: 500; background: #f8f9fa; position: sticky; left: 0; z-index: 5; }
 
   /* Model header groups */
   th.model-group { background: #2c5282; text-align: center; }
-  th.var-header { background: #3182ce; font-size: 0.9em; }
+  th.var-header { background: #3182ce; font-size: 0.85em; }
+  th .units { font-weight: normal; font-size: 0.85em; opacity: 0.9; }
+  .model-init { font-size: 0.8em; font-weight: normal; opacity: 0.9; display: block; }
+  .model-freshness { font-size: 0.75em; padding: 1px 4px; border-radius: 3px; margin-left: 4px; }
+  .freshness-good { background: #c6f6d5; color: #276749; }
+  .freshness-warn { background: #fefcbf; color: #975a16; }
+  .freshness-old { background: #fed7d7; color: #c53030; }
 
-  /* Color coding */
-  .temp-cold { background: #cce5ff; }
-  .temp-hot { background: #ffcccc; }
+  /* Color coding for cells */
+  .temp-cold { background: #bee3f8; }
+  .temp-cool { background: #e2e8f0; }
+  .temp-warm { background: #feebc8; }
+  .temp-hot { background: #feb2b2; }
   .precip-light { background: #e6f3ff; }
-  .precip-heavy { background: #99ccff; }
-  .snow-light { background: #f0e6ff; }
-  .snow-heavy { background: #cc99ff; }
+  .precip-mod { background: #90cdf4; }
+  .precip-heavy { background: #63b3ed; color: #1a365d; }
+  .snow-light { background: #e9d8fd; }
+  .snow-mod { background: #d6bcfa; }
+  .snow-heavy { background: #b794f4; color: #44337a; }
+  .wind-calm { background: #c6f6d5; }
+  .wind-mod { background: #faf089; }
+  .wind-strong { background: #fc8181; }
+  .cell-missing { background: #f1f1f1; color: #999; }
+  .cell-na { color: #ccc; }
 
+  /* Status and utilities */
   .muted { color: #666; }
   .error { color: #b00020; }
-  .model-init { font-size: 0.85em; color: #666; margin-left: 4px; }
-  .status-bar { padding: 8px; margin: 8px 0; border-radius: 4px; }
-  .status-loading { background: #fff3cd; }
+  .status-bar { padding: 8px 12px; margin: 8px 0; border-radius: 4px; font-size: 14px; }
+  .status-loading { background: #fff3cd; color: #856404; }
   .status-error { background: #f8d7da; color: #721c24; }
-  .status-success { background: #d4edda; }
+  .status-success { background: #d4edda; color: #155724; }
+
+  /* Export buttons */
+  .export-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    .controls { flex-direction: column; align-items: stretch; }
+    .autocomplete-container { max-width: 100%; }
+    input[type="text"] { min-width: 100%; }
+    .summary-cards { grid-template-columns: repeat(2, 1fr); }
+    .summary-card .value { font-size: 20px; }
+    th, td { padding: 4px 6px; font-size: 12px; }
+    th.time-col, td.time-col { min-width: 90px; }
+  }
 </style>
 {% endblock %}
 
@@ -68,12 +134,16 @@
       <div id="autocompleteList" class="autocomplete-list" style="display: none;"></div>
     </div>
     <button id="searchBtn">Search</button>
-    <button id="geolocateBtn">Use My Location</button>
+    <button id="geolocateBtn" class="secondary">My Location</button>
   </div>
 
-  <div class="controls">
-    <label>Lat <input type="text" id="latInput" size="8" placeholder="40.0"></label>
-    <label>Lon <input type="text" id="lonInput" size="9" placeholder="-75.0"></label>
+  <div id="recentLocationsContainer" style="display: none;">
+    <div class="recent-locations" id="recentLocations"></div>
+  </div>
+
+  <div class="controls" style="margin-top: 12px;">
+    <label>Lat <input type="text" id="latInput" size="8" placeholder="40.0" style="min-width: 80px;"></label>
+    <label>Lon <input type="text" id="lonInput" size="9" placeholder="-75.0" style="min-width: 90px;"></label>
     <label>Stat
       <select id="statSelect">
         <option value="mean">Mean</option>
@@ -81,13 +151,24 @@
         <option value="max">Max</option>
       </select>
     </label>
+    <div class="time-toggles">
+      <span class="time-toggle active" data-hours="24">24h</span>
+      <span class="time-toggle" data-hours="72">3 days</span>
+      <span class="time-toggle" data-hours="168">7 days</span>
+    </div>
     <button id="refreshBtn">Refresh</button>
   </div>
 
-  <div id="locationDisplay" class="muted"></div>
+  <div id="locationDisplay" class="muted" style="margin-top: 8px;"></div>
 </div>
 
 <div id="statusBar" class="status-bar status-loading" style="display: none;"></div>
+
+<div id="summaryCards" class="summary-cards" style="display: none;"></div>
+
+<div class="export-row">
+  <button id="csvBtn" class="secondary" style="display: none;">Download CSV</button>
+</div>
 
 <div id="tableContainer"></div>
 
@@ -99,6 +180,28 @@
 </div>
 
 <script>
+// Constants
+const MAX_RECENT_LOCATIONS = 5;
+const STORAGE_KEY_RECENT = 'radarcheck_recent_locations';
+
+// Variables we display (with units)
+const DISPLAY_VARS = [
+  { id: 'apcp', name: 'Precip', units: 'in', category: 'precip' },
+  { id: 'asnow', name: 'Snow', units: 'in', category: 'snow' },
+  { id: 'snod', name: 'Depth', units: 'in', category: 'snow' },
+  { id: 't2m', name: 'Temp', units: '°F', category: 'temp' },
+  { id: 'dpt', name: 'Dew', units: '°F', category: 'temp' },
+  { id: 'wind_10m', name: 'Wind', units: 'mph', category: 'wind' },
+  { id: 'gust', name: 'Gust', units: 'mph', category: 'wind' },
+];
+
+// State
+let currentLat = null;
+let currentLon = null;
+let currentLocationName = null;
+let currentData = null;
+let maxHoursToShow = 24;
+
 // Utility functions
 async function fetchJSON(url) {
   const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
@@ -106,129 +209,273 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-function formatLocalTime(isoString) {
-  if (!isoString) return '-';
+function formatLocalTime(isoString, compact = false) {
+  if (!isoString) return '—';
   try {
     const dt = new Date(isoString);
+    if (compact) {
+      return dt.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', hour12: true });
+    }
     return dt.toLocaleString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true
     });
-  } catch (e) {
-    return isoString;
-  }
+  } catch (e) { return isoString; }
 }
 
 function formatInitTime(isoString) {
   if (!isoString) return '';
   try {
     const dt = new Date(isoString);
-    return dt.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      hour12: true,
-      timeZoneName: 'short'
-    });
-  } catch (e) {
-    return isoString;
-  }
+    const hour = dt.getUTCHours().toString().padStart(2, '0');
+    return `${hour}Z`;
+  } catch (e) { return ''; }
+}
+
+function getModelFreshness(isoString) {
+  if (!isoString) return { class: '', label: '' };
+  const hoursAgo = (Date.now() - new Date(isoString).getTime()) / (1000 * 60 * 60);
+  if (hoursAgo < 2) return { class: 'freshness-good', label: '<2h' };
+  if (hoursAgo < 6) return { class: 'freshness-warn', label: `${Math.round(hoursAgo)}h` };
+  return { class: 'freshness-old', label: `${Math.round(hoursAgo)}h` };
 }
 
 function getColorClass(varId, value) {
-  if (value === null || value === undefined) return '';
+  if (value === null || value === undefined || (typeof value === 'number' && isNaN(value))) {
+    return 'cell-missing';
+  }
+  const v = DISPLAY_VARS.find(x => x.id === varId);
+  if (!v) return '';
 
-  if (varId === 't2m' || varId === 'dpt') {
+  if (v.category === 'temp') {
     if (value < 32) return 'temp-cold';
-    if (value > 80) return 'temp-hot';
-  } else if (varId === 'apcp' || varId === 'prate') {
-    if (value > 0 && value <= 0.1) return 'precip-light';
-    if (value > 0.1) return 'precip-heavy';
-  } else if (varId === 'asnow' || varId === 'snod') {
-    if (value > 0 && value <= 2) return 'snow-light';
-    if (value > 2) return 'snow-heavy';
+    if (value < 50) return 'temp-cool';
+    if (value < 75) return 'temp-warm';
+    if (value >= 75) return 'temp-hot';
+  } else if (v.category === 'precip') {
+    if (value <= 0) return '';
+    if (value < 0.1) return 'precip-light';
+    if (value < 0.5) return 'precip-mod';
+    return 'precip-heavy';
+  } else if (v.category === 'snow') {
+    if (value <= 0) return '';
+    if (value < 2) return 'snow-light';
+    if (value < 6) return 'snow-mod';
+    return 'snow-heavy';
+  } else if (v.category === 'wind') {
+    if (value < 15) return 'wind-calm';
+    if (value < 30) return 'wind-mod';
+    return 'wind-strong';
   }
   return '';
 }
 
-function formatValue(varId, value, units) {
-  if (value === null || value === undefined) return '-';
-
-  // Format based on units
-  if (units === 'in' || units === 'in/hr' || units === 'mi') {
-    return value.toFixed(2);
-  } else if (units === 'degF' || units === 'mph') {
-    return value.toFixed(1);
-  } else if (units === 'dBZ' || units === 'J/kg' || units === 'm/s' || units === '%') {
-    return value.toFixed(0);
+function formatValue(varId, value) {
+  if (value === null || value === undefined || (typeof value === 'number' && isNaN(value))) {
+    return '—';
   }
-  return value.toFixed(1);
+  const v = DISPLAY_VARS.find(x => x.id === varId);
+  if (v && (v.category === 'precip' || v.category === 'snow')) {
+    return value.toFixed(2);
+  }
+  return Math.round(value);
 }
 
-// Variables we care about for the table (in display order)
-const DISPLAY_VARS = [
-  { id: 'apcp', name: 'Precip', units: 'in' },
-  { id: 'asnow', name: 'Snow', units: 'in' },
-  { id: 'snod', name: 'Snow Depth', units: 'in' },
-  { id: 't2m', name: 'Temp', units: 'degF' },
-  { id: 'dpt', name: 'Dew Pt', units: 'degF' },
-  { id: 'wind_10m', name: 'Wind', units: 'mph' },
-  { id: 'gust', name: 'Gusts', units: 'mph' },
-];
+// Recent locations
+function loadRecentLocations() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY_RECENT) || '[]');
+  } catch (e) { return []; }
+}
 
-function renderMultiModelTable(data) {
-  const { rows, models, metadata } = data;
+function saveRecentLocation(name, lat, lon) {
+  let recent = loadRecentLocations();
+  // Remove if already exists
+  recent = recent.filter(r => !(Math.abs(r.lat - lat) < 0.01 && Math.abs(r.lon - lon) < 0.01));
+  // Add to front
+  recent.unshift({ name: name || `${lat}, ${lon}`, lat: parseFloat(lat), lon: parseFloat(lon), ts: Date.now() });
+  // Limit
+  recent = recent.slice(0, MAX_RECENT_LOCATIONS);
+  localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(recent));
+  renderRecentLocations();
+}
+
+function removeRecentLocation(index) {
+  let recent = loadRecentLocations();
+  recent.splice(index, 1);
+  localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(recent));
+  renderRecentLocations();
+}
+
+function renderRecentLocations() {
+  const recent = loadRecentLocations();
+  const container = document.getElementById('recentLocationsContainer');
+  const list = document.getElementById('recentLocations');
+
+  if (recent.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  list.innerHTML = recent.map((r, i) => `
+    <span class="recent-chip" data-index="${i}" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${r.name}">
+      ${r.name}
+      <span class="remove" data-index="${i}">&times;</span>
+    </span>
+  `).join('');
+}
+
+// Summary cards
+function renderSummaryCards(data) {
+  const container = document.getElementById('summaryCards');
+  if (!data || !data.rows || !data.rows.length) {
+    container.style.display = 'none';
+    return;
+  }
+
+  const models = Object.keys(data.models);
+  const summaries = {};
+
+  // Calculate summaries per variable across all models
+  for (const v of DISPLAY_VARS) {
+    const allValues = [];
+    for (const modelId of models) {
+      for (const row of data.rows) {
+        const val = row[`${modelId}_${v.id}`];
+        if (val !== null && val !== undefined && !isNaN(val)) {
+          if (v.category === 'precip' || v.category === 'snow') {
+            // For accumulations, we want the max
+            allValues.push(val);
+          } else {
+            allValues.push(val);
+          }
+        }
+      }
+    }
+    if (allValues.length > 0) {
+      summaries[v.id] = {
+        min: Math.min(...allValues),
+        max: Math.max(...allValues),
+        category: v.category,
+        units: v.units,
+        name: v.name
+      };
+    }
+  }
+
+  // Build cards for key variables
+  const cards = [];
+
+  if (summaries.apcp) {
+    const s = summaries.apcp;
+    cards.push(`
+      <div class="summary-card precip">
+        <div class="label">Total Precip</div>
+        <div class="value">${s.max.toFixed(2)}"</div>
+        <div class="range">${s.min.toFixed(2)} - ${s.max.toFixed(2)} in</div>
+      </div>
+    `);
+  }
+
+  if (summaries.asnow || summaries.snod) {
+    const s = summaries.asnow || summaries.snod;
+    cards.push(`
+      <div class="summary-card snow">
+        <div class="label">Snow</div>
+        <div class="value">${s.max.toFixed(1)}"</div>
+        <div class="range">${s.min.toFixed(1)} - ${s.max.toFixed(1)} in</div>
+      </div>
+    `);
+  }
+
+  if (summaries.t2m) {
+    const s = summaries.t2m;
+    cards.push(`
+      <div class="summary-card temp">
+        <div class="label">Temp Range</div>
+        <div class="value">${Math.round(s.min)}° - ${Math.round(s.max)}°</div>
+        <div class="range">Low ${Math.round(s.min)}°F / High ${Math.round(s.max)}°F</div>
+      </div>
+    `);
+  }
+
+  if (summaries.gust || summaries.wind_10m) {
+    const s = summaries.gust || summaries.wind_10m;
+    cards.push(`
+      <div class="summary-card wind">
+        <div class="label">Max Wind</div>
+        <div class="value">${Math.round(s.max)} mph</div>
+        <div class="range">Up to ${Math.round(s.max)} mph</div>
+      </div>
+    `);
+  }
+
+  if (cards.length > 0) {
+    container.innerHTML = cards.join('');
+    container.style.display = 'grid';
+  } else {
+    container.style.display = 'none';
+  }
+}
+
+// Table rendering
+function renderMultiModelTable(data, maxHours) {
+  const { rows, models } = data;
   if (!rows || !rows.length) return '<p class="muted">No forecast data available.</p>';
 
   const modelIds = Object.keys(models).sort();
   if (!modelIds.length) return '<p class="muted">No models available.</p>';
 
-  // Build header
+  // Filter rows by maxHours
+  const filteredRows = rows.filter(r => r.hour <= maxHours);
+  if (!filteredRows.length) return '<p class="muted">No data for selected time period.</p>';
+
   let html = '<div class="table-wrapper"><table>';
 
-  // Row 1: Model names
-  html += '<thead><tr><th class="time-col" rowspan="2">Local Time</th>';
+  // Header row 1: Model names with init times
+  html += '<thead><tr><th class="time-col" rowspan="2">Time</th>';
   for (const modelId of modelIds) {
-    const modelInfo = models[modelId];
-    const varsForModel = DISPLAY_VARS.filter(v => modelInfo.variables.includes(v.id));
-    if (varsForModel.length === 0) continue;
-    const initStr = formatInitTime(modelInfo.init_time_utc);
-    html += `<th class="model-group" colspan="${varsForModel.length}">${modelInfo.name}<span class="model-init">(${initStr})</span></th>`;
+    const m = models[modelId];
+    const varsForModel = DISPLAY_VARS.filter(v => m.variables.includes(v.id));
+    if (!varsForModel.length) continue;
+    const initStr = formatInitTime(m.init_time_utc);
+    const fresh = getModelFreshness(m.init_time_utc);
+    html += `<th class="model-group" colspan="${varsForModel.length}">
+      ${m.name}
+      <span class="model-init">${initStr}</span>
+      ${fresh.label ? `<span class="model-freshness ${fresh.class}">${fresh.label}</span>` : ''}
+    </th>`;
   }
   html += '</tr>';
 
-  // Row 2: Variable names per model
+  // Header row 2: Variable names with units
   html += '<tr>';
   for (const modelId of modelIds) {
-    const modelInfo = models[modelId];
-    const varsForModel = DISPLAY_VARS.filter(v => modelInfo.variables.includes(v.id));
+    const m = models[modelId];
+    const varsForModel = DISPLAY_VARS.filter(v => m.variables.includes(v.id));
     for (const v of varsForModel) {
-      html += `<th class="var-header">${v.name}</th>`;
+      html += `<th class="var-header">${v.name} <span class="units">(${v.units})</span></th>`;
     }
   }
   html += '</tr></thead>';
 
   // Body rows
   html += '<tbody>';
-  for (const row of rows) {
-    // Use valid time from first model
+  for (const row of filteredRows) {
     const firstModel = modelIds[0];
     const validTimeKey = `${firstModel}_valid_time`;
-    const localTime = formatLocalTime(row[validTimeKey]);
+    const localTime = formatLocalTime(row[validTimeKey], true);
 
     html += `<tr><td class="time-col">${localTime}</td>`;
     for (const modelId of modelIds) {
-      const modelInfo = models[modelId];
-      const varsForModel = DISPLAY_VARS.filter(v => modelInfo.variables.includes(v.id));
+      const m = models[modelId];
+      const varsForModel = DISPLAY_VARS.filter(v => m.variables.includes(v.id));
       for (const v of varsForModel) {
         const key = `${modelId}_${v.id}`;
         const value = row[key];
         const colorClass = getColorClass(v.id, value);
-        const formatted = formatValue(v.id, value, v.units);
+        const formatted = formatValue(v.id, value);
         html += `<td class="${colorClass}">${formatted}</td>`;
       }
     }
@@ -237,6 +484,50 @@ function renderMultiModelTable(data) {
   html += '</tbody></table></div>';
 
   return html;
+}
+
+// CSV export
+function exportToCSV(data, maxHours) {
+  if (!data || !data.rows) return;
+
+  const modelIds = Object.keys(data.models).sort();
+  const headers = ['Hour', 'Time'];
+
+  for (const modelId of modelIds) {
+    const m = data.models[modelId];
+    const varsForModel = DISPLAY_VARS.filter(v => m.variables.includes(v.id));
+    for (const v of varsForModel) {
+      headers.push(`${m.name} ${v.name} (${v.units})`);
+    }
+  }
+
+  const rows = [headers.join(',')];
+  const filteredRows = data.rows.filter(r => r.hour <= maxHours);
+
+  for (const row of filteredRows) {
+    const firstModel = modelIds[0];
+    const validTime = row[`${firstModel}_valid_time`] || '';
+    const cells = [row.hour, validTime];
+
+    for (const modelId of modelIds) {
+      const m = data.models[modelId];
+      const varsForModel = DISPLAY_VARS.filter(v => m.variables.includes(v.id));
+      for (const v of varsForModel) {
+        const val = row[`${modelId}_${v.id}`];
+        cells.push(val !== null && val !== undefined ? val : '');
+      }
+    }
+    rows.push(cells.join(','));
+  }
+
+  const csv = rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `forecast_${currentLat}_${currentLon}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // Nominatim autocomplete
@@ -249,17 +540,12 @@ async function searchNominatim(query) {
 
   try {
     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=us&limit=5`;
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Radarcheck Weather App' }
-    });
+    const res = await fetch(url, { headers: { 'User-Agent': 'Radarcheck Weather App' } });
     if (!res.ok) return [];
     const results = await res.json();
     autocompleteCache[query] = results;
     return results;
-  } catch (e) {
-    console.error('Nominatim search failed:', e);
-    return [];
-  }
+  } catch (e) { return []; }
 }
 
 function showAutocomplete(results) {
@@ -268,7 +554,6 @@ function showAutocomplete(results) {
     list.style.display = 'none';
     return;
   }
-
   list.innerHTML = results.map(r => `
     <div class="autocomplete-item" data-lat="${r.lat}" data-lon="${r.lon}">
       <div class="place-name">${r.display_name.split(',')[0]}</div>
@@ -278,16 +563,13 @@ function showAutocomplete(results) {
   list.style.display = 'block';
 }
 
-// State
-let currentLat = null;
-let currentLon = null;
-let currentLocationName = null;
-
+// Main data loading
 async function loadForecast() {
   const statusBar = document.getElementById('statusBar');
   const tableContainer = document.getElementById('tableContainer');
   const debugInfo = document.getElementById('debugInfo');
   const locationDisplay = document.getElementById('locationDisplay');
+  const csvBtn = document.getElementById('csvBtn');
 
   if (!currentLat || !currentLon) {
     statusBar.className = 'status-bar status-error';
@@ -299,17 +581,22 @@ async function loadForecast() {
   statusBar.className = 'status-bar status-loading';
   statusBar.textContent = 'Loading forecast data...';
   statusBar.style.display = 'block';
+  csvBtn.style.display = 'none';
 
   const stat = document.getElementById('statSelect').value;
 
   try {
     const data = await fetchJSON(`/api/table/multimodel?lat=${currentLat}&lon=${currentLon}&stat=${stat}`);
-    tableContainer.innerHTML = renderMultiModelTable(data);
+    currentData = data;
+
+    tableContainer.innerHTML = renderMultiModelTable(data, maxHoursToShow);
+    renderSummaryCards(data);
 
     const modelCount = Object.keys(data.models).length;
-    const rowCount = data.rows.length;
+    const rowCount = data.rows.filter(r => r.hour <= maxHoursToShow).length;
     statusBar.className = 'status-bar status-success';
-    statusBar.textContent = `Loaded ${rowCount} forecast hours from ${modelCount} model(s)`;
+    statusBar.textContent = `${rowCount} hours from ${modelCount} model(s)`;
+    csvBtn.style.display = 'inline-block';
 
     locationDisplay.textContent = currentLocationName
       ? `${currentLocationName} (${currentLat}, ${currentLon})`
@@ -320,6 +607,7 @@ async function loadForecast() {
     statusBar.className = 'status-bar status-error';
     statusBar.textContent = `Error: ${e.message}`;
     tableContainer.innerHTML = '';
+    document.getElementById('summaryCards').style.display = 'none';
     debugInfo.textContent = String(e);
   }
 }
@@ -332,12 +620,15 @@ function setLocation(lat, lon, name = null) {
   document.getElementById('lonInput').value = currentLon;
   document.getElementById('autocompleteList').style.display = 'none';
 
-  // Update URL without reloading
+  // Update URL
   const url = new URL(window.location);
   url.searchParams.set('lat', currentLat);
   url.searchParams.set('lon', currentLon);
   if (name) url.searchParams.set('name', name);
   window.history.replaceState({}, '', url);
+
+  // Save to recent
+  saveRecentLocation(name, currentLat, currentLon);
 
   loadForecast();
 }
@@ -346,12 +637,10 @@ function setLocation(lat, lon, name = null) {
 document.getElementById('locationInput').addEventListener('input', function(e) {
   clearTimeout(autocompleteTimeout);
   const query = e.target.value.trim();
-
   if (query.length < 3) {
     document.getElementById('autocompleteList').style.display = 'none';
     return;
   }
-
   autocompleteTimeout = setTimeout(async () => {
     const results = await searchNominatim(query);
     showAutocomplete(results);
@@ -361,18 +650,14 @@ document.getElementById('locationInput').addEventListener('input', function(e) {
 document.getElementById('autocompleteList').addEventListener('click', function(e) {
   const item = e.target.closest('.autocomplete-item');
   if (!item) return;
-
-  const lat = item.dataset.lat;
-  const lon = item.dataset.lon;
   const name = item.querySelector('.place-name').textContent;
   document.getElementById('locationInput').value = name;
-  setLocation(lat, lon, name);
+  setLocation(item.dataset.lat, item.dataset.lon, name);
 });
 
 document.getElementById('searchBtn').addEventListener('click', async function() {
   const query = document.getElementById('locationInput').value.trim();
   if (!query) return;
-
   const results = await searchNominatim(query);
   if (results.length > 0) {
     const first = results[0];
@@ -382,20 +667,18 @@ document.getElementById('searchBtn').addEventListener('click', async function() 
 
 document.getElementById('geolocateBtn').addEventListener('click', function() {
   const statusBar = document.getElementById('statusBar');
-
   if (!navigator.geolocation) {
     statusBar.className = 'status-bar status-error';
-    statusBar.textContent = 'Geolocation not supported by your browser.';
+    statusBar.textContent = 'Geolocation not supported.';
     statusBar.style.display = 'block';
     return;
   }
-
   statusBar.className = 'status-bar status-loading';
   statusBar.textContent = 'Getting your location...';
   statusBar.style.display = 'block';
 
   navigator.geolocation.getCurrentPosition(
-    (pos) => setLocation(pos.coords.latitude, pos.coords.longitude, 'Current Location'),
+    (pos) => setLocation(pos.coords.latitude, pos.coords.longitude, 'My Location'),
     (err) => {
       statusBar.className = 'status-bar status-error';
       statusBar.textContent = `Location error: ${err.message}`;
@@ -407,22 +690,51 @@ document.getElementById('geolocateBtn').addEventListener('click', function() {
 document.getElementById('refreshBtn').addEventListener('click', function() {
   const lat = document.getElementById('latInput').value;
   const lon = document.getElementById('lonInput').value;
-  if (lat && lon) {
-    setLocation(lat, lon);
-  }
+  if (lat && lon) setLocation(lat, lon, currentLocationName);
 });
 
 document.getElementById('statSelect').addEventListener('change', loadForecast);
 
-// Close autocomplete when clicking outside
+document.getElementById('csvBtn').addEventListener('click', () => exportToCSV(currentData, maxHoursToShow));
+
+// Recent locations click handler
+document.getElementById('recentLocations').addEventListener('click', function(e) {
+  const removeBtn = e.target.closest('.remove');
+  if (removeBtn) {
+    e.stopPropagation();
+    removeRecentLocation(parseInt(removeBtn.dataset.index));
+    return;
+  }
+  const chip = e.target.closest('.recent-chip');
+  if (chip) {
+    setLocation(chip.dataset.lat, chip.dataset.lon, chip.dataset.name);
+  }
+});
+
+// Time period toggles
+document.querySelectorAll('.time-toggle').forEach(toggle => {
+  toggle.addEventListener('click', function() {
+    document.querySelectorAll('.time-toggle').forEach(t => t.classList.remove('active'));
+    this.classList.add('active');
+    maxHoursToShow = parseInt(this.dataset.hours);
+    if (currentData) {
+      document.getElementById('tableContainer').innerHTML = renderMultiModelTable(currentData, maxHoursToShow);
+      renderSummaryCards(currentData);
+    }
+  });
+});
+
+// Close autocomplete on outside click
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.autocomplete-container')) {
     document.getElementById('autocompleteList').style.display = 'none';
   }
 });
 
-// Initialize from URL params
+// Initialize
 function init() {
+  renderRecentLocations();
+
   const params = new URLSearchParams(window.location.search);
   const lat = params.get('lat');
   const lon = params.get('lon');
@@ -431,7 +743,6 @@ function init() {
   if (lat && lon) {
     setLocation(lat, lon, name);
   } else {
-    // Try geolocation by default
     document.getElementById('geolocateBtn').click();
   }
 }
