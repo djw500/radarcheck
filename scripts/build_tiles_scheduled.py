@@ -49,12 +49,15 @@ BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15")
 MAX_HOURS_HRRR = int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "24"))
 MAX_HOURS_NAM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))
 MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
+MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
+KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
 
 # Models to build tiles for (in priority order)
 MODELS_CONFIG = [
     {"id": "hrrr", "max_hours": MAX_HOURS_HRRR, "check_hours": 6},
     {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
     {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
+    {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
 ]
 
 # Regions to build
@@ -243,7 +246,7 @@ def main():
             build_cycle()
 
             # Cleanup old runs periodically
-            cleanup_old_runs(max_runs_per_model=3)
+            cleanup_old_runs(max_runs_per_model=KEEP_RUNS)
 
         except Exception as e:
             logger.exception(f"Error in build cycle: {e}")
