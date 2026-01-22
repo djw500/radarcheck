@@ -186,7 +186,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 600,
         "category": "severe",
-        "model_exclusions": ["nam_nest", "gfs"],
+        "model_exclusions": ["nam_nest", "gfs", "nbm"],
     },
     "hail": {
         "nomads_params": ["var_HAIL"],
@@ -198,7 +198,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 3,
         "category": "severe",
-        "model_exclusions": ["nam_nest", "gfs"],
+        "model_exclusions": ["nam_nest", "gfs", "nbm"],
     },
 }
 
@@ -259,6 +259,16 @@ MODELS = {
         "nomads_url": "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl",
         "dir_pattern": "%2Fgfs.{date_str}%2F{init_hour}%2Fatmos",
         "file_pattern": "gfs.t{init_hour}z.pgrb2.0p25.f{forecast_hour}",
+        "availability_check_var": "var_TMP",
+        "forecast_hour_digits": 3,
+    },
+    "nbm": {
+        "name": "National Blend (NBM)",
+        "max_forecast_hours": 264,
+        "update_frequency_hours": 1,
+        "nomads_url": "https://nomads.ncep.noaa.gov/cgi-bin/filter_blend.pl",
+        "dir_pattern": "%2Fblend.{date_str}%2F{init_hour}%2Fcore",
+        "file_pattern": "blend.t{init_hour}z.core.f{forecast_hour}.co.grib2",
         "availability_check_var": "var_TMP",
         "forecast_hour_digits": 3,
     },
