@@ -56,11 +56,17 @@ root_logger.addHandler(file_handler)
 
 def log_memory_usage(context: str = "") -> None:
     """Log current memory usage."""
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    # Convert to MB
-    rss_mb = mem_info.rss / 1024 / 1024
-    logger.info(f"Memory Usage [{context}]: {rss_mb:.2f} MB")
+    # process = psutil.Process(os.getpid())
+    # mem_info = process.memory_info()
+    # rss_mb = mem_info.rss / 1024 / 1024
+    # logger.info(f"Memory Usage [{context}]: {rss_mb:.2f} MB")
+    pass
+
+# ... existing code ...
+
+# Suppress noisy external libraries
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("cfgrib").setLevel(logging.WARNING)
 
 def build_variable_query(variable_config: dict[str, Any]) -> str:
     params = [f"{param}=on" for param in variable_config.get("nomads_params", [])]
@@ -395,12 +401,6 @@ def fetch_grib(
 
     # Try downloading up to 3 times
     for attempt in range(repomap["MAX_DOWNLOAD_RETRIES"]):
-        logger.info(
-            "Downloading GRIB file from: %s (attempt %s/%s)",
-            url,
-            attempt + 1,
-            repomap["MAX_DOWNLOAD_RETRIES"],
-        )
         try:
             temp_filename = f"{filename}.tmp"
             download_file(url, temp_filename)
@@ -418,7 +418,6 @@ def fetch_grib(
             # If verification passed, move the file into place atomically
             with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
                 os.replace(temp_filename, filename)
-                logger.info(f"Successfully downloaded and verified GRIB file: {filename}")
                 return filename
                 
         except Timeout as exc:

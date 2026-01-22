@@ -35,12 +35,7 @@ def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> N
     """
     timeout = timeout or repomap["DOWNLOAD_TIMEOUT_SECONDS"]
     if not os.path.exists(local_path):
-        logger.info(f"Downloading from: {url}")
         response = requests.get(url, stream=True, timeout=timeout)
-        status = response.status_code
-        ctype = response.headers.get("Content-Type", "")
-        clen = response.headers.get("Content-Length")
-        logger.info(f"HTTP status={status}, content-type='{ctype}', content-length={clen}")
         # Raise for obvious HTTP errors early
         try:
             response.raise_for_status()
