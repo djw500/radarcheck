@@ -82,16 +82,20 @@ def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
         return False
 
 
-def get_latest_run(model_id: str, check_hours: int = 12) -> Optional[str]:
-    """Find the latest available run for a model."""
+def get_available_runs(model_id: str, check_hours: int = 12, max_runs: int = 1) -> list[str]:
+    """Find recent available runs for a model."""
     model_config = repomap["MODELS"].get(model_id)
     if not model_config:
-        return None
+        return []
 
     now = datetime.datetime.now(datetime.timezone.utc)
     update_freq = model_config.get("update_frequency_hours", 1)
+    found_runs = []
 
     for hours_ago in range(check_hours):
+        if len(found_runs) >= max_runs:
+            break
+            
         check_time = now - datetime.timedelta(hours=hours_ago)
         date_str = check_time.strftime("%Y%m%d")
         init_hour = check_time.strftime("%H")
@@ -101,13 +105,27 @@ def get_latest_run(model_id: str, check_hours: int = 12) -> Optional[str]:
             continue
 
         if check_run_available(model_id, date_str, init_hour):
-            return f"run_{date_str}_{init_hour}"
+            found_runs.append(f"run_{date_str}_{init_hour}")
 
-    return None
+    return found_runs
+
+
+def tiles_exist_any(region_id: str, model_id: str) -> bool:
+    """Check if any tiles exist for a model in a region."""
+    res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
+    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+    model_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id)
+    if not os.path.isdir(model_dir):
+        return False
+    # Check for any run directory
+    for item in os.listdir(model_dir):
+        if item.startswith("run_") and os.path.isdir(os.path.join(model_dir, item)):
+            return True
+    return False
 
 
 def tiles_exist(region_id: str, model_id: str, run_id: str) -> bool:
-    """Check if tiles already exist for a run."""
+    """Check if tiles already exist for a specific run."""
     # Check for at least t2m tiles as a proxy
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
     res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
@@ -156,26 +174,39 @@ def build_cycle():
         max_hours = model_cfg["max_hours"]
         check_hours = model_cfg["check_hours"]
 
-        # Find latest available run
-        run_id = get_latest_run(model_id, check_hours)
-        if not run_id:
-            logger.warning(f"No available run found for {model_id}")
+        # Check if we need to backfill (no runs exist locally)
+        needs_backfill = False
+        for region_id in REGIONS:
+            if not tiles_exist_any(region_id, model_id):
+                needs_backfill = True
+                break
+        
+        # Determine how many runs to fetch
+        fetch_count = 3 if needs_backfill else 1
+        runs_to_process = get_available_runs(model_id, check_hours, max_runs=fetch_count)
+        
+        if not runs_to_process:
+            logger.warning(f"No available runs found for {model_id}")
             continue
 
-        logger.info(f"Latest run for {model_id}: {run_id}")
+        if needs_backfill:
+            logger.info(f"Backfilling {len(runs_to_process)} runs for {model_id} (cache empty)")
+        else:
+            logger.info(f"Latest run for {model_id}: {runs_to_process[0]}")
 
-        for region_id in REGIONS:
-            # Skip if tiles already exist
-            if tiles_exist(region_id, model_id, run_id):
-                logger.info(f"Tiles already exist for {model_id}/{run_id} in {region_id}, skipping")
-                continue
+        for run_id in runs_to_process:
+            for region_id in REGIONS:
+                # Skip if tiles already exist
+                if tiles_exist(region_id, model_id, run_id):
+                    logger.info(f"Tiles already exist for {model_id}/{run_id} in {region_id}, skipping")
+                    continue
 
-            builds_attempted += 1
-            if build_tiles_for_run(region_id, model_id, run_id, max_hours):
-                builds_succeeded += 1
+                builds_attempted += 1
+                if build_tiles_for_run(region_id, model_id, run_id, max_hours):
+                    builds_succeeded += 1
 
-            # Rate limit between builds
-            time.sleep(5)
+                # Rate limit between builds
+                time.sleep(5)
 
     logger.info(f"Build cycle complete: {builds_succeeded}/{builds_attempted} builds succeeded")
     return builds_attempted, builds_succeeded
