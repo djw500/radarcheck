@@ -124,13 +124,44 @@ def tiles_exist_any(region_id: str, model_id: str) -> bool:
     return False
 
 
-def tiles_exist(region_id: str, model_id: str, run_id: str) -> bool:
-    """Check if tiles already exist for a specific run."""
-    # Check for at least t2m tiles as a proxy
+def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: int = 24) -> bool:
+    """Check if tiles already exist and are sufficiently complete for a specific run.
+    If the run is very recent, we might want to retry if it has fewer hours than expected.
+    """
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
     res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    tile_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_id, "t2m.npz")
-    return os.path.exists(tile_path)
+    
+    # Check for t2m tiles as a proxy for the run
+    npz_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_id, "t2m.npz")
+    if not os.path.exists(npz_path):
+        return False
+        
+    # Check if the run is complete enough
+    try:
+        import numpy as np
+        d = np.load(npz_path)
+        hours = d.get('hours', [])
+        actual_hours = len(hours)
+        
+        # If we have at least 80% of expected hours, or it's an old run, consider it done.
+        # Otherwise, we might want to retry to pick up new hours as they arrive on NOMADS.
+        if actual_hours >= expected_max_hours * 0.8:
+            return True
+            
+        # If the run is older than 6 hours, it's probably as complete as it will ever be
+        try:
+            # run_id format: run_YYYYMMDD_HH
+            parts = run_id.split('_')
+            run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if (now - run_dt).total_seconds() > 6 * 3600:
+                return True
+        except:
+            pass
+            
+        return False
+    except Exception:
+        return False
 
 
 def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: int) -> bool:
@@ -196,9 +227,9 @@ def build_cycle():
 
         for run_id in runs_to_process:
             for region_id in REGIONS:
-                # Skip if tiles already exist
-                if tiles_exist(region_id, model_id, run_id):
-                    logger.info(f"Tiles already exist for {model_id}/{run_id} in {region_id}, skipping")
+                # Skip if tiles already exist and are complete
+                if tiles_exist(region_id, model_id, run_id, expected_max_hours=max_hours):
+                    logger.info(f"Tiles already exist and are complete for {model_id}/{run_id} in {region_id}, skipping")
                     continue
 
                 builds_attempted += 1
