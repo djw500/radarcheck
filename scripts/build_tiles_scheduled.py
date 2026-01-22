@@ -46,6 +46,11 @@ file_handler = logging.FileHandler(detailed_log_path)
 file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
 root_logger.addHandler(file_handler)
 
+# Explicitly suppress noisy external libraries in ALL handlers
+for logger_name in ["urllib3", "requests", "matplotlib", "cfgrib", "fiona", "rasterio"]:
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
+logging.getLogger("cfgrib").setLevel(logging.ERROR) # Extra quiet for cfgrib
+
 # Main logger for scheduler (only to file)
 logger = logging.getLogger("scheduler")
 logger.setLevel(logging.INFO)
@@ -95,20 +100,17 @@ def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
         return False
 
 
-def get_available_runs(model_id: str, check_hours: int = 12, max_runs: int = 1) -> list[str]:
-    """Find recent available runs for a model."""
+def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
+    """Find all runs in the lookback period that WE WANT to have according to policy."""
     model_config = repomap["MODELS"].get(model_id)
     if not model_config:
         return []
 
     now = datetime.datetime.now(datetime.timezone.utc)
     update_freq = model_config.get("update_frequency_hours", 1)
-    found_runs = []
+    required_runs = []
 
-    for hours_ago in range(check_hours):
-        if len(found_runs) >= max_runs:
-            break
-            
+    for hours_ago in range(lookback_hours):
         check_time = now - datetime.timedelta(hours=hours_ago)
         date_str = check_time.strftime("%Y%m%d")
         init_hour = check_time.strftime("%H")
@@ -116,11 +118,18 @@ def get_available_runs(model_id: str, check_hours: int = 12, max_runs: int = 1) 
         # Skip non-synoptic hours for models with 6-hourly updates
         if update_freq >= 6 and int(init_hour) % 6 != 0:
             continue
+            
+        # Policy Tier 1: All runs in last 12 hours
+        # Policy Tier 2: Synoptic runs (00, 06, 12, 18) in last 72 hours
+        is_recent = hours_ago <= 12
+        is_synoptic = int(init_hour) % 6 == 0
+        
+        if is_recent or is_synoptic:
+            # Check if available on NOMADS
+            if check_run_available(model_id, date_str, init_hour):
+                required_runs.append(f"run_{date_str}_{init_hour}")
 
-        if check_run_available(model_id, date_str, init_hour):
-            found_runs.append(f"run_{date_str}_{init_hour}")
-
-    return found_runs
+    return required_runs
 
 
 def tiles_exist_any(region_id: str, model_id: str) -> bool:
@@ -205,16 +214,19 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
         if process.stdout:
             last_was_newline = True
             while True:
-                char = process.stdout.read(1)
-                if not char:
+                line = process.stdout.readline()
+                if not line:
                     break
                 
-                if last_was_newline:
-                    sys.stdout.write(f"    [{model_id}] ")
-                
-                sys.stdout.write(char)
-                sys.stdout.flush()
-                last_was_newline = (char == '\n')
+                line = line.strip()
+                if line:
+                    # Only print if it doesn't look like a standard library log line
+                    # (which should have been redirected to file anyway)
+                    if not any(x in line for x in ["[INFO]", "[WARNING]", "[ERROR]", "[DEBUG]"]):
+                        print(f"    [{model_id}] {line}")
+                    
+                    # Still log everything to detailed file
+                    logger.debug(f"[{model_id}] {line}")
         
         returncode = process.wait(timeout=3600)
         if returncode == 0:
@@ -254,47 +266,40 @@ def build_cycle():
     for model_cfg in MODELS_CONFIG:
         model_id = model_cfg["id"]
         max_hours = model_cfg["max_hours"]
-        check_hours = model_cfg["check_hours"]
 
-        # Check if we need to backfill (no runs exist locally)
-        needs_backfill = False
-        for region_id in REGIONS:
-            if not tiles_exist_any(region_id, model_id):
-                needs_backfill = True
-                break
-        
-        # Determine how many runs to fetch
-        fetch_count = 3 if needs_backfill else 1
-        runs_to_process = get_available_runs(model_id, check_hours, max_runs=fetch_count)
+        # Get all runs we SHOULD have according to tiered policy (last 72h)
+        runs_to_process = get_required_runs(model_id, lookback_hours=72)
         
         if not runs_to_process:
             logger.warning(f"No available runs found for {model_id}")
             continue
 
         num_runs = len(runs_to_process)
-        if needs_backfill:
-            logger.info(f"Backfilling {num_runs} runs for {model_id} (cache empty)")
-        else:
-            logger.info(f"Processing latest run for {model_id}: {runs_to_process[0]}")
+        print(f"Checking {num_runs} required runs for {model_id} (last 72h)...")
 
         for i, run_id in enumerate(runs_to_process):
+            # Skip if run is too new
             if not run_is_ready(run_id):
-                print(f"[{model_id} {i+1}/{num_runs}] Run {run_id} is too new, skipping until next cycle")
+                # Only log skip for very recent runs to avoid noise
+                if i == 0: 
+                    print(f"[{model_id} {i+1}/{num_runs}] Run {run_id} is too new, skipping")
                 continue
 
             for region_id in REGIONS:
                 # Skip if tiles already exist and are complete
                 if tiles_exist(region_id, model_id, run_id, expected_max_hours=max_hours):
-                    print(f"[{model_id} {i+1}/{num_runs}] Tiles complete for {run_id} in {region_id}")
+                    # Reduce noise: don't print for every existing old run
+                    if i < 5: # Only show status for the few most recent
+                        print(f"[{model_id} {i+1}/{num_runs}] Tiles complete for {run_id}")
                     continue
 
-                print(f"[{model_id} {i+1}/{num_runs}] Starting build for {run_id}...")
+                print(f"[{model_id} {i+1}/{num_runs}] Building/Completing {run_id}...")
                 builds_attempted += 1
                 if build_tiles_for_run(region_id, model_id, run_id, max_hours):
                     builds_succeeded += 1
 
                 # Rate limit between builds
-                time.sleep(5)
+                time.sleep(2)
 
     print(f"Build cycle complete: {builds_succeeded}/{builds_attempted} succeeded")
     return builds_attempted, builds_succeeded
