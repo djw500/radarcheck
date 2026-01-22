@@ -289,6 +289,11 @@ MODELS = {
         "file_pattern": "blend.t{init_hour}z.core.f{forecast_hour}.co.grib2",
         "availability_check_var": "var_TMP",
         "forecast_hour_digits": 3,
+        # NBM: hourly 1-36, then 6-hourly 42-264 (some vars like TMP are 3-hourly, but ASNOW is 6-hourly)
+        "forecast_hour_schedule": [
+            {"start": 1, "end": 36, "step": 1},
+            {"start": 42, "end": 264, "step": 6},
+        ],
     },
     "icon": {
         "name": "ICON (DWD)",

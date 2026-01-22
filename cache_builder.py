@@ -66,6 +66,33 @@ def log_memory_usage(context: str = "") -> None:
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("cfgrib").setLevel(logging.WARNING)
 
+
+def get_valid_forecast_hours(model_id: str, max_hours: int) -> list[int]:
+    """Get list of valid forecast hours for a model, respecting its schedule.
+
+    Some models (like NBM) have non-hourly data after a certain point:
+    - NBM: hourly 1-36, 3-hourly 39-192, 6-hourly 198-264
+
+    Returns list of valid forecast hours up to max_hours.
+    """
+    model_config = repomap["MODELS"].get(model_id, {})
+    schedule = model_config.get("forecast_hour_schedule")
+
+    if not schedule:
+        # Default: hourly
+        return list(range(1, max_hours + 1))
+
+    hours = []
+    for segment in schedule:
+        start = segment["start"]
+        end = min(segment["end"], max_hours)
+        step = segment["step"]
+        if start <= max_hours:
+            hours.extend(range(start, end + 1, step))
+
+    return sorted(set(h for h in hours if h <= max_hours))
+
+
 def build_variable_query(variable_config: dict[str, Any]) -> str:
     params = [f"{param}=on" for param in variable_config.get("nomads_params", [])]
     levels = variable_config.get("level_params", [])
@@ -454,22 +481,29 @@ def download_all_hours_parallel(
     max_hours: int,
 ) -> dict[int, str]:
     """Download GRIB files in parallel using a thread pool.
-    Short-circuits if a 404 is encountered, as subsequent hours won't be ready.
+    Short-circuits if consecutive valid hours fail, indicating the run hasn't extended that far.
+
+    Respects model-specific forecast hour schedules (e.g., NBM is hourly 1-36, then 3-hourly).
     """
     results: dict[int, str] = {}
     max_workers = repomap["PARALLEL_DOWNLOAD_WORKERS"]
     model_config = repomap["MODELS"][model_id]
     digits = model_config.get("forecast_hour_digits", 2)
-    
-    # Track missing hours to allow bridging small gaps (e.g. GFS/NBM 3h/6h jumps)
-    missing_hours = set()
-    first_missing_hour = [999] 
 
-    print(f"Downloading {max_hours} hours: ", end="", flush=True)
+    # Get valid forecast hours for this model (respects hourly/3-hourly/6-hourly schedules)
+    valid_hours = get_valid_forecast_hours(model_id, max_hours)
+    valid_hours_set = set(valid_hours)
+
+    # Track missing hours to detect when run data ends
+    missing_hours = set()
+    # Index in valid_hours where we detected 3 consecutive misses
+    first_missing_idx = [len(valid_hours)]
+
+    print(f"Downloading {len(valid_hours)} forecast hours: ", end="", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        def fetch_with_check(h):
-            # If we've already determined the run ended way back, skip
-            if h > first_missing_hour[0] + 6: # Allow a 6-hour "buffer" for long-range jumps
+        def fetch_with_check(h, idx):
+            # If we've already determined the run ended, skip remaining hours
+            if idx > first_missing_idx[0] + 3:  # Allow 3-hour buffer in valid-hour space
                 return None
             try:
                 res = fetch_grib(
@@ -482,45 +516,40 @@ def download_all_hours_parallel(
                 )
                 return res
             except Exception as e:
-                if "404" in str(e):
-                    missing_hours.add(h)
-                    # Check for 3 consecutive misses to determine if run has truly ended
-                    if {h-1, h-2}.issubset(missing_hours):
-                        first_missing_hour[0] = min(first_missing_hour[0], h - 2)
-                else:
-                    # Non-404 errors (like 500) are more likely to be transient or fatal, 
-                    # but we apply the same "3-miss" rule to be safe but efficient.
-                    missing_hours.add(h)
-                    if {h-1, h-2}.issubset(missing_hours):
-                        first_missing_hour[0] = min(first_missing_hour[0], h - 2)
+                missing_hours.add(h)
+                # Check for 3 consecutive valid-hour misses (not calendar hours)
+                # Look at previous 2 valid hours
+                if idx >= 2:
+                    prev_hours = {valid_hours[idx - 1], valid_hours[idx - 2]}
+                    if prev_hours.issubset(missing_hours):
+                        first_missing_idx[0] = min(first_missing_idx[0], idx - 2)
                 raise e
 
         futures = {
-            executor.submit(fetch_with_check, hour): hour
-            for hour in range(1, max_hours + 1)
+            executor.submit(fetch_with_check, hour, idx): (hour, idx)
+            for idx, hour in enumerate(valid_hours)
         }
         
+        # Sort by (hour, idx) to process in order
         for future in sorted(futures.keys(), key=lambda f: futures[f]):
-            hour = futures[future]
-            if hour > first_missing_hour[0] + 6:
+            hour, idx = futures[future]
+            if idx > first_missing_idx[0] + 3:
                 continue
-                
+
             try:
                 val = future.result()
                 if val:
                     results[hour] = val
-                    # Simple one-character progress indicator
                     print(".", end="", flush=True)
             except Exception as exc:
                 if "404" in str(exc):
                     print("x", end="", flush=True)
                 else:
-                    # Log detail to file but keep CLI short
                     logger.warning(f"Hour {hour} failed: {exc}")
                     print("!", end="", flush=True)
-    
+
     if results:
-        print(f" Done. ({len(results)}/{max_hours} hours)", flush=True)
+        print(f" Done. ({len(results)}/{len(valid_hours)} hours)", flush=True)
     else:
         print(" Failed.", flush=True)
     return results

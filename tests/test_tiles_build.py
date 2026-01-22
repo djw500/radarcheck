@@ -154,7 +154,7 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
     # Mock downloader to avoid network; return predictable fake paths
     import build_tiles as build_tiles_module
 
-    def fake_download_all_hours_parallel(model_id, variable_id, date_str, init_hour, location_config, run_id, max_hours):
+    def fake_download_all_hours_parallel(model_id, variable_id, date_str, init_hour, run_id, max_hours):
         return {h: f"/fake/grib_{h:02d}.grib2" for h in range(1, min(max_hours, 4) + 1)}
 
     monkeypatch.setattr(build_tiles_module, "download_all_hours_parallel", fake_download_all_hours_parallel)
