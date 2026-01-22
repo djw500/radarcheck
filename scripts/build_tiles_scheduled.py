@@ -197,7 +197,7 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
     ]
 
     try:
-        # Stream output line by line to show progress
+        # Stream output character by character to show real-time dots
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -207,13 +207,19 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
         )
         
         if process.stdout:
-            for line in process.stdout:
-                line = line.strip()
-                if line:
-                    # Print to console for user
-                    print(f"    [{model_id}] {line}")
-                    # Still log to file
-                    logger.debug(f"[{model_id}] {line}")
+            import sys
+            last_was_newline = True
+            while True:
+                char = process.stdout.read(1)
+                if not char:
+                    break
+                
+                if last_was_newline:
+                    sys.stdout.write(f"    [{model_id}] ")
+                
+                sys.stdout.write(char)
+                sys.stdout.flush()
+                last_was_newline = (char == '\n')
         
         returncode = process.wait(timeout=3600)
         if returncode == 0:

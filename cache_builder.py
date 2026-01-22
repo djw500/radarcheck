@@ -467,7 +467,7 @@ def download_all_hours_parallel(
     # We use a list for a mutable reference in the closure
     first_missing_hour = [999] 
 
-    print(f"Downloading {max_hours} hours ", end="", flush=True)
+    print(f"Downloading {max_hours} hours: ", end="", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         def fetch_with_check(h):
             if h >= first_missing_hour[0]:
@@ -512,9 +512,9 @@ def download_all_hours_parallel(
                     print("!", end="", flush=True)
     
     if results:
-        print(f" Done. ({len(results)}/{max_hours} hours)")
+        print(f" Done. ({len(results)}/{max_hours} hours)", flush=True)
     else:
-        print(" Failed.")
+        print(" Failed.", flush=True)
     return results
 
 def extract_center_value(
