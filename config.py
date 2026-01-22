@@ -12,7 +12,7 @@ WEATHER_VARIABLES = {
         "vmin": 5,
         "vmax": 75,
         "category": "precipitation",
-        "model_exclusions": ["gfs"],
+        "model_exclusions": ["gfs", "nbm", "icon"],
     },
     "asnow": {
         "nomads_params": ["var_ASNOW"],
@@ -26,7 +26,7 @@ WEATHER_VARIABLES = {
         "category": "winter",
         "conversion": "m_to_in",
         "is_accumulation": True,
-        "model_exclusions": ["nam_nest", "gfs"],
+        "model_exclusions": ["nam_nest", "gfs", "icon"],
         "unit_conversions_by_units": {
             "m": "m_to_in",
             "kg m-2": "kg_m2_to_in",
@@ -43,6 +43,7 @@ WEATHER_VARIABLES = {
         "vmax": 1,
         "category": "winter",
         "preferred_step_type": "instant",
+        "model_exclusions": ["icon"],
     },
     "snod": {
         "nomads_params": ["var_SNOD"],
@@ -91,6 +92,7 @@ WEATHER_VARIABLES = {
         "category": "precipitation",
         "conversion": "kg_m2_s_to_in_hr",
         "preferred_step_type": "instant",
+        "model_exclusions": ["icon"],
     },
     "t2m": {
         "nomads_params": ["var_TMP"],
@@ -132,6 +134,7 @@ WEATHER_VARIABLES = {
             "degF": None,
             "°F": None
         },
+        "model_exclusions": ["icon"],
     },
     "rh": {
         "nomads_params": ["var_RH"],
@@ -143,6 +146,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 100,
         "category": "temperature",
+        "model_exclusions": ["icon"],
     },
     "wind_10m": {
         "nomads_params": ["var_UGRD", "var_VGRD"],
@@ -161,6 +165,7 @@ WEATHER_VARIABLES = {
             ["ugrd", "10u", "u10", "UGRD"],  # u-component
             ["vgrd", "10v", "v10", "VGRD"],  # v-component
         ],
+        "model_exclusions": ["icon"],
     },
     "gust": {
         "nomads_params": ["var_GUST"],
@@ -173,6 +178,7 @@ WEATHER_VARIABLES = {
         "vmax": 90,
         "category": "wind",
         "conversion": "m_s_to_mph",
+        "model_exclusions": ["icon"],
     },
     "cape": {
         "nomads_params": ["var_CAPE"],
@@ -184,6 +190,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 4000,
         "category": "severe",
+        "model_exclusions": ["icon"],
     },
     "hlcy": {
         "nomads_params": ["var_HLCY"],
@@ -195,7 +202,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 600,
         "category": "severe",
-        "model_exclusions": ["nam_nest", "gfs", "nbm"],
+        "model_exclusions": ["nam_nest", "gfs", "nbm", "icon"],
     },
     "hail": {
         "nomads_params": ["var_HAIL"],
@@ -207,7 +214,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 3,
         "category": "severe",
-        "model_exclusions": ["nam_nest", "gfs", "nbm"],
+        "model_exclusions": ["nam_nest", "gfs", "nbm", "icon"],
     },
 }
 

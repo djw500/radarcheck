@@ -110,19 +110,47 @@ def get_available_model_runs(model_id: str, max_runs: int = 5) -> list[dict[str,
         date_str = check_time.strftime("%Y%m%d")
         init_hour = check_time.strftime("%H")
         
-        # Check if the file exists using the filter URL
+        # Skip non-synoptic hours if needed
+        update_freq = model_config.get("update_frequency_hours", 1)
+        if update_freq >= 6 and int(init_hour) % 6 != 0:
+            continue
+
         forecast_hour = format_forecast_hour(1, model_id)
-        file_name = model_config["file_pattern"].format(
-            init_hour=init_hour,
-            forecast_hour=forecast_hour,
-        )
-        dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
-        url = (
-            f"{model_config['nomads_url']}?"
-            f"file={file_name}&"
-            f"dir={dir_path}&"
-            f"{model_config['availability_check_var']}=on"
-        )
+        
+        if model_config.get("source") == "dwd":
+            # DWD check: construct URL to a key file (availability_check_var)
+            check_var = model_config.get("availability_check_var", "t_2m")
+            # We need to resolve dwd_var_upper for the filename pattern
+            # Assuming availability_check_var is the dwd_var (e.g. 't_2m')
+            # But the file pattern might expect {dwd_var_upper}
+            # Let's assume standard mapping: t_2m -> T_2M
+            dwd_var_upper = check_var.upper()
+            
+            # Format filename using all required keys including date_str
+            file_name = model_config["file_pattern"].format(
+                date_str=date_str,
+                init_hour=init_hour,
+                forecast_hour=forecast_hour,
+                dwd_var_upper=dwd_var_upper
+            )
+            dir_path = model_config["dir_pattern"].format(
+                init_hour=init_hour, 
+                dwd_var=check_var
+            )
+            url = f"{model_config['nomads_url']}/{dir_path}/{file_name}"
+        else:
+            # NOMADS check
+            file_name = model_config["file_pattern"].format(
+                init_hour=init_hour,
+                forecast_hour=forecast_hour,
+            )
+            dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+            url = (
+                f"{model_config['nomads_url']}?"
+                f"file={file_name}&"
+                f"dir={dir_path}&"
+                f"{model_config['availability_check_var']}=on"
+            )
         
         try:
             response = requests.head(url, timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"])
@@ -193,6 +221,15 @@ def fetch_grib(
 
     # Use CONUS region for all downloads to ensure full coverage and deduplication
     download_region = repomap["DOWNLOAD_REGIONS"]["conus"]
+    
+    # Determine preferred stepType filter
+    preferred = None
+    if variable_config.get("is_accumulation"):
+        preferred = {'stepType': 'accum'}
+    if variable_config.get("preferred_step_type"):
+        preferred = {'stepType': variable_config.get("preferred_step_type")}
+    if variable_config.get("short_name") == "prate" and not preferred:
+        preferred = {'stepType': 'instant'}
 
     # ECMWF CDS download path
     if model_config.get("source") == "cds":
@@ -318,14 +355,6 @@ def fetch_grib(
         variable_query,
         download_region,
     )
-    
-    preferred = None
-    if variable_config.get("is_accumulation"):
-        preferred = {'stepType': 'accum'}
-    if variable_config.get("preferred_step_type"):
-        preferred = {'stepType': variable_config.get("preferred_step_type")}
-    if variable_config.get("short_name") == "prate" and not preferred:
-        preferred = {'stepType': 'instant'}
     
     def try_load_grib(filename: str) -> bool:
         """Try to load and validate a GRIB file"""
