@@ -219,7 +219,7 @@ function initChart() {
             responsive: true,
             maintainAspectRatio: false,
             interaction: {
-                mode: 'nearest',
+                mode: 'index', // Snap to all points at this X-index
                 axis: 'x',
                 intersect: false,
             },
@@ -318,10 +318,21 @@ function updateChart(data) {
         let label = modelName;
 
         if (!isLatest) {
-            // Fade older runs: 0.6 down to 0.1 based on age
-            opacity = Math.max(0.1, 0.6 - (ageHours / 48)); 
-            lineWidth = 1.5;
-            borderDash = [4, 4];
+            // Age in hours
+            if (ageHours < 12) {
+                // Recent history: Thin solid line, medium opacity
+                opacity = 0.6;
+                lineWidth = 1.5;
+                borderDash = []; // Solid
+            } else {
+                // Older history: Thin dashed line, low opacity
+                opacity = 0.3;
+                lineWidth = 1;
+                borderDash = [4, 4]; // Dashed
+            }
+            // Fade further based on age
+            opacity = Math.max(0.1, opacity - (ageHours / 100)); 
+            
             label += ` (${Math.round(ageHours)}h ago)`;
         } else {
             label += " (Latest)";
