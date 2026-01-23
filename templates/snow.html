@@ -219,23 +219,33 @@ function initChart() {
             responsive: true,
             maintainAspectRatio: false,
             interaction: {
-                mode: 'index', // Snap to all points at this X-index
+                mode: 'x', // Align by X-axis value (time), not dataset index
                 axis: 'x',
                 intersect: false,
             },
             plugins: {
                 legend: { display: false }, // Using custom toggles instead
                 tooltip: {
-                    backgroundColor: document.documentElement.classList.contains('dark') ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                    backgroundColor: document.documentElement.classList.contains('dark') ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
                     titleColor: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f1742',
                     bodyColor: document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#334155',
                     borderColor: document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0',
                     borderWidth: 1,
                     padding: 10,
                     cornerRadius: 8,
-                    titleFont: { family: 'Inter', weight: '600' },
-                    bodyFont: { family: 'Inter' },
+                    titleFont: { family: 'Inter', weight: '600', size: 13 },
+                    bodyFont: { family: 'Inter', size: 12 },
+                    displayColors: true,
+                    boxPadding: 4,
                     callbacks: {
+                        title: (items) => {
+                            if (!items.length) return '';
+                            const date = new Date(items[0].parsed.x);
+                            return date.toLocaleString('en-US', { 
+                                weekday: 'short', month: 'short', day: 'numeric', 
+                                hour: 'numeric'
+                            });
+                        },
                         label: (context) => {
                             let label = context.dataset.label || '';
                             if (label) {
