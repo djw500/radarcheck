@@ -301,24 +301,55 @@ function updateChart(data) {
 
     const datasets = runs.map((run) => {
         const isLatest = latestRunByModel[run.model_id] === run.run_id;
-        if (!isLatest) return null; // Simplified: Only show latest run per model for cleaner UI
-
+        
         const modelConf = MODEL_CONFIG[run.model_id] || MODEL_CONFIG['other'];
         const modelName = run.model_id.toUpperCase().replace('_', ' ');
         
+        // Calculate age for ghosting (transparency)
+        // Newer runs are more opaque, older runs fade out
+        const runDate = new Date(run.init_time);
+        const ageHours = (latestInit - runDate.getTime()) / 3600000;
+        
+        let opacity = 1.0;
+        let lineWidth = 3;
+        let borderDash = [];
+        let label = modelName;
+
+        if (!isLatest) {
+            // Fade older runs: 0.6 down to 0.1 based on age
+            opacity = Math.max(0.1, 0.6 - (ageHours / 48)); 
+            lineWidth = 1.5;
+            borderDash = [4, 4];
+            label += ` (${Math.round(ageHours)}h ago)`;
+        } else {
+            label += " (Latest)";
+        }
+
+        // Convert hex color to rgba for opacity
+        const hex = modelConf.color.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+        const color = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+
         return {
-            label: modelName,
+            label: label,
             data: run.series.map(pt => ({ x: pt.valid_time, y: pt.value })),
-            borderColor: modelConf.color,
-            backgroundColor: modelConf.color,
-            borderWidth: 3,
+            borderColor: color,
+            backgroundColor: color,
+            borderWidth: lineWidth,
+            borderDash: borderDash,
             pointRadius: 0,
-            pointHoverRadius: 6,
+            pointHoverRadius: isLatest ? 6 : 3,
             fill: false,
-            tension: 0.3, // Smooth curves
-            // Add custom property for styling if using HTML legend, but here we rely on ChartJS
+            tension: 0.3,
+            // Custom flag to sort datasets (latest on top)
+            order: isLatest ? 0 : 1
         };
-    }).filter(Boolean);
+    });
+
+    //Sort datasets so latest runs are drawn on top
+    datasets.sort((a, b) => b.order - a.order);
 
     chartInstance.data.datasets = datasets;
     chartInstance.update();
