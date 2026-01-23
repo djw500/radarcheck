@@ -299,6 +299,8 @@ function updateChart(data) {
         }
     });
 
+    const latestInit = Math.max(...runs.map(r => new Date(r.init_time).getTime()));
+
     const datasets = runs.map((run) => {
         const isLatest = latestRunByModel[run.model_id] === run.run_id;
         
