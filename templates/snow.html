@@ -298,12 +298,25 @@ function initChart() {
                         color: (context) => {
                             if (context.tick && context.tick.value) {
                                 const date = new Date(context.tick.value);
-                                // Darker line for midnight
-                                if (date.getHours() === 0) return document.documentElement.classList.contains('dark') ? '#475569' : '#cbd5e1';
+                                const h = date.getHours();
+                                const isDark = document.documentElement.classList.contains('dark');
+                                
+                                // Midnight: Thick/Dark
+                                if (h === 0) return isDark ? '#475569' : '#94a3b8';
+                                
+                                // 6-hour intervals (6, 12, 18): Medium/Light
+                                if (h % 6 === 0) return isDark ? 'rgba(71, 85, 105, 0.4)' : 'rgba(203, 213, 225, 0.4)';
                             }
-                            return 'transparent'; // Hide hourly grid lines to reduce noise
+                            return 'transparent'; 
                         },
-                        lineWidth: 2 
+                        lineWidth: (context) => {
+                            if (context.tick && context.tick.value) {
+                                const h = new Date(context.tick.value).getHours();
+                                if (h === 0) return 2;
+                                if (h % 6 === 0) return 1;
+                            }
+                            return 0;
+                        }
                     }
                 },
                 y: {
