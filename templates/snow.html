@@ -338,6 +338,59 @@ function updateChart(data) {
     const selectedDays = parseInt(document.querySelector('.period-btn.bg-primary').dataset.days);
     const endTime = new Date(now.getTime() + selectedDays * 24 * 60 * 60 * 1000);
 
+    // Generate a master timeline (hourly) covering the full range
+    // This ensures all datasets have points at the same X-coordinates for the tooltip
+    const masterTimeline = [];
+    let currentTime = now.getTime();
+    const endTimeMs = endTime.getTime();
+    // Start at the earliest run's start time if it's earlier than 'now', or just stick to the view window
+    // Actually, stick to the view window (now -> +days) for the "scrubbing" experience
+    // Snap to nearest hour
+    currentTime = Math.floor(currentTime / 3600000) * 3600000;
+    
+    while (currentTime <= endTimeMs) {
+        masterTimeline.push(currentTime);
+        currentTime += 3600000; // +1 hour
+    }
+
+    // Helper to interpolate value at a specific time
+    const interpolate = (series, targetTime) => {
+        if (!series || !series.length) return null;
+        
+        // Find surrounding points
+        // Series is sorted by time? It should be from the API, but let's assume yes or sort it.
+        // Assuming series is [{valid_time: 'ISO', value: 1.2}, ...]
+        
+        // Convert series times to timestamps once for perf could be better, but map is fast enough
+        const times = series.map(p => new Date(p.valid_time).getTime());
+        
+        // Exact match?
+        const idx = times.indexOf(targetTime);
+        if (idx !== -1) return series[idx].value;
+        
+        // Find left and right neighbors
+        let leftIdx = -1;
+        let rightIdx = -1;
+        for (let i = 0; i < times.length; i++) {
+            if (times[i] < targetTime) leftIdx = i;
+            if (times[i] > targetTime) {
+                rightIdx = i;
+                break;
+            }
+        }
+        
+        if (leftIdx === -1 || rightIdx === -1) return null; // Out of bounds
+        
+        // Linear interp
+        const t1 = times[leftIdx];
+        const v1 = series[leftIdx].value;
+        const t2 = times[rightIdx];
+        const v2 = series[rightIdx].value;
+        
+        const fraction = (targetTime - t1) / (t2 - t1);
+        return v1 + (v2 - v1) * fraction;
+    };
+
     const datasets = uniqueRuns.map((run) => {
         const isLatest = latestRunByModel[run.model_id] === run.run_id;
         
@@ -349,46 +402,50 @@ function updateChart(data) {
         const ageHours = (latestInit - runDate.getTime()) / 3600000;
         
         let opacity = 1.0;
-        let lineWidth = 4; // Thicker lines as requested
+        let lineWidth = 4;
         let borderDash = [];
         let label = modelName;
 
         if (!isLatest) {
             if (ageHours < 12) {
-                // Recent history: Medium opacity
                 opacity = 0.5;
                 lineWidth = 2.5;
             } else {
-                // Older history: Lower opacity
                 opacity = 0.2;
                 lineWidth = 2;
             }
-            // Fade further based on age
             opacity = Math.max(0.1, opacity - (ageHours / 100)); 
             label += ` (${Math.round(ageHours)}h ago)`;
         } else {
             label += " (Latest)";
         }
 
-        // Convert hex color to rgba for opacity
         const hex = modelConf.color.replace('#', '');
         const r = parseInt(hex.substring(0, 2), 16);
         const g = parseInt(hex.substring(2, 4), 16);
         const b = parseInt(hex.substring(4, 6), 16);
         const color = `rgba(${r}, ${g}, ${b}, ${opacity})`;
 
+        // Resample data to master timeline
+        // This creates a point for every hour, interpolating if necessary
+        const resampledData = masterTimeline.map(t => ({
+            x: t,
+            y: interpolate(run.series, t)
+        }));
+
         return {
             label: label,
-            data: run.series.map(pt => ({ x: pt.valid_time, y: pt.value })),
+            data: resampledData,
             borderColor: color,
             backgroundColor: color,
             borderWidth: lineWidth,
             borderDash: borderDash,
-            pointRadius: 0,
-            pointHoverRadius: isLatest ? 6 : 3,
+            pointRadius: 0, // Hide points for clean line
+            pointHoverRadius: 0, // No big dots on hover, rely on vertical line
             fill: false,
             tension: 0.3,
-            order: isLatest ? 0 : 1
+            order: isLatest ? 0 : 1,
+            spanGaps: true // Draw lines over nulls if any remain
         };
     });
 
