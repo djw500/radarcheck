@@ -275,10 +275,21 @@ function initChart() {
                     type: 'time',
                     time: {
                         unit: 'hour',
-                        displayFormats: { hour: 'h a' },
+                        displayFormats: { hour: 'EEE h a' }, // Mon 12 PM
                         tooltipFormat: 'PPpp'
                     },
-                    grid: { display: false }
+                    grid: { 
+                        display: true,
+                        color: (context) => {
+                            if (context.tick && context.tick.value) {
+                                const date = new Date(context.tick.value);
+                                // Darker line for midnight
+                                if (date.getHours() === 0) return document.documentElement.classList.contains('dark') ? '#475569' : '#cbd5e1';
+                            }
+                            return 'transparent'; // Hide hourly grid lines to reduce noise
+                        },
+                        lineWidth: 2 
+                    }
                 },
                 y: {
                     beginAtZero: true,
@@ -311,38 +322,49 @@ function updateChart(data) {
 
     const latestInit = Math.max(...runs.map(r => new Date(r.init_time).getTime()));
 
-    const datasets = runs.map((run) => {
+    // Filter out potential duplicates (same model, same run_id)
+    const uniqueRuns = [];
+    const seenRuns = new Set();
+    runs.forEach(r => {
+        const key = `${r.model_id}|${r.run_id}`;
+        if (!seenRuns.has(key)) {
+            seenRuns.add(key);
+            uniqueRuns.push(r);
+        }
+    });
+    
+    // Calculate global time range for X-axis scaling based on selected period
+    const now = new Date();
+    const selectedDays = parseInt(document.querySelector('.period-btn.bg-primary').dataset.days);
+    const endTime = new Date(now.getTime() + selectedDays * 24 * 60 * 60 * 1000);
+
+    const datasets = uniqueRuns.map((run) => {
         const isLatest = latestRunByModel[run.model_id] === run.run_id;
         
         const modelConf = MODEL_CONFIG[run.model_id] || MODEL_CONFIG['other'];
         const modelName = run.model_id.toUpperCase().replace('_', ' ');
         
         // Calculate age for ghosting (transparency)
-        // Newer runs are more opaque, older runs fade out
         const runDate = new Date(run.init_time);
         const ageHours = (latestInit - runDate.getTime()) / 3600000;
         
         let opacity = 1.0;
-        let lineWidth = 3;
+        let lineWidth = 4; // Thicker lines as requested
         let borderDash = [];
         let label = modelName;
 
         if (!isLatest) {
-            // Age in hours
             if (ageHours < 12) {
-                // Recent history: Thin solid line, medium opacity
-                opacity = 0.6;
-                lineWidth = 1.5;
-                borderDash = []; // Solid
+                // Recent history: Medium opacity
+                opacity = 0.5;
+                lineWidth = 2.5;
             } else {
-                // Older history: Thin dashed line, low opacity
-                opacity = 0.3;
-                lineWidth = 1;
-                borderDash = [4, 4]; // Dashed
+                // Older history: Lower opacity
+                opacity = 0.2;
+                lineWidth = 2;
             }
             // Fade further based on age
             opacity = Math.max(0.1, opacity - (ageHours / 100)); 
-            
             label += ` (${Math.round(ageHours)}h ago)`;
         } else {
             label += " (Latest)";
@@ -366,7 +388,6 @@ function updateChart(data) {
             pointHoverRadius: isLatest ? 6 : 3,
             fill: false,
             tension: 0.3,
-            // Custom flag to sort datasets (latest on top)
             order: isLatest ? 0 : 1
         };
     });
@@ -375,6 +396,11 @@ function updateChart(data) {
     datasets.sort((a, b) => b.order - a.order);
 
     chartInstance.data.datasets = datasets;
+    
+    // Explicitly set X-axis limits to enforce the "Forecast Up To" selection
+    chartInstance.options.scales.x.min = now.toISOString();
+    chartInstance.options.scales.x.max = endTime.toISOString();
+    
     chartInstance.update();
 }
 
