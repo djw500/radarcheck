@@ -175,8 +175,29 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
     res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
     
     # Check for t2m tiles as a proxy for the run
-    npz_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_id, "t2m.npz")
+    base_run_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_id)
+    npz_path = os.path.join(base_run_dir, "t2m.npz")
     if not os.path.exists(npz_path):
+        return False
+    # Verify region bounds match current config (backfill trigger after region expansion)
+    try:
+        meta_path = os.path.join(base_run_dir, "t2m.meta.json")
+        if os.path.exists(meta_path):
+            import json
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+            reg = repomap["TILING_REGIONS"][region_id]
+            tol = 1e-6
+            if (
+                abs(float(meta.get("lat_min")) - float(reg["lat_min"])) > tol or
+                abs(float(meta.get("lat_max")) - float(reg["lat_max"])) > tol or
+                abs(float(meta.get("lon_min")) - float(reg["lon_min"])) > tol or
+                abs(float(meta.get("lon_max")) - float(reg["lon_max"])) > tol or
+                abs(float(meta.get("resolution_deg")) - float(res)) > tol
+            ):
+                return False
+    except Exception:
+        # If meta can't be read, force rebuild
         return False
         
     # Check if the run is complete enough
