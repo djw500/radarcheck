@@ -18,3 +18,8 @@ Transform Radarcheck from a location-based PNG image viewer into a **tile-based 
 2.  **Run Comparison:** "Show History" feature to see previous model outputs.
 3.  **Tile-Based Architecture:** backend generation of statistical grids for fast querying.
 4.  **AI Summaries:** Intelligent synthesis of complex model data.
+
+## Current State & Limitations
+- **Active UI:** `index.html` (served at `/forecast` or `/`) is the **ONLY** active and supported frontend endpoint.
+- **Defunct Endpoints:** Legacy endpoints (e.g., `/table/geo`, `/location/...` without the new React/Plotly UI) are deprecated and should be ignored or removed.
+- **Data Source:** ECMWF integration via Herbie is active for the "ne" region.
