@@ -24,6 +24,7 @@ import os
 import subprocess
 import sys
 import time
+import json
 from typing import Optional
 
 import requests
@@ -70,6 +71,24 @@ MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
 MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
 KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
 BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
+
+STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
+
+def write_scheduler_status(state="idle", last_run=None, next_run=None, targets=None, error=None):
+    """Write current scheduler status to JSON."""
+    status = {
+        "state": state,
+        "last_run": last_run,
+        "next_run": next_run,
+        "targets": targets or [],
+        "last_error": str(error) if error else None,
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+    try:
+        with open(STATUS_FILE, "w") as f:
+            json.dump(status, f)
+    except Exception as e:
+        logger.error(f"Failed to write status file: {e}")
 
 
 def get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
@@ -314,8 +333,11 @@ def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
 def build_cycle():
     """Run one build cycle for all models and regions."""
     logger.info("Starting build cycle")
+    write_scheduler_status(state="running")
+    
     builds_attempted = 0
     builds_succeeded = 0
+    all_targets = []
 
     for model_cfg in MODELS_CONFIG:
         model_id = model_cfg["id"]
@@ -323,6 +345,12 @@ def build_cycle():
 
         # Get all runs we SHOULD have according to tiered policy (last 72h)
         runs_to_process = get_required_runs(model_id, lookback_hours=72)
+        
+        if runs_to_process:
+            for r in runs_to_process:
+                all_targets.append(f"{model_id}/{r}")
+            # Update status with known targets
+            write_scheduler_status(state="running", targets=all_targets)
         
         if not runs_to_process:
             logger.warning(f"No available runs found for {model_id}")
@@ -355,7 +383,7 @@ def build_cycle():
                 time.sleep(2)
 
     print(f"Build cycle complete: {builds_succeeded}/{builds_attempted} succeeded")
-    return builds_attempted, builds_succeeded
+    return builds_attempted, builds_succeeded, all_targets
 
 
 def cleanup_old_runs(max_runs_to_keep: int = 48):
@@ -474,13 +502,24 @@ def main():
     while True:
         try:
             # Run build cycle
-            build_cycle()
+            _, _, targets = build_cycle()
 
             # Cleanup old runs periodically using tiered policy
             cleanup_old_runs()
+            
+            # Record success and sleep state
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            next_run = (now_utc + datetime.timedelta(minutes=BUILD_INTERVAL_MINUTES)).isoformat()
+            write_scheduler_status(
+                state="sleeping", 
+                last_run=now_utc.isoformat(), 
+                next_run=next_run, 
+                targets=targets
+            )
 
         except Exception as e:
             logger.exception(f"Error in build cycle: {e}")
+            write_scheduler_status(state="error", error=e)
 
         # Sleep until next cycle
         print(f"Sleeping {BUILD_INTERVAL_MINUTES} minutes until next cycle...")

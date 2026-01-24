@@ -1,9 +1,12 @@
 import os
 import glob
+import json
 import numpy as np
 from datetime import datetime
 from collections import deque
 from config import repomap
+
+STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
 def scan_cache_status(region="ne"):
     """
@@ -167,3 +170,13 @@ def read_scheduler_logs(lines=100, log_path='logs/scheduler_detailed.log'):
             return [line.rstrip('\n') for line in deque(f, lines)]
     except Exception:
         return []
+
+def read_scheduler_status():
+    """Read scheduler status from JSON."""
+    if not os.path.exists(STATUS_FILE):
+        return {}
+    try:
+        with open(STATUS_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}

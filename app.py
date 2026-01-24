@@ -55,7 +55,7 @@ from tiles import (
     list_tile_variables,
     list_tile_models,
 )
-from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs
+from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs, read_scheduler_status
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -2163,10 +2163,12 @@ def api_status_summary():
     
     cache_status = scan_cache_status(region=region_id)
     disk_usage = get_disk_usage()
+    scheduler_status = read_scheduler_status()
     
     return jsonify({
         "cache_status": cache_status,
         "disk_usage": disk_usage,
+        "scheduler_status": scheduler_status,
         "timestamp": datetime.now(pytz.UTC).isoformat()
     })
 

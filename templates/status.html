@@ -1,59 +1,135 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>System Status | RadarCheck</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#0ea5e9", // Sky 500
+                        "background-light": "#f8fafc", // Slate 50
+                        "background-dark": "#0B1120", // Custom deep dark
+                        "card-dark": "#1e293b",
+                        "card-light": "#ffffff",
+                    },
+                    fontFamily: {
+                        display: ["Inter", "sans-serif"],
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-200 min-h-screen flex flex-col font-display antialiased selection:bg-primary selection:text-white">
 
-{% block title %}System Status | RadarCheck{% endblock %}
+<!-- Header -->
+<nav class="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+            <div class="flex items-center gap-2">
+                <span class="material-icons-outlined text-primary text-2xl">dns</span>
+                <span class="font-bold text-lg tracking-tight">System Status</span>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <a href="/" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="Back to Forecast">
+                    <span class="material-icons-outlined">arrow_back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</nav>
 
-{% block extra_head %}
-<style>
-    .status-complete { background-color: #10b981; color: white; } /* Green-500 */
-    .status-partial { background-color: #f59e0b; color: white; } /* Amber-500 */
-    .status-empty { background-color: #94a3b8; color: white; } /* Slate-400 */
-    .status-grid { display: grid; gap: 4px; }
-</style>
-{% endblock %}
+<main class="flex-grow p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
 
-{% block content %}
-<div class="max-w-7xl mx-auto p-4 space-y-6">
-    <h1 class="text-2xl font-bold text-slate-900 dark:text-white">System Status</h1>
+    <!-- Scheduler Status (New) -->
+    <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
+        <h2 class="text-lg font-semibold mb-4 text-slate-900 dark:text-white flex items-center gap-2">
+            <span class="material-icons-outlined text-primary">schedule</span> Scheduler Status
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="schedulerStats">
+            <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                <div class="text-xs text-slate-500 uppercase font-semibold">Last Run</div>
+                <div class="text-lg font-medium" id="schedLastRun">-</div>
+            </div>
+            <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                <div class="text-xs text-slate-500 uppercase font-semibold">Next Run</div>
+                <div class="text-lg font-medium" id="schedNextRun">-</div>
+            </div>
+            <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg col-span-2">
+                <div class="text-xs text-slate-500 uppercase font-semibold">Targets</div>
+                <div class="text-sm font-mono mt-1 text-slate-600 dark:text-slate-300" id="schedTargets">-</div>
+            </div>
+        </div>
+    </div>
 
     <!-- Disk Usage -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="bg-white dark:bg-slate-800 p-4 rounded-lg shadow border border-slate-200 dark:border-slate-700">
+        <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
             <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">Total Cache Size</h3>
-            <p id="diskTotal" class="text-2xl font-bold text-slate-900 dark:text-white">-</p>
+            <p id="diskTotal" class="text-2xl font-bold text-slate-900 dark:text-white mt-2">-</p>
         </div>
-        <div class="bg-white dark:bg-slate-800 p-4 rounded-lg shadow border border-slate-200 dark:border-slate-700">
+        <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
             <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">GRIBs (Raw)</h3>
-            <p id="diskGribs" class="text-2xl font-bold text-slate-900 dark:text-white">-</p>
+            <p id="diskGribs" class="text-2xl font-bold text-slate-900 dark:text-white mt-2">-</p>
         </div>
-        <div class="bg-white dark:bg-slate-800 p-4 rounded-lg shadow border border-slate-200 dark:border-slate-700">
+        <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
             <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">Tiles (Processed)</h3>
-            <p id="diskTiles" class="text-2xl font-bold text-slate-900 dark:text-white">-</p>
+            <p id="diskTiles" class="text-2xl font-bold text-slate-900 dark:text-white mt-2">-</p>
         </div>
     </div>
 
     <!-- Run Status Grid -->
-    <div class="bg-white dark:bg-slate-800 p-6 rounded-lg shadow border border-slate-200 dark:border-slate-700">
-        <h2 class="text-lg font-semibold mb-4 text-slate-900 dark:text-white">Model Run Status</h2>
+    <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <span class="material-icons-outlined text-primary">grid_on</span> Model Run Status
+            </h2>
+        </div>
         <div id="statusGrid" class="overflow-x-auto">
-            <!-- Rendered by JS -->
-            <p class="text-slate-500">Loading run status...</p>
+            <div class="animate-pulse flex space-x-4">
+                <div class="flex-1 space-y-4 py-1">
+                    <div class="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4"></div>
+                    <div class="space-y-2">
+                        <div class="h-4 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                        <div class="h-4 bg-slate-200 dark:bg-slate-700 rounded w-5/6"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Logs -->
-    <div class="bg-white dark:bg-slate-800 p-6 rounded-lg shadow border border-slate-200 dark:border-slate-700">
+    <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
         <div class="flex justify-between items-center mb-4">
-            <h2 class="text-lg font-semibold text-slate-900 dark:text-white">Scheduler Logs</h2>
-            <button id="refreshLogsBtn" class="text-sm text-primary hover:text-blue-400">Refresh</button>
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <span class="material-icons-outlined text-primary">terminal</span> Scheduler Logs
+            </h2>
+            <button id="refreshLogsBtn" class="text-sm text-primary hover:text-blue-400 font-medium flex items-center gap-1">
+                <span class="material-icons-outlined text-sm">refresh</span> Refresh
+            </button>
         </div>
-        <div class="bg-slate-900 text-slate-300 p-4 rounded font-mono text-xs h-64 overflow-y-auto" id="logsContainer">
+        <div class="bg-slate-900 text-slate-300 p-4 rounded-lg font-mono text-xs h-96 overflow-y-auto leading-relaxed" id="logsContainer">
             <!-- Logs here -->
         </div>
         <div class="mt-2 text-right">
-            <a href="/api/status/logs?lines=1000" target="_blank" class="text-sm text-blue-500 hover:underline">View Raw Log</a>
+            <a href="/api/status/logs?lines=1000" target="_blank" class="text-xs text-slate-500 hover:text-primary hover:underline">View Raw Log</a>
         </div>
     </div>
-</div>
+
+</main>
 
 <script src="{{ url_for('static', filename='js/statusView.js') }}"></script>
 <script>
@@ -63,4 +139,5 @@
         }
     });
 </script>
-{% endblock %}
+</body>
+</html>

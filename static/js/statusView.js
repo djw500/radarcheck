@@ -9,6 +9,7 @@ async function initStatusPage() {
         const data = await fetchJSON('/api/status/summary');
         renderStatusGrid(data.cache_status);
         renderDiskUsage(data.disk_usage);
+        renderSchedulerStats(data.scheduler_status);
         
         await loadLogs();
         
@@ -122,6 +123,25 @@ function renderLogs(lines) {
     container.scrollTop = container.scrollHeight;
 }
 
+function renderSchedulerStats(status) {
+    if (!status) return;
+    
+    const elLast = document.getElementById('schedLastRun');
+    const elNext = document.getElementById('schedNextRun');
+    const elTargets = document.getElementById('schedTargets');
+    
+    if (elLast && status.last_run) elLast.textContent = new Date(status.last_run).toLocaleTimeString();
+    if (elNext && status.next_run) elNext.textContent = new Date(status.next_run).toLocaleTimeString();
+    
+    if (elTargets) {
+        if (status.targets && status.targets.length > 0) {
+            elTargets.textContent = status.targets.join(', ');
+        } else {
+            elTargets.textContent = "None";
+        }
+    }
+}
+
 if (typeof module !== 'undefined') {
-    module.exports = { initStatusPage, renderStatusGrid, renderDiskUsage, renderLogs };
+    module.exports = { initStatusPage, renderStatusGrid, renderDiskUsage, renderLogs, renderSchedulerStats };
 }
