@@ -55,6 +55,7 @@ from tiles import (
     list_tile_variables,
     list_tile_models,
 )
+from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -2153,6 +2154,33 @@ def index():
     """Home page showing available locations"""
     locations = get_available_locations()
     return render_template('index.html', locations=locations)
+
+@app.route("/api/status/summary")
+@require_api_key
+def api_status_summary():
+    """Get system status summary (cache, disk, scheduler)."""
+    region_id = request.args.get("region", "ne")
+    
+    cache_status = scan_cache_status(region=region_id)
+    disk_usage = get_disk_usage()
+    
+    return jsonify({
+        "cache_status": cache_status,
+        "disk_usage": disk_usage,
+        "timestamp": datetime.now(pytz.UTC).isoformat()
+    })
+
+@app.route("/api/status/logs")
+@require_api_key
+def api_status_logs():
+    """Get recent scheduler logs."""
+    try:
+        lines = int(request.args.get("lines", 100))
+    except ValueError:
+        lines = 100
+        
+    log_data = read_scheduler_logs(lines=lines)
+    return jsonify({"lines": log_data})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
