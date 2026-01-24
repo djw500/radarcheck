@@ -91,7 +91,7 @@
                 <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto">
                     <button data-var="asnow" class="var-btn px-4 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap transition">Snow</button>
                     <button data-var="t2m" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
-                    <button data-var="gust" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
+                    <button data-var="wind_10m" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
                 </div>
 
                 <!-- Time Period -->
@@ -200,7 +200,7 @@ const MODEL_CONFIG = {
 const VAR_CONFIG = {
     'asnow': { label: 'Snowfall', unit: '"', stepSize: 6, beginAtZero: true },
     't2m': { label: 'Temperature', unit: '°F', stepSize: 10, beginAtZero: false },
-    'gust': { label: 'Wind Gust', unit: ' mph', stepSize: 10, beginAtZero: true }
+    'wind_10m': { label: 'Wind Speed', unit: ' mph', stepSize: 10, beginAtZero: true }
 };
 
 // --- UI Interaction ---
@@ -431,16 +431,21 @@ function updateChart(data) {
     
     // Calculate global time range for X-axis scaling based on selected period
     const now = new Date();
+    // Round down to nearest 6 hours for chart start (Synoptic alignment)
+    const startHour = Math.floor(now.getHours() / 6) * 6;
+    const startTime = new Date(now);
+    startTime.setHours(startHour, 0, 0, 0);
+    
     const selectedDays = parseInt(document.querySelector('.period-btn.bg-primary').dataset.days);
-    const endTime = new Date(now.getTime() + selectedDays * 24 * 60 * 60 * 1000);
+    const endTime = new Date(startTime.getTime() + selectedDays * 24 * 60 * 60 * 1000);
 
     // Generate a master timeline (hourly) covering the full range
     // This ensures all datasets have points at the same X-coordinates for the tooltip
     const masterTimeline = [];
     const endTimeMs = endTime.getTime();
     
-    // Start at current hour floor
-    let currentTime = Math.floor(now.getTime() / 3600000) * 3600000;
+    // Start at aligned start time
+    let currentTime = startTime.getTime();
     
     while (currentTime <= endTimeMs) {
         masterTimeline.push(currentTime);
@@ -549,7 +554,7 @@ function updateChart(data) {
     chartInstance.data.datasets = datasets;
     
     // Explicitly set X-axis limits to enforce the "Forecast Up To" selection
-    chartInstance.options.scales.x.min = now.toISOString();
+    chartInstance.options.scales.x.min = startTime.toISOString();
     chartInstance.options.scales.x.max = endTime.toISOString();
     
     // Update Y-axis based on variable config
@@ -680,6 +685,27 @@ function renderTable(data, timeline) {
 
         tableBody.appendChild(tr);
     });
+}
+
+// Helper for table interpolation
+function interpolateValue(series, targetTime) {
+    if (!series || !series.length) return null;
+
+    const times = series.map(p => new Date(p.valid_time).getTime());
+    const idx = times.indexOf(targetTime);
+    if (idx !== -1) return series[idx].value;
+
+    let leftIdx = -1, rightIdx = -1;
+    for (let i = 0; i < times.length; i++) {
+        if (times[i] < targetTime) leftIdx = i;
+        if (times[i] > targetTime) { rightIdx = i; break; }
+    }
+
+    if (leftIdx === -1 || rightIdx === -1) return null;
+
+    const t1 = times[leftIdx], v1 = series[leftIdx].value;
+    const t2 = times[rightIdx], v2 = series[rightIdx].value;
+    return v1 + (v2 - v1) * (targetTime - t1) / (t2 - t1);
 }
 
 document.getElementById('toggleTableBtn').addEventListener('click', () => {
