@@ -111,6 +111,9 @@ def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
     if not model_config:
         return False
 
+    if model_config.get("source") == "herbie":
+        return True
+
     fhour_str = format_forecast_hour(1, model_id)
     file_name = model_config["file_pattern"].format(init_hour=init_hour, forecast_hour=fhour_str)
     dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
