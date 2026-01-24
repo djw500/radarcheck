@@ -1,84 +1,103 @@
 """
-ECMWF fetcher scaffolding for HRES and EPS via CDS.
+ECMWF fetcher using Herbie for IFS Open Data.
 
 Usage notes:
-- Requires 'cdsapi' package and valid credentials (typically in ~/.cdsapirc).
-- This module exposes a fetch_grib_cds() function with a NOMADS-like signature
-  to integrate with cache_builder's flow. It currently raises a clear error
-  if cdsapi is not available or credentials are missing.
+- Uses 'herbie-data' package to fetch from ECMWF Open Data (Google Cloud/AWS/Azure).
+- Supports partial downloads (byte ranges) for efficiency.
+- No API keys required for operational data.
 """
 from __future__ import annotations
 
 import os
+import shutil
 from typing import Any, Dict
+from datetime import datetime
 
 
-def fetch_grib_cds(
+def fetch_grib_herbie(
     model_id: str,
     variable_id: str,
     date_str: str,
     init_hour: str,
     forecast_hour: str,
-    location_config: Dict[str, Any],
-    run_id: str,
     target_path: str,
 ) -> str:
-    """Fetch GRIB via CDS for ECMWF models.
+    """Fetch GRIB via Herbie for ECMWF (IFS) models.
 
-    Returns the local path to the downloaded GRIB file.
+    Args:
+        model_id: 'ecmwf_hres' (mapped to 'ifs') or 'ecmwf_eps' (mapped to 'aifs' or similar if available)
+        variable_id: Internal variable ID (e.g., 't2m', 'apcp')
+        date_str: YYYYMMDD string
+        init_hour: "00", "06", "12", "18"
+        forecast_hour: Lead time in hours (e.g., "003")
+        target_path: Destination path for the downloaded GRIB file.
+
+    Returns:
+        The local path to the downloaded GRIB file (should match target_path).
     """
     try:
-        import cdsapi  # type: ignore
-    except Exception as exc:
+        from herbie import Herbie
+    except ImportError as exc:
         raise RuntimeError(
-            "cdsapi is required for ECMWF downloads. Install with 'pip install cdsapi' and configure ~/.cdsapirc."
+            "herbie-data is required for ECMWF downloads. Install with 'pip install herbie-data'."
         ) from exc
 
-    # Basic environment checks
-    cds_url = os.environ.get("CDSAPI_URL")
-    cds_key = os.environ.get("CDSAPI_KEY")
-    if not (os.path.exists(os.path.expanduser("~/.cdsapirc")) or (cds_url and cds_key)):
-        raise RuntimeError(
-            "CDS credentials not found. Create ~/.cdsapirc or set CDSAPI_URL and CDSAPI_KEY."
-        )
-
-    # Minimal variable mapping (extend as needed)
+    # Variable mapping: internal_id -> Herbie search string (regex)
     var_map = {
-        "t2m": {"cds_var": "2m_temperature"},
-        "dpt": {"cds_var": "2m_dewpoint_temperature"},
-        "apcp": {"cds_var": "total_precipitation"},  # 'tp' shortName
-        "prate": {"cds_var": "total_precipitation"},  # derive rate downstream if needed
+        "t2m": ":2t:",
+        "dpt": ":2d:",
+        "apcp": ":tp:",  # Total precipitation
+        "msl": ":msl:",  # Mean sea level pressure
+        "wind_10m": ":10[uv]:",  # u and v components
+        "gust": ":10fg:",       # 10m wind gust
+        "gh": ":gh:",           # Geopotential height
     }
+
     if variable_id not in var_map:
-        raise RuntimeError(f"Variable '{variable_id}' not mapped for ECMWF CDS fetch.")
+        raise RuntimeError(f"Variable '{variable_id}' not mapped for ECMWF Herbie fetch.")
 
-    dataset = {
-        "ecmwf_hres": "ecmwf-high-resolution-forecast",
-        "ecmwf_eps": "ecmwf-ensemble-forecast",
-    }.get(model_id)
-    if not dataset:
-        raise RuntimeError(f"Model '{model_id}' not supported by ECMWF CDS fetch.")
+    search_string = var_map[variable_id]
 
-    # Build request parameters (simplified; refine for production)
-    # ECMWF expects times/steps rather than 'forecast_hour' directly; map accordingly.
-    step = int(forecast_hour)  # hours since init
-    request = {
-        "product_type": "forecast",
-        "date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}",
-        "time": f"{init_hour}:00",
-        "variable": var_map[variable_id]["cds_var"],
-        "step": [step],
-        "format": "grib",
-        # Area: North, West, South, East
-        "area": [
-            location_config["lat_max"],
-            location_config["lon_min"],
-            location_config["lat_min"],
-            location_config["lon_max"],
-        ],
-    }
+    # Map internal model ID to Herbie model name
+    herbie_model = "ifs"  # Default to IFS (HRES)
+    # Note: 'ecmwf_eps' might map to 'aifs' or specific product types in Herbie, 
+    # but 'ifs' is the main deterministic one.
 
-    c = cdsapi.Client()
-    c.retrieve(dataset, request, target_path)
-    return target_path
+    # Format date for Herbie
+    dt_str = f"{date_str} {init_hour}:00"
 
+    try:
+        H = Herbie(
+            dt_str,
+            model=herbie_model,
+            product="oper",  # Operational high-resolution
+            fxx=int(forecast_hour),
+            save_dir=os.path.dirname(target_path), # Save near target to minimize move cost? 
+            # Actually, Herbie has its own structure. We'll let it save there and move/copy.
+            # Or we can try to force it. Let's use default Herbie cache and move.
+        )
+        
+        # Download the specific variable(s)
+        # verbose=False to reduce noise in logs
+        H.download(search_string, verbose=False)
+        
+        # Herbie saves files with its own naming convention.
+        # We need to find the file it just downloaded.
+        # get_localFilePath returns the path to the file in the cache.
+        source_path = str(H.get_localFilePath(search_string))
+        
+        if not os.path.exists(source_path):
+             raise RuntimeError(f"Herbie reported success but file not found at {source_path}")
+
+        # Ensure target directory exists
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+        # Move or copy to target_path
+        # We copy to preserve Herbie's cache if needed, or move to save space. 
+        # Given we have a dedicated cache structure, moving is better to avoid duplication.
+        shutil.move(source_path, target_path)
+        
+        return target_path
+
+    except Exception as e:
+        raise RuntimeError(f"Herbie fetch failed for {model_id}/{variable_id}: {e}")

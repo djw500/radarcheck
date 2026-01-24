@@ -12,7 +12,7 @@ WEATHER_VARIABLES = {
         "vmin": 5,
         "vmax": 75,
         "category": "precipitation",
-        "model_exclusions": ["gfs", "nbm", "icon"],
+        "model_exclusions": ["gfs", "nbm", "icon", "ecmwf_hres", "ecmwf_eps"],
     },
     "asnow": {
         "nomads_params": ["var_ASNOW"],
@@ -26,7 +26,7 @@ WEATHER_VARIABLES = {
         "category": "winter",
         "conversion": "m_to_in",
         "is_accumulation": True,
-        "model_exclusions": ["nam_nest", "gfs", "icon"],
+        "model_exclusions": ["nam_nest", "gfs", "icon", "ecmwf_hres", "ecmwf_eps"],
         "unit_conversions_by_units": {
             "m": "m_to_in",
             "kg m-2": "kg_m2_to_in",
@@ -44,7 +44,7 @@ WEATHER_VARIABLES = {
         "vmax": 1,
         "category": "winter",
         "preferred_step_type": "instant",
-        "model_exclusions": ["icon"],
+        "model_exclusions": ["icon", "ecmwf_hres", "ecmwf_eps"],
     },
     "snod": {
         "nomads_params": ["var_SNOD"],
@@ -58,6 +58,7 @@ WEATHER_VARIABLES = {
         "category": "winter",
         "conversion": "m_to_in",
         "dwd_var": "h_snow",
+        "model_exclusions": ["ecmwf_hres", "ecmwf_eps"],
     },
     "apcp": {
         "nomads_params": ["var_APCP"],
@@ -94,7 +95,7 @@ WEATHER_VARIABLES = {
         "category": "precipitation",
         "conversion": "kg_m2_s_to_in_hr",
         "preferred_step_type": "instant",
-        "model_exclusions": ["icon"],
+        "model_exclusions": ["icon", "ecmwf_hres", "ecmwf_eps"],
     },
     "t2m": {
         "nomads_params": ["var_TMP"],
@@ -148,7 +149,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 100,
         "category": "temperature",
-        "model_exclusions": ["icon"],
+        "model_exclusions": ["icon", "ecmwf_hres", "ecmwf_eps"],
     },
     "wind_10m": {
         "nomads_params": ["var_UGRD", "var_VGRD"],
@@ -194,7 +195,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 4000,
         "category": "severe",
-        "model_exclusions": ["icon"],
+        "model_exclusions": ["icon", "ecmwf_hres", "ecmwf_eps"],
     },
     "hlcy": {
         "nomads_params": ["var_HLCY"],
@@ -206,7 +207,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 600,
         "category": "severe",
-        "model_exclusions": ["nam_nest", "gfs", "nbm", "icon"],
+        "model_exclusions": ["nam_nest", "gfs", "nbm", "icon", "ecmwf_hres", "ecmwf_eps"],
     },
     "hail": {
         "nomads_params": ["var_HAIL"],
@@ -218,7 +219,7 @@ WEATHER_VARIABLES = {
         "vmin": 0,
         "vmax": 3,
         "category": "severe",
-        "model_exclusions": ["nam_nest", "gfs", "nbm", "icon"],
+        "model_exclusions": ["nam_nest", "gfs", "nbm", "icon", "ecmwf_hres", "ecmwf_eps"],
     },
 }
 
@@ -310,16 +311,15 @@ MODELS = {
         "forecast_hour_digits": 3,
         "availability_check_var": "t_2m", # Used for dwd_var in check
     },
-    # ECMWF integrations are scaffolded for CDS; downloads require cdsapi credentials.
-    # These entries are not used by NOMADS and will be activated when CDS fetch is configured.
+    # ECMWF integrations via Herbie (Open Data)
     "ecmwf_hres": {
         "name": "ECMWF HRES",
         "max_forecast_hours": 240,
-        "update_frequency_hours": 12,
-        "source": "cds",
+        "update_frequency_hours": 6,  # 00, 06, 12, 18
+        "source": "herbie",
         "dataset": "ecmwf-high-resolution-forecast",
         "forecast_hour_digits": 3,
-        # Placeholders to satisfy validation/tests; CDS flow supplies these via cdsapi
+        # Placeholders
         "nomads_url": "",
         "dir_pattern": "",
         "file_pattern": "",
@@ -327,11 +327,11 @@ MODELS = {
     "ecmwf_eps": {
         "name": "ECMWF EPS",
         "max_forecast_hours": 360,
-        "update_frequency_hours": 12,
-        "source": "cds",
+        "update_frequency_hours": 6,
+        "source": "herbie",
         "dataset": "ecmwf-ensemble-forecast",
         "forecast_hour_digits": 3,
-        # Placeholders to satisfy validation/tests; CDS flow supplies these via cdsapi
+        # Placeholders
         "nomads_url": "",
         "dir_pattern": "",
         "file_pattern": "",

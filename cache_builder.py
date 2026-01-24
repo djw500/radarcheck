@@ -25,7 +25,7 @@ import numpy as np
 import psutil
 
 from config import repomap
-from ecmwf import fetch_grib_cds  # scaffolding for ECMWF CDS
+from ecmwf import fetch_grib_herbie  # using Herbie for ECMWF
 from plotting import create_plot, select_variable_from_dataset
 from tiles import open_dataset_robust
 from utils import (
@@ -262,24 +262,20 @@ def fetch_grib(
     if variable_config.get("short_name") == "prate" and not preferred:
         preferred = {'stepType': 'instant'}
 
-    # ECMWF CDS download path
-    if model_config.get("source") == "cds":
-        # ... (existing CDS logic) ...
-        # Attempt CDS retrieval directly to temp file, then validate like NOMADS flow
+    # ECMWF download path (Herbie)
+    if model_config.get("source") == "herbie":
         temp_filename = f"{filename}.tmp"
         try:
-            fetch_grib_cds(
+            fetch_grib_herbie(
                 model_id,
                 variable_id,
                 date_str,
                 init_hour,
                 forecast_hour,
-                download_region,
-                run_id,
                 temp_filename,
             )
         except Exception as exc:
-            logger.error(f"CDS fetch failed for {model_id} {variable_id} hour {forecast_hour}: {exc}")
+            logger.error(f"Herbie fetch failed for {model_id} {variable_id} hour {forecast_hour}: {exc}")
             raise GribDownloadError(str(exc)) from exc
 
         # Verify file via xarray open and move into place
@@ -289,14 +285,16 @@ def fetch_grib(
 
             ds = xr.open_dataset(temp_filename, engine="cfgrib")
             data_to_plot = select_variable_from_dataset(ds, variable_config)
-            data_to_plot.load()
+            # Basic validation
+            if data_to_plot.size == 0:
+                 raise ValueError("Empty variable")
             ds.close()
             with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
                 os.replace(temp_filename, filename)
-                logger.info(f"Successfully downloaded and verified GRIB file (CDS): {filename}")
+                logger.info(f"Successfully downloaded and verified GRIB file (Herbie): {filename}")
                 return filename
         except Exception as exc:
-            logger.error(f"CDS verification failed: {exc}")
+            logger.error(f"Herbie verification failed: {exc}")
             try:
                 if os.path.exists(temp_filename):
                     os.remove(temp_filename)
