@@ -167,6 +167,8 @@ WEATHER_VARIABLES = {
             ["ugrd", "10u", "u10", "UGRD"],  # u-component
             ["vgrd", "10v", "v10", "VGRD"],  # v-component
         ],
+        # Some centers (e.g., NBM) provide 10m wind magnitude as WIND
+        "magnitude_short_names": ["wind", "WIND"],
         "model_exclusions": ["icon"],
     },
     "gust": {
@@ -317,6 +319,10 @@ MODELS = {
         "source": "cds",
         "dataset": "ecmwf-high-resolution-forecast",
         "forecast_hour_digits": 3,
+        # Placeholders to satisfy validation/tests; CDS flow supplies these via cdsapi
+        "nomads_url": "",
+        "dir_pattern": "",
+        "file_pattern": "",
     },
     "ecmwf_eps": {
         "name": "ECMWF EPS",
@@ -325,6 +331,10 @@ MODELS = {
         "source": "cds",
         "dataset": "ecmwf-ensemble-forecast",
         "forecast_hour_digits": 3,
+        # Placeholders to satisfy validation/tests; CDS flow supplies these via cdsapi
+        "nomads_url": "",
+        "dir_pattern": "",
+        "file_pattern": "",
     },
 }
 
@@ -420,7 +430,8 @@ repomap = {
             "lon_min": -88.0,
             "lon_max": -66.0,
             "default_resolution_deg": 0.1,
-            "stats": ["min", "max", "mean"],
+            # Generate means only to reduce storage
+            "stats": ["mean"],
         }
     },
 

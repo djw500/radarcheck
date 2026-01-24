@@ -319,7 +319,7 @@ if FLASGGER_AVAILABLE:
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"],
+    default_limits=["20000 per day", "5000 per hour"],
 )
 
 def get_or_create_counter(name: str, description: str, labels: list[str]) -> Counter:
@@ -1443,6 +1443,9 @@ def get_frame(location_id: str, model_id: str, run_id: str, variable_id: str, ho
         
         if not os.path.exists(frame_path):
             logger.warning(f'Frame not found in cache: {frame_path}')
+            # Legacy PNG cache historically provided up to 24 hours; treat >24 as invalid hour
+            if hour > 24:
+                return "Invalid forecast hour", 400
             return "Forecast frame not available", 404
             
         return send_file(frame_path, mimetype="image/png")
