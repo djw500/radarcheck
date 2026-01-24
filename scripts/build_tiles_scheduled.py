@@ -98,6 +98,7 @@ MODELS_CONFIG = [
     {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
     {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
     {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
+    {"id": "ecmwf_hres", "max_hours": 240, "check_hours": 12},
 ]
 
 # Regions to build
