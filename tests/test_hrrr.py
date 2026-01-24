@@ -116,7 +116,7 @@ def test_real_grib_download():
     # Fetch the GRIB file
     forecast_hour = "01"  # Use 1-hour forecast
     try:
-        grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
+        grib_path = fetch_grib("hrrr", "refc", date_str, init_hour, forecast_hour, run_id, location_config)
     except (GribDownloadError, requests.RequestException) as exc:
         pytest.skip(f"GRIB download failed: {exc}")
 
@@ -175,7 +175,7 @@ def test_create_forecast_gif_success():
     for hour in range(1, 4):  # Test with 3 hours instead of 12 for speed
         hour_str = f"{hour:02d}"
         try:
-            grib_path = fetch_grib(date_str, init_hour, hour_str, location_config, run_id)
+            grib_path = fetch_grib("hrrr", "refc", date_str, init_hour, hour_str, run_id, location_config)
             grib_paths.append(grib_path)
         except (GribDownloadError, requests.RequestException) as exc:
             pytest.skip(f"GRIB download failed: {exc}")
@@ -227,7 +227,7 @@ def test_create_plot_success():
 
     # 2. Download the GRIB file
     try:
-        grib_path = fetch_grib(date_str, init_hour, forecast_hour, location_config, run_id)
+        grib_path = fetch_grib("hrrr", "refc", date_str, init_hour, forecast_hour, run_id, location_config)
     except (GribDownloadError, requests.RequestException) as exc:
         pytest.skip(f"GRIB download failed: {exc}")
 

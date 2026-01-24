@@ -44,10 +44,14 @@ function initSingleRunView() {
     const preloadLimit = Math.min(maxForecastHours, 48);
 
     // Preload first few frames immediately
-    Promise.all([1, 2, 3].map(preloadImage)).then(() => {
-        // Then load the rest in background (cap for very long models)
+    Promise.all([1, 2, 3].map(h => preloadImage(h).catch(() => {}))).then(async () => {
+        // Then load the rest in background sequentially to avoid network congestion
         for (let hour = 4; hour <= preloadLimit; hour++) {
-            preloadImage(hour);
+            try {
+                await preloadImage(hour);
+            } catch (e) {
+                console.debug(`Failed to preload hour ${hour}`, e);
+            }
         }
     });
 

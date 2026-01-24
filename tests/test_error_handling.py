@@ -30,8 +30,8 @@ def test_fetch_grib_handles_network_timeout(monkeypatch, tmp_path):
             "20240101",
             "00",
             "01",
-            location_config,
             "run_20240101_00",
+            location_config,
         )
 
 

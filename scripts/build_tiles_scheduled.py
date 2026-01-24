@@ -69,6 +69,7 @@ MAX_HOURS_NAM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))
 MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
 MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
 KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
+BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
 
 
 def get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
@@ -243,6 +244,12 @@ def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: i
         "--max-hours", str(max_hours),
         "--clean-gribs",
     ]
+
+    # Restrict variables if configured (comma-separated list)
+    if BUILD_VARIABLES_ENV:
+        vars_list = [v.strip() for v in BUILD_VARIABLES_ENV.split(',') if v.strip()]
+        if vars_list:
+            cmd += ["--variables", *vars_list]
 
     try:
         # Stream output character by character to show real-time dots

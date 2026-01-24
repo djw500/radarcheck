@@ -28,7 +28,15 @@ def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any
             found_v = next((name for name in v_alts if name in ds.data_vars), None)
             if found_u and found_v:
                 return np.hypot(ds[found_u], ds[found_v])
-        raise ValueError(f"Missing wind components: {vector_components}")
+        # Fallback: some sources provide magnitude directly (e.g., NBM WIND)
+        for mag_name in variable_config.get("magnitude_short_names", []):
+            if mag_name in ds.data_vars:
+                return ds[mag_name]
+        # As a last resort, try generic source_short_names for magnitude
+        for alt_name in variable_config.get("source_short_names", []):
+            if alt_name in ds.data_vars:
+                return ds[alt_name]
+        raise ValueError(f"Missing wind components/magnitude for vector variable")
 
     preferred_name = variable_config.get("short_name")
     if preferred_name in ds.data_vars:
@@ -270,7 +278,20 @@ def save_tiles_npz(
     out_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
     os.makedirs(out_dir, exist_ok=True)
     npz_path = os.path.join(out_dir, f"{variable_id}.npz")
-    np.savez_compressed(npz_path, mins=mins, maxs=maxs, means=means, hours=np.array(hours, dtype=np.int32))
+    # Determine which stats to persist for this region (default: all) 
+    try:
+        region_stats = repomap.get("TILING_REGIONS", {}).get(region_id, {}).get("stats", ["min", "max", "mean"])  # type: ignore
+    except Exception:
+        region_stats = ["min", "max", "mean"]
+
+    payload: Dict[str, Any] = {"hours": np.array(hours, dtype=np.int32)}
+    if "mean" in region_stats:
+        payload["means"] = means
+    if "min" in region_stats:
+        payload["mins"] = mins
+    if "max" in region_stats:
+        payload["maxs"] = maxs
+    np.savez_compressed(npz_path, **payload)
     with open(os.path.join(out_dir, f"{variable_id}.meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
     return npz_path
@@ -303,7 +324,13 @@ def load_timeseries_for_point(
     lon_0_360 = bool(meta.get("lon_0_360", False))
     d = np.load(npz_path)
     hours = d["hours"]
-    arr = d["means" if stat == "mean" else ("mins" if stat == "min" else "maxs")]
+    # Fallback to means when requested stat is not available
+    key = "means"
+    if stat == "min" and "mins" in d.files:
+        key = "mins"
+    elif stat == "max" and "maxs" in d.files:
+        key = "maxs"
+    arr = d[key]
 
     ny, nx = arr.shape[1], arr.shape[2]
     iy = int(np.floor((lat - lat_min) / meta["resolution_deg"]))
@@ -371,7 +398,13 @@ def load_grid_slice(
         idx = int(np.where(hours == hour)[0][0])
     except Exception:
         raise IndexError(f"Hour {hour} not found in tiles; available: {hours.tolist()}")
-    arr3d = d["means" if stat == "mean" else ("mins" if stat == "min" else "maxs")]
+    # Fallback to means when requested stat is not available
+    key = "means"
+    if stat == "min" and "mins" in d.files:
+        key = "mins"
+    elif stat == "max" and "maxs" in d.files:
+        key = "maxs"
+    arr3d = d[key]
     slice2d = arr3d[idx]
     bounds = {
         "lat_min": meta["lat_min"],

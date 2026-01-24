@@ -48,17 +48,18 @@ class WeatherMap {
     }
 
     setWeatherLayer(locationId, modelId, runId, variableId, hour) {
-        if (this.weatherLayer) {
-            this.map.removeLayer(this.weatherLayer);
-        }
-
         const authParam = typeof apiKeyParam !== 'undefined' ? apiKeyParam : '';
         const tileUrl = `/tiles/${locationId}/${modelId}/${runId}/${variableId}/${hour}/{z}/{x}/{y}.png${authParam}`;
-        this.weatherLayer = L.tileLayer(tileUrl, {
-            opacity: 0.7,
-            maxZoom: 12,
-            minZoom: 4
-        }).addTo(this.map);
+
+        if (this.weatherLayer) {
+            this.weatherLayer.setUrl(tileUrl);
+        } else {
+            this.weatherLayer = L.tileLayer(tileUrl, {
+                opacity: 0.7,
+                maxZoom: 12,
+                minZoom: 4
+            }).addTo(this.map);
+        }
 
         this.currentHour = hour;
         this.locationId = locationId;
