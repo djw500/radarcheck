@@ -99,6 +99,28 @@
         </div>
     </div>
 
+    <!-- Data Table Toggle -->
+    <div class="flex justify-end">
+        <button id="toggleTableBtn" class="text-sm text-primary hover:text-blue-400 font-medium transition-colors flex items-center gap-1">
+            <span class="material-icons-outlined text-base">table_chart</span> Show Data Table
+        </button>
+    </div>
+
+    <!-- Data Table (Hidden by default) -->
+    <div id="dataTableContainer" class="hidden bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left text-slate-500 dark:text-slate-400">
+                <thead class="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700/50 dark:text-slate-400">
+                    <tr>
+                        <th class="px-6 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>
+                        <!-- Headers injected via JS -->
+                    </tr>
+                </thead>
+                <tbody id="dataTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- Model Toggles (Sticky Bottom) -->
     <div class="sticky bottom-6 z-40 flex justify-center w-full px-4">
         <div class="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-slate-200 dark:border-slate-700 p-2 rounded-full shadow-2xl flex items-center gap-3 overflow-x-auto max-w-full no-scrollbar">
@@ -231,12 +253,13 @@ function initChart() {
                     bodyColor: document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#334155',
                     borderColor: document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0',
                     borderWidth: 1,
-                    padding: 10,
+                    padding: window.innerWidth < 640 ? 6 : 10, // Smaller on mobile
                     cornerRadius: 8,
-                    titleFont: { family: 'Inter', weight: '600', size: 13 },
-                    bodyFont: { family: 'Inter', size: 12 },
+                    titleFont: { family: 'Inter', weight: '600', size: window.innerWidth < 640 ? 11 : 13 },
+                    bodyFont: { family: 'Inter', size: window.innerWidth < 640 ? 10 : 12 },
                     displayColors: true,
                     boxPadding: 4,
+                    itemSort: (a, b) => a.datasetIndex - b.datasetIndex, // Sort by dataset order (Latest is 0)
                     callbacks: {
                         title: (items) => {
                             if (!items.length) return '';
@@ -369,12 +392,10 @@ function updateChart(data) {
     // Generate a master timeline (hourly) covering the full range
     // This ensures all datasets have points at the same X-coordinates for the tooltip
     const masterTimeline = [];
-    let currentTime = now.getTime();
     const endTimeMs = endTime.getTime();
-    // Start at the earliest run's start time if it's earlier than 'now', or just stick to the view window
-    // Actually, stick to the view window (now -> +days) for the "scrubbing" experience
-    // Snap to nearest hour
-    currentTime = Math.floor(currentTime / 3600000) * 3600000;
+    
+    // Start at current hour floor
+    let currentTime = Math.floor(now.getTime() / 3600000) * 3600000;
     
     while (currentTime <= endTimeMs) {
         masterTimeline.push(currentTime);
@@ -487,7 +508,59 @@ function updateChart(data) {
     chartInstance.options.scales.x.max = endTime.toISOString();
     
     chartInstance.update();
+    
+    renderTable(datasets, masterTimeline);
 }
+
+function renderTable(datasets, timeline) {
+    const tableBody = document.getElementById('dataTableBody');
+    const tableHeadRow = document.querySelector('#dataTableContainer thead tr');
+    
+    // Clear existing
+    tableBody.innerHTML = '';
+    // Reset headers to just Time
+    tableHeadRow.innerHTML = '<th class="px-6 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>';
+    
+    // Filter to only Latest runs for the table to keep it readable
+    const latestDatasets = datasets.filter(d => d.label.includes('(Latest)') || !d.label.includes('ago'));
+    
+    latestDatasets.forEach(ds => {
+        const th = document.createElement('th');
+        th.className = "px-6 py-3 whitespace-nowrap";
+        th.textContent = ds.label.replace(' (Latest)', '');
+        tableHeadRow.appendChild(th);
+    });
+
+    timeline.forEach((time, idx) => {
+        const date = new Date(time);
+        const tr = document.createElement('tr');
+        tr.className = "bg-white border-b dark:bg-card-dark dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800";
+        
+        const timeCell = document.createElement('td');
+        timeCell.className = "px-6 py-4 font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark";
+        timeCell.textContent = date.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', day: 'numeric' });
+        tr.appendChild(timeCell);
+        
+        latestDatasets.forEach(ds => {
+            const td = document.createElement('td');
+            td.className = "px-6 py-4";
+            const val = ds.data[idx].y;
+            td.textContent = val !== null ? val.toFixed(2) + '"' : '-';
+            tr.appendChild(td);
+        });
+        
+        tableBody.appendChild(tr);
+    });
+}
+
+document.getElementById('toggleTableBtn').addEventListener('click', () => {
+    const container = document.getElementById('dataTableContainer');
+    container.classList.toggle('hidden');
+    const btn = document.getElementById('toggleTableBtn');
+    btn.innerHTML = container.classList.contains('hidden') 
+        ? '<span class="material-icons-outlined text-base">table_chart</span> Show Data Table'
+        : '<span class="material-icons-outlined text-base">expand_less</span> Hide Data Table';
+});
 
 async function loadData(daysOverride = null) {
     if (!currentLat || !currentLon) return;
