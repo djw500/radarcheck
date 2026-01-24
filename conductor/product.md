@@ -19,6 +19,7 @@ Transform Radarcheck from a location-based PNG image viewer into a **tile-based 
 3.  **Tile-Based Architecture:** backend generation of statistical grids for fast querying.
 4.  **AI Summaries:** Intelligent synthesis of complex model data.
 5.  **System Health Dashboard:** `/status` page for monitoring cache completeness, disk usage, and scheduler status.
+6.  **Optimized Build Pipeline:** Cache-first tile generation with metadata validation to eliminate redundant processing.
 
 ## Current State & Limitations
 - **Active UI:** `index.html` (served at `/forecast` or `/`) is the **ONLY** active and supported frontend endpoint.
