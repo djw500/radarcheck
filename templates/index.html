@@ -1,26 +1,783 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Forecast Analysis | RadarCheck</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#0ea5e9", // Sky 500
+                        "background-light": "#f8fafc", // Slate 50
+                        "background-dark": "#0B1120", // Custom deep dark
+                        "card-dark": "#1e293b",
+                        "card-light": "#ffffff",
+                        "hrrr": "#3b82f6", // Blue
+                        "nam_nest": "#ef4444", // Red
+                        "gfs": "#22d3ee", // Cyan
+                        "nbm": "#a855f7", // Purple
+                    },
+                    fontFamily: {
+                        display: ["Inter", "sans-serif"],
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .chart-glow-cyan { filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.5)); }
+        .chart-glow-orange { filter: drop-shadow(0 0 4px rgba(251, 146, 60, 0.5)); }
+        .chart-glow-purple { filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.5)); }
+        .chart-glow-pink { filter: drop-shadow(0 0 4px rgba(236, 72, 153, 0.5)); }
+        .chart-glow-blue { filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.5)); }
+        .chart-glow-red { filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.5)); }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-200 min-h-screen flex flex-col font-display antialiased selection:bg-primary selection:text-white">
 
-{% block title %}HRRR Forecast Visualization{% endblock %}
-
-{% block main_container_class %}locations-container{% endblock %}
-
-{% block content %}
-<h2>Available Locations</h2>
-
-{% if locations %}
-    {% for location in locations %}
-    <div class="location-card">
-        <h3>{{ location.name }}</h3>
-        <p>Model initialized: {{ location.init_time }}</p>
-        <a href="/location/{{ location.id }}" data-location-id="{{ location.id }}">View Forecast</a>
+<!-- Minimal Header -->
+<nav class="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+            <div class="flex items-center gap-2">
+                <span class="material-icons-outlined text-primary text-2xl">ssid_chart</span>
+                <span class="font-bold text-lg tracking-tight">Forecast Analysis</span>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <!-- Location Search -->
+                <div class="relative group">
+                    <button id="searchTrigger" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors">
+                        <span class="material-icons-outlined">search</span>
+                    </button>
+                    <div id="searchContainer" class="absolute right-0 top-12 w-72 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-2 hidden">
+                        <input type="text" id="locationInput" placeholder="Search city..." class="w-full bg-slate-100 dark:bg-slate-900 border-none rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                        <div id="autocompleteList" class="mt-2 max-h-48 overflow-y-auto hidden"></div>
+                        <button id="geolocateBtn" class="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-primary hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md transition-colors">
+                            <span class="material-icons-outlined text-sm">my_location</span> Use My Location
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    {% endfor %}
-{% else %}
-    <p>No forecast data is currently available. Please check back later.</p>
-{% endif %}
-{% endblock %}
+</nav>
 
-{% block scripts %}
-<script src="{{ url_for('static', filename='js/preferences.js') }}"></script>
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
-{% endblock %}
+<main class="flex-grow p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
+    
+    <!-- Location & Controls -->
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h1 class="text-xl md:text-2xl font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span id="locName">Select Location</span>
+                    <span class="text-xs font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded" id="locCoords"></span>
+                </h1>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mt-1" id="statusText">Loading...</p>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row gap-3">
+                <!-- Variable Switcher -->
+                <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto">
+                    <button data-var="asnow" class="var-btn px-4 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap transition">Snow</button>
+                    <button data-var="t2m" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
+                    <button data-var="gust" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
+                </div>
+
+                <!-- Time Period -->
+                <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto">
+                    <button data-days="1" class="period-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">24h</button>
+                    <button data-days="3" class="period-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">3 Days</button>
+                    <button data-days="7" class="period-btn px-4 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap">7 Days</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart Card -->
+    <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm relative h-[60vh] min-h-[400px]">
+        <div class="absolute inset-0 p-4">
+            <canvas id="snowChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Data Table Toggle -->
+    <div class="flex justify-end">
+        <button id="toggleTableBtn" class="text-sm text-primary hover:text-blue-400 font-medium transition-colors flex items-center gap-1">
+            <span class="material-icons-outlined text-base">table_chart</span> Show Data Table
+        </button>
+    </div>
+
+    <!-- Data Table (Hidden by default) -->
+    <div id="dataTableContainer" class="hidden bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left text-slate-500 dark:text-slate-400">
+                <thead class="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700/50 dark:text-slate-400">
+                    <tr>
+                        <th class="px-6 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>
+                        <!-- Headers injected via JS -->
+                    </tr>
+                </thead>
+                <tbody id="dataTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Model Toggles (Sticky Bottom) -->
+    <div class="sticky bottom-6 z-40 flex justify-center w-full px-4">
+        <div class="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-slate-200 dark:border-slate-700 p-2 rounded-full shadow-2xl flex items-center gap-3 overflow-x-auto max-w-full no-scrollbar">
+            
+            <!-- HRRR -->
+            <label class="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none whitespace-nowrap">
+                <input type="checkbox" class="hidden peer model-toggle" value="hrrr" checked>
+                <div class="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full relative peer-checked:bg-hrrr/20 transition-colors">
+                    <div class="w-4 h-4 bg-white dark:bg-slate-400 rounded-full absolute left-0 top-0 shadow-sm transition-all peer-checked:left-4 peer-checked:bg-hrrr"></div>
+                </div>
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-200">HRRR</span>
+            </label>
+
+            <!-- NAM -->
+            <label class="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none whitespace-nowrap">
+                <input type="checkbox" class="hidden peer model-toggle" value="nam_nest" checked>
+                <div class="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full relative peer-checked:bg-nam_nest/20 transition-colors">
+                    <div class="w-4 h-4 bg-white dark:bg-slate-400 rounded-full absolute left-0 top-0 shadow-sm transition-all peer-checked:left-4 peer-checked:bg-nam_nest"></div>
+                </div>
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-200">NAM</span>
+            </label>
+
+            <!-- GFS -->
+            <label class="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none whitespace-nowrap">
+                <input type="checkbox" class="hidden peer model-toggle" value="gfs" checked>
+                <div class="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full relative peer-checked:bg-gfs/20 transition-colors">
+                    <div class="w-4 h-4 bg-white dark:bg-slate-400 rounded-full absolute left-0 top-0 shadow-sm transition-all peer-checked:left-4 peer-checked:bg-gfs"></div>
+                </div>
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-200">GFS</span>
+            </label>
+
+            <!-- NBM -->
+            <label class="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none whitespace-nowrap">
+                <input type="checkbox" class="hidden peer model-toggle" value="nbm" checked>
+                <div class="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full relative peer-checked:bg-nbm/20 transition-colors">
+                    <div class="w-4 h-4 bg-white dark:bg-slate-400 rounded-full absolute left-0 top-0 shadow-sm transition-all peer-checked:left-4 peer-checked:bg-nbm"></div>
+                </div>
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-200">NBM</span>
+            </label>
+
+        </div>
+    </div>
+
+</main>
+
+<script>
+// --- Configuration ---
+const STORAGE_KEY_LAST_LOC = 'radarcheck_last_location';
+const STORAGE_KEY_LAST_VAR = 'radarcheck_last_variable';
+let chartInstance = null;
+let currentLat = null;
+let currentLon = null;
+let currentName = null;
+let currentData = null; // Store fetched data locally for toggling
+let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR) || 'asnow';
+
+const MODEL_CONFIG = {
+    'hrrr': { color: '#3b82f6', glow: 'chart-glow-blue' },     // Blue
+    'nam_nest': { color: '#ef4444', glow: 'chart-glow-red' }, // Red
+    'gfs': { color: '#22d3ee', glow: 'chart-glow-cyan' },     // Cyan
+    'nbm': { color: '#a855f7', glow: 'chart-glow-purple' },   // Purple
+    'other': { color: '#94a3b8', glow: '' }                   // Slate
+};
+
+const VAR_CONFIG = {
+    'asnow': { label: 'Snowfall', unit: '"', stepSize: 6, beginAtZero: true },
+    't2m': { label: 'Temperature', unit: '°F', stepSize: 10, beginAtZero: false },
+    'gust': { label: 'Wind Gust', unit: ' mph', stepSize: 10, beginAtZero: true }
+};
+
+// --- UI Interaction ---
+document.getElementById('searchTrigger').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const container = document.getElementById('searchContainer');
+    container.classList.toggle('hidden');
+    if (!container.classList.contains('hidden')) {
+        document.getElementById('locationInput').focus();
+    }
+});
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#searchContainer') && !e.target.closest('#searchTrigger')) {
+        document.getElementById('searchContainer').classList.add('hidden');
+    }
+});
+
+document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        // Update active state
+        document.querySelectorAll('.period-btn').forEach(b => {
+            b.classList.remove('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+            b.classList.add('text-slate-600', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white');
+        });
+        e.target.classList.remove('text-slate-600', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white');
+        e.target.classList.add('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+        
+        loadData(e.target.dataset.days);
+    });
+});
+
+document.querySelectorAll('.var-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const newVar = e.target.dataset.var;
+        if (newVar === currentVariable) return;
+
+        currentVariable = newVar;
+        localStorage.setItem(STORAGE_KEY_LAST_VAR, currentVariable);
+
+        updateVarButtons();
+        loadData();
+    });
+});
+
+function updateVarButtons() {
+    document.querySelectorAll('.var-btn').forEach(b => {
+        if (b.dataset.var === currentVariable) {
+            b.classList.remove('text-slate-600', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white');
+            b.classList.add('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+        } else {
+            b.classList.add('text-slate-600', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white');
+            b.classList.remove('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+        }
+    });
+}
+
+document.querySelectorAll('.model-toggle').forEach(toggle => {
+    toggle.addEventListener('change', () => {
+        if (currentData) updateChart(currentData);
+    });
+});
+
+// --- API Helpers ---
+async function fetchJSON(url) {
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    return res.json();
+}
+
+// --- Chart Logic ---
+function initChart() {
+    const ctx = document.getElementById('snowChart').getContext('2d');
+    
+    // Custom Chart.js defaults for dark/light mode
+    Chart.defaults.color = document.documentElement.classList.contains('dark') ? '#94a3b8' : '#64748b';
+    Chart.defaults.borderColor = document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0';
+
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [] },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'x', // Align by X-axis value (time), not dataset index
+                axis: 'x',
+                intersect: false,
+            },
+            plugins: {
+                legend: { display: false }, // Using custom toggles instead
+                tooltip: {
+                    backgroundColor: document.documentElement.classList.contains('dark') ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                    titleColor: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f1742',
+                    bodyColor: document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#334155',
+                    borderColor: document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0',
+                    borderWidth: 1,
+                    padding: window.innerWidth < 640 ? 6 : 10, // Smaller on mobile
+                    cornerRadius: 8,
+                    titleFont: { family: 'Inter', weight: '600', size: window.innerWidth < 640 ? 11 : 13 },
+                    bodyFont: { family: 'Inter', size: window.innerWidth < 640 ? 10 : 12 },
+                    displayColors: true,
+                    boxPadding: 4,
+                    itemSort: (a, b) => a.datasetIndex - b.datasetIndex, // Sort by dataset order (Latest is 0)
+                    callbacks: {
+                        title: (items) => {
+                            if (!items.length) return '';
+                            const date = new Date(items[0].parsed.x);
+                            return date.toLocaleString('en-US', { 
+                                weekday: 'short', month: 'short', day: 'numeric', 
+                                hour: 'numeric'
+                            });
+                        },
+                        label: (context) => {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += context.parsed.y.toFixed(1) + VAR_CONFIG[currentVariable].unit;
+                            }
+                            return label;
+                        }
+                    }
+                },
+                zoom: {
+                    zoom: {
+                        wheel: { enabled: true },
+                        pinch: { enabled: true },
+                        mode: 'x',
+                    },
+                    pan: {
+                        enabled: true,
+                        mode: 'x',
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'hour',
+                        stepSize: 6, // Force 6-hour tick intervals
+                        displayFormats: { hour: 'h a' },
+                        tooltipFormat: 'EEE MMM d, h:mm a'
+                    },
+                    ticks: {
+                        maxRotation: 0,
+                        autoSkip: false, // Don't skip - we control with stepSize
+                        font: { size: 11 },
+                        callback: function(value) {
+                            const d = new Date(value);
+                            const h = d.getHours();
+                            // Show Day Name + Date at midnight, otherwise just time
+                            if (h === 0) {
+                                return [d.toLocaleString('en-US', { hour: 'numeric' }), d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })];
+                            }
+                            return d.toLocaleString('en-US', { hour: 'numeric' });
+                        }
+                    },
+                    grid: {
+                        display: true,
+                        color: (context) => {
+                            if (context.tick && context.tick.value) {
+                                const date = new Date(context.tick.value);
+                                const h = date.getHours();
+                                const isDark = document.documentElement.classList.contains('dark');
+
+                                // Midnight: Thick/Dark
+                                if (h === 0) return isDark ? '#475569' : '#94a3b8';
+
+                                // 6-hour intervals (6, 12, 18): Medium/Light
+                                if (h % 6 === 0) return isDark ? 'rgba(71, 85, 105, 0.4)' : 'rgba(203, 213, 225, 0.4)';
+                            }
+                            return 'transparent';
+                        },
+                        lineWidth: (context) => {
+                            if (context.tick && context.tick.value) {
+                                const h = new Date(context.tick.value).getHours();
+                                if (h === 0) return 2;
+                                if (h % 6 === 0) return 1;
+                            }
+                            return 0;
+                        }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { borderDash: [4, 4] },
+                    title: { display: false } // Minimal look
+                }
+            }
+        }
+    });
+}
+
+function updateChart(data) {
+    if (!chartInstance) initChart();
+    
+    // Get active models from toggles
+    const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
+    
+    // Flatten runs
+    const runs = Object.values(data.runs).filter(r => activeModels.includes(r.model_id));
+    
+    // Sort runs by init time descending
+    runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+
+    const latestRunByModel = {};
+    runs.forEach(run => {
+        if (!latestRunByModel[run.model_id]) {
+            latestRunByModel[run.model_id] = run.run_id;
+        }
+    });
+
+    const latestInit = Math.max(...runs.map(r => new Date(r.init_time).getTime()));
+
+    // Filter out potential duplicates (same model, same run_id)
+    const uniqueRuns = [];
+    const seenRuns = new Set();
+    runs.forEach(r => {
+        const key = `${r.model_id}|${r.run_id}`;
+        if (!seenRuns.has(key)) {
+            seenRuns.add(key);
+            uniqueRuns.push(r);
+        }
+    });
+    
+    // Calculate global time range for X-axis scaling based on selected period
+    const now = new Date();
+    const selectedDays = parseInt(document.querySelector('.period-btn.bg-primary').dataset.days);
+    const endTime = new Date(now.getTime() + selectedDays * 24 * 60 * 60 * 1000);
+
+    // Generate a master timeline (hourly) covering the full range
+    // This ensures all datasets have points at the same X-coordinates for the tooltip
+    const masterTimeline = [];
+    const endTimeMs = endTime.getTime();
+    
+    // Start at current hour floor
+    let currentTime = Math.floor(now.getTime() / 3600000) * 3600000;
+    
+    while (currentTime <= endTimeMs) {
+        masterTimeline.push(currentTime);
+        currentTime += 3600000; // +1 hour
+    }
+
+    // Helper to interpolate value at a specific time
+    const interpolate = (series, targetTime) => {
+        if (!series || !series.length) return null;
+        
+        // Find surrounding points
+        // Series is sorted by time? It should be from the API, but let's assume yes or sort it.
+        // Assuming series is [{valid_time: 'ISO', value: 1.2}, ...]
+        
+        // Convert series times to timestamps once for perf could be better, but map is fast enough
+        const times = series.map(p => new Date(p.valid_time).getTime());
+        
+        // Exact match?
+        const idx = times.indexOf(targetTime);
+        if (idx !== -1) return series[idx].value;
+        
+        // Find left and right neighbors
+        let leftIdx = -1;
+        let rightIdx = -1;
+        for (let i = 0; i < times.length; i++) {
+            if (times[i] < targetTime) leftIdx = i;
+            if (times[i] > targetTime) {
+                rightIdx = i;
+                break;
+            }
+        }
+        
+        if (leftIdx === -1 || rightIdx === -1) return null; // Out of bounds - Do not extrapolate
+        
+        // Linear interp
+        const t1 = times[leftIdx];
+        const v1 = series[leftIdx].value;
+        const t2 = times[rightIdx];
+        const v2 = series[rightIdx].value;
+        
+        const fraction = (targetTime - t1) / (t2 - t1);
+        return v1 + (v2 - v1) * fraction;
+    };
+
+    const datasets = uniqueRuns.map((run) => {
+        const isLatest = latestRunByModel[run.model_id] === run.run_id;
+        
+        const modelConf = MODEL_CONFIG[run.model_id] || MODEL_CONFIG['other'];
+        const modelName = run.model_id.toUpperCase().replace('_', ' ');
+        
+        // Calculate age for ghosting (transparency)
+        const runDate = new Date(run.init_time);
+        const ageHours = (latestInit - runDate.getTime()) / 3600000;
+        
+        let opacity = 1.0;
+        let lineWidth = 4;
+        let borderDash = [];
+        let label = modelName;
+
+        if (!isLatest) {
+            if (ageHours < 12) {
+                opacity = 0.5;
+                lineWidth = 2.5;
+            } else {
+                opacity = 0.2;
+                lineWidth = 2;
+            }
+            opacity = Math.max(0.1, opacity - (ageHours / 100)); 
+            label += ` (${Math.round(ageHours)}h ago)`;
+        } else {
+            label += " (Latest)";
+        }
+
+        const hex = modelConf.color.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+        const color = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+
+        // Resample data to master timeline
+        // This creates a point for every hour, interpolating if necessary
+        const resampledData = masterTimeline.map(t => ({
+            x: t,
+            y: interpolate(run.series, t)
+        }));
+
+        return {
+            label: label,
+            data: resampledData,
+            borderColor: color,
+            backgroundColor: color,
+            borderWidth: lineWidth,
+            borderDash: borderDash,
+            pointRadius: 0, // Hide points for clean line
+            pointHoverRadius: 0, // No big dots on hover, rely on vertical line
+            fill: false,
+            tension: 0.3,
+            order: isLatest ? 0 : 1,
+            spanGaps: true // Draw lines over nulls if any remain
+        };
+    });
+
+    //Sort datasets so latest runs are drawn on top
+    datasets.sort((a, b) => b.order - a.order);
+
+    chartInstance.data.datasets = datasets;
+    
+    // Explicitly set X-axis limits to enforce the "Forecast Up To" selection
+    chartInstance.options.scales.x.min = now.toISOString();
+    chartInstance.options.scales.x.max = endTime.toISOString();
+    
+    // Update Y-axis based on variable config
+    const varCfg = VAR_CONFIG[currentVariable];
+    chartInstance.options.scales.y.beginAtZero = varCfg.beginAtZero;
+
+    chartInstance.update();
+
+    renderTable(data, masterTimeline);
+}
+
+function renderTable(data, timeline) {
+    const tableBody = document.getElementById('dataTableBody');
+    const tableHeadRow = document.querySelector('#dataTableContainer thead tr');
+
+    // Clear existing
+    tableBody.innerHTML = '';
+    tableHeadRow.innerHTML = '<th class="px-4 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>';
+
+    // Get active models from toggles
+    const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
+
+    // Group runs by model
+    const runsByModel = {};
+    Object.values(data.runs).forEach(run => {
+        if (!activeModels.includes(run.model_id)) return;
+        if (!runsByModel[run.model_id]) runsByModel[run.model_id] = [];
+        runsByModel[run.model_id].push(run);
+    });
+
+    // For each model, select latest 3 runs, always retaining a synoptic (00Z or 12Z) run
+    const SYNOPTIC_HOURS = ['00', '12'];
+    const selectedRuns = [];
+
+    Object.entries(runsByModel).forEach(([modelId, runs]) => {
+        // Sort by init_time descending (newest first)
+        runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+
+        // Extract run hour from run_id (e.g., "2026012318" -> "18")
+        const getRunHour = (run) => run.run_id.slice(-2);
+
+        // Find synoptic runs and non-synoptic runs
+        const synopticRuns = runs.filter(r => SYNOPTIC_HOURS.includes(getRunHour(r)));
+        const nonSynopticRuns = runs.filter(r => !SYNOPTIC_HOURS.includes(getRunHour(r)));
+
+        // Take latest 2 non-synoptic + latest synoptic (or just latest 3 if no synoptic)
+        let selected = [];
+        if (synopticRuns.length > 0) {
+            selected = nonSynopticRuns.slice(0, 2);
+            selected.push(synopticRuns[0]); // Add latest synoptic
+        } else {
+            selected = runs.slice(0, 3);
+        }
+
+        // Sort selected by init_time descending for display
+        selected.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+        selected.forEach(run => selectedRuns.push({ ...run, modelId }));
+    });
+
+    // Sort selected runs by model order then by init time
+    const modelOrder = ['hrrr', 'nam_nest', 'gfs', 'nbm'];
+    selectedRuns.sort((a, b) => {
+        const orderA = modelOrder.indexOf(a.modelId);
+        const orderB = modelOrder.indexOf(b.modelId);
+        if (orderA !== orderB) return orderA - orderB;
+        return new Date(b.init_time) - new Date(a.init_time);
+    });
+
+    // Build header with model groups
+    const modelColors = {
+        'hrrr': '#3b82f6',
+        'nam_nest': '#ef4444',
+        'gfs': '#22d3ee',
+        'nbm': '#a855f7'
+    };
+
+    selectedRuns.forEach(run => {
+        const th = document.createElement('th');
+        th.className = "px-3 py-2 text-xs whitespace-nowrap";
+        const runHour = run.run_id.slice(-2) + 'Z';
+        const isSynoptic = SYNOPTIC_HOURS.includes(run.run_id.slice(-2));
+        const color = modelColors[run.modelId] || '#94a3b8';
+        // Format date from init_time (e.g., "Jan 23")
+        const initDate = new Date(run.init_time);
+        const dateStr = initDate.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+        th.innerHTML = `<span style="color: ${color}">${run.model_id.toUpperCase().replace('_', ' ')}</span><br><span class="text-slate-500 font-normal">${dateStr} ${runHour}${isSynoptic ? '*' : ''}</span>`;
+        tableHeadRow.appendChild(th);
+    });
+
+    // Precompute interpolated values for each run at each timeline point
+    const runData = selectedRuns.map(run => {
+        return timeline.map(t => interpolateValue(run.series, t));
+    });
+
+    // Render rows (every 3 hours to keep table readable)
+    const HOUR_STEP = 3;
+    timeline.forEach((time, idx) => {
+        if (idx % HOUR_STEP !== 0) return; // Skip to show every 3 hours
+
+        const date = new Date(time);
+        const tr = document.createElement('tr');
+        tr.className = "bg-white border-b dark:bg-card-dark dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800";
+
+        // Time cell
+        const timeCell = document.createElement('td');
+        timeCell.className = "px-4 py-2 text-xs font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark";
+        const h = date.getHours();
+        if (h === 0) {
+            timeCell.innerHTML = `<span class="font-bold">${date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span><br>12 AM`;
+        } else {
+            timeCell.textContent = date.toLocaleString('en-US', { hour: 'numeric' });
+        }
+        tr.appendChild(timeCell);
+
+        // Value cells for each run
+        runData.forEach((data, runIdx) => {
+            const td = document.createElement('td');
+            td.className = "px-3 py-2 text-xs text-center";
+            const val = data[idx];
+            if (val !== null) {
+                td.textContent = val.toFixed(1) + VAR_CONFIG[currentVariable].unit;
+            } else {
+                td.textContent = '-';
+                td.classList.add('text-slate-400');
+            }
+            tr.appendChild(td);
+        });
+
+        tableBody.appendChild(tr);
+    });
+}
+
+document.getElementById('toggleTableBtn').addEventListener('click', () => {
+    const container = document.getElementById('dataTableContainer');
+    container.classList.toggle('hidden');
+    const btn = document.getElementById('toggleTableBtn');
+    btn.innerHTML = container.classList.contains('hidden') 
+        ? '<span class="material-icons-outlined text-base">table_chart</span> Show Data Table'
+        : '<span class="material-icons-outlined text-base">expand_less</span> Hide Data Table';
+});
+
+async function loadData(daysOverride = null) {
+    if (!currentLat || !currentLon) return;
+    
+    updateVarButtons();
+
+    const days = daysOverride || document.querySelector('.period-btn.bg-primary').dataset.days;
+    document.getElementById('statusText').textContent = 'Updating forecast...';
+    
+    try {
+        const data = await fetchJSON(`/api/timeseries/multirun?lat=${currentLat}&lon=${currentLon}&model=all&variable=${currentVariable}&days=${days}`);
+        currentData = data; // Store for toggling
+        
+        updateChart(data);
+        const modelCount = new Set(Object.values(data.runs).map(r => r.model_id)).size;
+        document.getElementById('statusText').textContent = `Forecast from ${modelCount} models • Live 12Z`;
+        
+    } catch (e) {
+        document.getElementById('statusText').textContent = `Error: ${e.message}`;
+        console.error(e);
+    }
+}
+
+function setLocation(lat, lon, name) {
+    currentLat = parseFloat(lat).toFixed(4);
+    currentLon = parseFloat(lon).toFixed(4);
+    currentName = name;
+    
+    document.getElementById('locName').textContent = name;
+    document.getElementById('locCoords').textContent = `${currentLat}, ${currentLon}`;
+    
+    localStorage.setItem(STORAGE_KEY_LAST_LOC, JSON.stringify({ lat, lon, name }));
+    loadData();
+}
+
+// --- Search Logic (Nominatim) ---
+let searchTimeout;
+document.getElementById('locationInput').addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    const val = e.target.value.trim();
+    const list = document.getElementById('autocompleteList');
+    
+    if (val.length < 3) { list.classList.add('hidden'); return; }
+    
+    searchTimeout = setTimeout(async () => {
+        try {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=us&limit=5`;
+            const res = await fetch(url);
+            const results = await res.json();
+            
+            list.innerHTML = results.map(r => `
+                <div class="autocomplete-item p-2 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer rounded" 
+                     data-lat="${r.lat}" data-lon="${r.lon}" data-name="${r.display_name.split(',')[0]}">
+                    <div class="font-medium text-slate-800 dark:text-slate-200">${r.display_name.split(',')[0]}</div>
+                    <div class="text-xs text-slate-500">${r.display_name}</div>
+                </div>
+            `).join('');
+            list.classList.remove('hidden');
+        } catch (e) {}
+    }, 300);
+});
+
+document.getElementById('autocompleteList').addEventListener('click', (e) => {
+    const item = e.target.closest('.autocomplete-item');
+    if (item) {
+        setLocation(item.dataset.lat, item.dataset.lon, item.dataset.name);
+        document.getElementById('searchContainer').classList.add('hidden');
+    }
+});
+
+document.getElementById('geolocateBtn').addEventListener('click', () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {
+            setLocation(pos.coords.latitude, pos.coords.longitude, "My Location");
+            document.getElementById('searchContainer').classList.add('hidden');
+        }
+    );
+});
+
+// Init
+const last = JSON.parse(localStorage.getItem(STORAGE_KEY_LAST_LOC));
+if (last) {
+    setLocation(last.lat, last.lon, last.name);
+} else {
+    setLocation(40.0488, -75.3890, "Philadelphia");
+}
+
+</script>
+</body>
+</html>

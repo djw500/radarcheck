@@ -1661,11 +1661,6 @@ def forecast_view():
     return render_template("forecast.html", locations=get_available_locations())
 
 
-@app.route("/snow")
-@require_api_key
-def snow_view():
-    """Accumulated snowfall comparison plot."""
-    return render_template("snow.html", locations=get_available_locations())
 
 
 @app.route("/summary/<location_id>")
