@@ -298,39 +298,39 @@ function initChart() {
                     type: 'time',
                     time: {
                         unit: 'hour',
+                        stepSize: 6, // Force 6-hour tick intervals
                         displayFormats: { hour: 'h a' },
                         tooltipFormat: 'EEE MMM d, h:mm a'
                     },
                     ticks: {
                         maxRotation: 0,
-                        autoSkip: true,
-                        maxTicksLimit: 12, // Avoid clutter
+                        autoSkip: false, // Don't skip - we control with stepSize
                         font: { size: 11 },
                         callback: function(value) {
                             const d = new Date(value);
                             const h = d.getHours();
-                            // Show Day Name + Date at midnight and noon, otherwise just time
-                            if (h === 0 || h === 12) {
-                                return [d.toLocaleString('en-US', { hour: 'numeric' }), d.toLocaleString('en-US', { weekday: 'short', day: 'numeric' })];
+                            // Show Day Name + Date at midnight, otherwise just time
+                            if (h === 0) {
+                                return [d.toLocaleString('en-US', { hour: 'numeric' }), d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })];
                             }
                             return d.toLocaleString('en-US', { hour: 'numeric' });
                         }
                     },
-                    grid: { 
+                    grid: {
                         display: true,
                         color: (context) => {
                             if (context.tick && context.tick.value) {
                                 const date = new Date(context.tick.value);
                                 const h = date.getHours();
                                 const isDark = document.documentElement.classList.contains('dark');
-                                
+
                                 // Midnight: Thick/Dark
                                 if (h === 0) return isDark ? '#475569' : '#94a3b8';
-                                
+
                                 // 6-hour intervals (6, 12, 18): Medium/Light
                                 if (h % 6 === 0) return isDark ? 'rgba(71, 85, 105, 0.4)' : 'rgba(203, 213, 225, 0.4)';
                             }
-                            return 'transparent'; 
+                            return 'transparent';
                         },
                         lineWidth: (context) => {
                             if (context.tick && context.tick.value) {
@@ -508,49 +508,150 @@ function updateChart(data) {
     chartInstance.options.scales.x.max = endTime.toISOString();
     
     chartInstance.update();
-    
-    renderTable(datasets, masterTimeline);
+
+    renderTable(data, masterTimeline);
 }
 
-function renderTable(datasets, timeline) {
+function renderTable(data, timeline) {
     const tableBody = document.getElementById('dataTableBody');
     const tableHeadRow = document.querySelector('#dataTableContainer thead tr');
-    
+
     // Clear existing
     tableBody.innerHTML = '';
-    // Reset headers to just Time
-    tableHeadRow.innerHTML = '<th class="px-6 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>';
-    
-    // Filter to only Latest runs for the table to keep it readable
-    const latestDatasets = datasets.filter(d => d.label.includes('(Latest)') || !d.label.includes('ago'));
-    
-    latestDatasets.forEach(ds => {
+    tableHeadRow.innerHTML = '<th class="px-4 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>';
+
+    // Get active models from toggles
+    const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
+
+    // Group runs by model
+    const runsByModel = {};
+    Object.values(data.runs).forEach(run => {
+        if (!activeModels.includes(run.model_id)) return;
+        if (!runsByModel[run.model_id]) runsByModel[run.model_id] = [];
+        runsByModel[run.model_id].push(run);
+    });
+
+    // For each model, select latest 3 runs, always retaining a synoptic (00Z or 12Z) run
+    const SYNOPTIC_HOURS = ['00', '12'];
+    const selectedRuns = [];
+
+    Object.entries(runsByModel).forEach(([modelId, runs]) => {
+        // Sort by init_time descending (newest first)
+        runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+
+        // Extract run hour from run_id (e.g., "2026012318" -> "18")
+        const getRunHour = (run) => run.run_id.slice(-2);
+
+        // Find synoptic runs and non-synoptic runs
+        const synopticRuns = runs.filter(r => SYNOPTIC_HOURS.includes(getRunHour(r)));
+        const nonSynopticRuns = runs.filter(r => !SYNOPTIC_HOURS.includes(getRunHour(r)));
+
+        // Take latest 2 non-synoptic + latest synoptic (or just latest 3 if no synoptic)
+        let selected = [];
+        if (synopticRuns.length > 0) {
+            selected = nonSynopticRuns.slice(0, 2);
+            selected.push(synopticRuns[0]); // Add latest synoptic
+        } else {
+            selected = runs.slice(0, 3);
+        }
+
+        // Sort selected by init_time descending for display
+        selected.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+        selected.forEach(run => selectedRuns.push({ ...run, modelId }));
+    });
+
+    // Sort selected runs by model order then by init time
+    const modelOrder = ['hrrr', 'nam_nest', 'gfs', 'nbm'];
+    selectedRuns.sort((a, b) => {
+        const orderA = modelOrder.indexOf(a.modelId);
+        const orderB = modelOrder.indexOf(b.modelId);
+        if (orderA !== orderB) return orderA - orderB;
+        return new Date(b.init_time) - new Date(a.init_time);
+    });
+
+    // Build header with model groups
+    const modelColors = {
+        'hrrr': '#3b82f6',
+        'nam_nest': '#ef4444',
+        'gfs': '#22d3ee',
+        'nbm': '#a855f7'
+    };
+
+    selectedRuns.forEach(run => {
         const th = document.createElement('th');
-        th.className = "px-6 py-3 whitespace-nowrap";
-        th.textContent = ds.label.replace(' (Latest)', '');
+        th.className = "px-3 py-2 text-xs whitespace-nowrap";
+        const runHour = run.run_id.slice(-2) + 'Z';
+        const isSynoptic = SYNOPTIC_HOURS.includes(run.run_id.slice(-2));
+        const color = modelColors[run.modelId] || '#94a3b8';
+        // Format date from init_time (e.g., "Jan 23")
+        const initDate = new Date(run.init_time);
+        const dateStr = initDate.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+        th.innerHTML = `<span style="color: ${color}">${run.model_id.toUpperCase().replace('_', ' ')}</span><br><span class="text-slate-500 font-normal">${dateStr} ${runHour}${isSynoptic ? '*' : ''}</span>`;
         tableHeadRow.appendChild(th);
     });
 
+    // Precompute interpolated values for each run at each timeline point
+    const runData = selectedRuns.map(run => {
+        return timeline.map(t => interpolateValue(run.series, t));
+    });
+
+    // Render rows (every 3 hours to keep table readable)
+    const HOUR_STEP = 3;
     timeline.forEach((time, idx) => {
+        if (idx % HOUR_STEP !== 0) return; // Skip to show every 3 hours
+
         const date = new Date(time);
         const tr = document.createElement('tr');
         tr.className = "bg-white border-b dark:bg-card-dark dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800";
-        
+
+        // Time cell
         const timeCell = document.createElement('td');
-        timeCell.className = "px-6 py-4 font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark";
-        timeCell.textContent = date.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', day: 'numeric' });
+        timeCell.className = "px-4 py-2 text-xs font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark";
+        const h = date.getHours();
+        if (h === 0) {
+            timeCell.innerHTML = `<span class="font-bold">${date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span><br>12 AM`;
+        } else {
+            timeCell.textContent = date.toLocaleString('en-US', { hour: 'numeric' });
+        }
         tr.appendChild(timeCell);
-        
-        latestDatasets.forEach(ds => {
+
+        // Value cells for each run
+        runData.forEach((data, runIdx) => {
             const td = document.createElement('td');
-            td.className = "px-6 py-4";
-            const val = ds.data[idx].y;
-            td.textContent = val !== null ? val.toFixed(2) + '"' : '-';
+            td.className = "px-3 py-2 text-xs text-center";
+            const val = data[idx];
+            if (val !== null) {
+                td.textContent = val.toFixed(1) + '"';
+            } else {
+                td.textContent = '-';
+                td.classList.add('text-slate-400');
+            }
             tr.appendChild(td);
         });
-        
+
         tableBody.appendChild(tr);
     });
+}
+
+// Helper for table interpolation
+function interpolateValue(series, targetTime) {
+    if (!series || !series.length) return null;
+
+    const times = series.map(p => new Date(p.valid_time).getTime());
+    const idx = times.indexOf(targetTime);
+    if (idx !== -1) return series[idx].value;
+
+    let leftIdx = -1, rightIdx = -1;
+    for (let i = 0; i < times.length; i++) {
+        if (times[i] < targetTime) leftIdx = i;
+        if (times[i] > targetTime) { rightIdx = i; break; }
+    }
+
+    if (leftIdx === -1 || rightIdx === -1) return null;
+
+    const t1 = times[leftIdx], v1 = series[leftIdx].value;
+    const t2 = times[rightIdx], v2 = series[rightIdx].value;
+    return v1 + (v2 - v1) * (targetTime - t1) / (t2 - t1);
 }
 
 document.getElementById('toggleTableBtn').addEventListener('click', () => {

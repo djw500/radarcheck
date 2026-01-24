@@ -11,6 +11,8 @@
   },
   "jest": {
     "testEnvironment": "jsdom",
-    "testMatch": ["**/tests/js/**/*.test.js"]
+    "testMatch": [
+      "**/tests/js/**/*.test.js"
+    ]
   }
 }

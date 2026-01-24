@@ -197,14 +197,19 @@ def _derive_asnow_timeseries_from_tiles(
 
     # Align hours across available series using union to avoid losing data from sparse models (e.g. GFS)
     # We use union instead of intersection, then interpolate missing values.
+    # CRITICAL: Limit to APCP's range to avoid extrapolation beyond actual precip data.
     all_hour_sets = [h_apcp]
     if h_csnow is not None:
         all_hour_sets.append(h_csnow)
     if h_t2m is not None:
         all_hour_sets.append(h_t2m)
-    
+
     common_hours = np.unique(np.concatenate(all_hour_sets))
     common_hours = np.sort(common_hours)
+
+    # Limit common_hours to APCP's actual data range to prevent extrapolation
+    apcp_min, apcp_max = h_apcp.min(), h_apcp.max()
+    common_hours = common_hours[(common_hours >= apcp_min) & (common_hours <= apcp_max)]
 
     if common_hours.size == 0:
         return None, None
@@ -212,14 +217,16 @@ def _derive_asnow_timeseries_from_tiles(
     def align_and_interpolate(h, v, target_h, fill_value=0.0):
         if h is None or v is None:
             return np.full_like(target_h, fill_value, dtype=float)
-        
+
         # Drop NaNs so interp can bridge gaps linearly instead of creating steps
         h_arr = np.array(h, dtype=float)
         v_arr = np.array(v, dtype=float)
         mask = ~np.isnan(v_arr)
         if not np.any(mask):
             return np.full_like(target_h, fill_value, dtype=float)
-            
+
+        # Interpolate within range; left fill for initial gap, hold last value on right
+        # (extrapolation on right is now prevented by common_hours limit above)
         return np.interp(target_h, h_arr[mask], v_arr[mask], left=fill_value, right=v_arr[mask][-1])
 
     # Build aligned vectors using interpolation

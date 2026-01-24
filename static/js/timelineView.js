@@ -9,7 +9,6 @@ function createTimeline() {
     // Process the pre-loaded data
     Object.values(validTimes).forEach(runData => {
         runData.forEach(vt => {
-            // Create a simplified time key (just date and hour)
             const validTime = new Date(vt.valid_time);
             const timeKey = `${validTime.getFullYear()}-${(validTime.getMonth() + 1).toString().padStart(2, '0')}-${validTime.getDate().toString().padStart(2, '0')} ${validTime.getHours().toString().padStart(2, '0')}:00`;
             allValidTimes.add(timeKey);
@@ -17,44 +16,72 @@ function createTimeline() {
     });
 
     // Sort valid times
-    const sortedTimes = Array.from(allValidTimes).sort();
+    const sortedKeys = Array.from(allValidTimes).sort();
+
+    // Build header meta with day grouping
+    const header = [];
+    let currentDay = null;
+    let dayIndex = -1;
+    sortedKeys.forEach(timeKey => {
+        const [dateStr, hourStr] = timeKey.split(' ');
+        if (dateStr !== currentDay) {
+            currentDay = dateStr;
+            dayIndex += 1;
+        }
+        header.push({ timeKey, dateStr, hourStr, dayIndex, isDayStart: hourStr.startsWith('00') });
+    });
 
     // Clear existing rows and header
     timeline.querySelectorAll('.timeline-row').forEach(row => row.remove());
     timelineHeader.innerHTML = '';
-    sortedTimes.forEach(timeKey => {
+    header.forEach(h => {
         const cell = document.createElement('div');
         cell.className = 'timeline-header-cell';
-        cell.textContent = timeKey.split(' ')[1]; // Just show the time part
-        cell.title = timeKey;
+        cell.textContent = h.hourStr; // show hour
+        cell.title = `${h.dateStr} ${h.hourStr}`;
+        if (h.isDayStart) cell.classList.add('day-start');
+        if (h.dayIndex % 2 === 1) cell.classList.add('day-even');
+        // Also show date inline for day starts
+        if (h.isDayStart) {
+            const [y, m, d] = h.dateStr.split('-');
+            const dateLabel = `${m}/${d}`;
+            cell.setAttribute('data-date', dateLabel);
+        }
         timelineHeader.appendChild(cell);
     });
 
     // Create a row for each run
+    const latestInit = Math.max(...timelineData.map(r => new Date(r.init_time).getTime()));
     timelineData.forEach(run => {
         const row = document.createElement('div');
         row.className = 'timeline-row';
 
         const label = document.createElement('div');
         label.className = 'timeline-label';
-        label.textContent = new Date(run.init_time).toLocaleString();
+        const dt = new Date(run.init_time);
+        const z = dt.getUTCHours().toString().padStart(2, '0');
+        const agoHrs = Math.round((latestInit - dt.getTime()) / 3600000);
+        const agoLabel = agoHrs === 0 ? 'LATEST' : `${agoHrs}h ago`;
+        label.textContent = `${dt.toLocaleDateString()} ${z}Z • ${agoLabel}`;
         row.appendChild(label);
 
         const cells = document.createElement('div');
         cells.className = 'timeline-cells';
 
-        sortedTimes.forEach(timeKey => {
+        header.forEach(h => {
             const cell = document.createElement('div');
             cell.className = 'timeline-cell';
-            cell.dataset.timeKey = timeKey;
+            cell.dataset.timeKey = h.timeKey;
             cell.dataset.runId = run.run_id;
+            if (h.isDayStart) cell.classList.add('day-start');
+            if (h.dayIndex % 2 === 1) cell.classList.add('day-even');
 
             // Check if this run has data for this time
             const runValidTimes = validTimes[run.run_id] || [];
             const hasData = runValidTimes.some(vt => {
                 const validTime = new Date(vt.valid_time);
                 const vtTimeKey = `${validTime.getFullYear()}-${(validTime.getMonth() + 1).toString().padStart(2, '0')}-${validTime.getDate().toString().padStart(2, '0')} ${validTime.getHours().toString().padStart(2, '0')}:00`;
-                return vtTimeKey === timeKey;
+                return vtTimeKey === h.timeKey;
             });
 
             if (hasData) {

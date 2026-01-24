@@ -1,5 +1,20 @@
 let spaghettiChart = null;
 
+function formatRunLabel(initIso, latestInitMs) {
+    try {
+        const dt = new Date(initIso);
+        const utcHour = dt.getUTCHours().toString().padStart(2, '0');
+        const mon = dt.toLocaleString('en-US', { month: 'short' });
+        const day = dt.getDate();
+        const labelBase = `${mon} ${day} ${utcHour}Z`;
+        const ageHrs = (latestInitMs - dt.getTime()) / 3600000;
+        const ageLabel = ageHrs < 1 ? 'now' : `${Math.round(ageHrs)}h ago`;
+        return { text: `${labelBase} • ${ageLabel}`, ageHrs };
+    } catch (e) {
+        return { text: initIso, ageHrs: Infinity };
+    }
+}
+
 function buildRunControls(datasets) {
     const container = document.getElementById('spaghettiControls');
     if (!container) {
@@ -78,15 +93,21 @@ async function createSpaghettiPlot() {
         const valueMap = new Map(values.map(entry => [entry.forecast_hour, entry.value]));
         const ageHours = (latestTime - new Date(run.init_time).getTime()) / 3600000;
         const alpha = Math.max(0.2, 1 - ageHours / 24);
+        const labelInfo = formatRunLabel(run.init_time, latestTime);
+        const isLatest = ageHours === 0;
+        const baseColor = `rgba(0, 64, 128, ${alpha})`;
         return {
-            label: new Date(run.init_time).toLocaleString(),
+            label: isLatest ? `${labelInfo.text} • LATEST` : labelInfo.text,
             data: hours.map(hour => ({
                 x: hour,
                 y: valueMap.get(hour) ?? null
             })),
-            borderColor: `rgba(0, 64, 128, ${alpha})`,
+            borderColor: baseColor,
             backgroundColor: 'transparent',
-            tension: 0.3
+            tension: 0.3,
+            borderWidth: isLatest ? 3 : 1.5,
+            pointRadius: 0,
+            _initTime: run.init_time
         };
     });
 
@@ -99,7 +120,9 @@ async function createSpaghettiPlot() {
         borderColor: 'rgba(0,0,0,0.8)',
         borderDash: [5, 5],
         backgroundColor: 'transparent',
-        tension: 0.1
+        tension: 0.1,
+        pointRadius: 0,
+        borderWidth: 2
     });
 
     datasets.push({
@@ -108,7 +131,8 @@ async function createSpaghettiPlot() {
         borderColor: 'rgba(0,128,0,0.6)',
         borderDash: [2, 4],
         backgroundColor: 'transparent',
-        tension: 0.1
+        tension: 0.1,
+        pointRadius: 0
     });
 
     datasets.push({
@@ -117,7 +141,8 @@ async function createSpaghettiPlot() {
         borderColor: 'rgba(128,0,0,0.6)',
         borderDash: [2, 4],
         backgroundColor: 'transparent',
-        tension: 0.1
+        tension: 0.1,
+        pointRadius: 0
     });
 
     const ctx = document.getElementById('spaghettiChart').getContext('2d');
@@ -134,7 +159,23 @@ async function createSpaghettiPlot() {
                     type: 'linear',
                     title: {
                         display: true,
-                        text: 'Forecast Hour'
+                        text: 'Forecast Hour (Day markers every 24h)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            if (value % 24 === 0 && value !== 0) {
+                                const dayNum = value / 24;
+                                return [value.toString(), `Day ${dayNum}`];
+                            }
+                            return value.toString();
+                        },
+                        maxTicksLimit: 20
+                    },
+                    grid: {
+                        color: function(ctx) {
+                            const x = ctx.tick.value;
+                            return (x % 24 === 0 && x !== 0) ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.08)';
+                        }
                     }
                 },
                 y: {
@@ -151,7 +192,21 @@ async function createSpaghettiPlot() {
                 },
                 tooltip: {
                     mode: 'nearest',
-                    intersect: false
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            const ds = context.dataset;
+                            const hour = context.parsed.x;
+                            let label = ds.label ? ds.label + ': ' : '';
+                            label += `H+${hour}`;
+                            if (ds._initTime) {
+                                const valid = new Date(new Date(ds._initTime).getTime() + hour * 3600000);
+                                const validStr = valid.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', hour12: true });
+                                label += ` (valid ${validStr})`;
+                            }
+                            return label;
+                        }
+                    }
                 },
                 zoom: {
                     zoom: {
