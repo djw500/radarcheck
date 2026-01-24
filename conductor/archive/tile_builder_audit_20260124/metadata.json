@@ -1,0 +1,8 @@
+{
+  "track_id": "tile_builder_audit_20260124",
+  "type": "chore",
+  "status": "new",
+  "created_at": "2026-01-24T17:30:00Z",
+  "updated_at": "2026-01-24T17:30:00Z",
+  "description": "vet the logic of the tile builder against the cache/actual data sources as it may be wasting time reprocessing data"
+}
