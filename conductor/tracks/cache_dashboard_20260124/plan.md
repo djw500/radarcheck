@@ -13,11 +13,11 @@
 - [x] Task: Conductor - User Manual Verification 'Backend Data Collection & Utilities' (Protocol in workflow.md) a181c05
 
 ## Phase 2: API Endpoints
-- [ ] Task: Create Status API Endpoints.
-    - [ ] Write Tests: Create `tests/test_status_api.py` to verify `/api/status/summary` and `/api/status/logs`.
-    - [ ] Implement: Add routes to `app.py` that serve the data collected in Phase 1.
-    - [ ] Verification: Verify endpoints return valid JSON using `curl` against the local dev server.
-- [ ] Task: Conductor - User Manual Verification 'API Endpoints' (Protocol in workflow.md)
+- [x] Task: Create Status API Endpoints. ea0db13
+    - [x] Write Tests: Create `tests/test_status_api.py` to verify `/api/status/summary` and `/api/status/logs`.
+    - [x] Implement: Add routes to `app.py` that serve the data collected in Phase 1.
+    - [x] Verification: Verify endpoints return valid JSON using `curl` against the local dev server.
+- [x] Task: Conductor - User Manual Verification 'API Endpoints' (Protocol in workflow.md) ea0db13
 
 ## Phase 3: Frontend Dashboard
 - [ ] Task: Create Dashboard Template.
