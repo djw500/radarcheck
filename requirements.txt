@@ -9,6 +9,8 @@ prometheus-client
 requests
 pillow
 pytz
+herbie-data
+toml
 
 # Scientific/GRIB processing
 numpy
