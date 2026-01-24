@@ -43,4 +43,7 @@
     - [ ] Fix: Update `static/js/statusView.js` to ensure correct API calls and error handling.
 - [ ] Task: Enable CLI Verification.
     - [ ] Verification: Ensure `curl http://localhost:5001/status` returns full HTML with expected structure (not just empty div placeholders).
+- [ ] Task: Scheduler Status Reporting.
+    - [ ] Implement: Update `scripts/build_tiles_scheduled.py` to write a status file (e.g., `cache/scheduler_status.json`) with last run time, next run time, and last error.
+    - [ ] Implement: Update `api_status_summary` in `app.py` to read this status file.
 - [ ] Task: Conductor - User Manual Verification 'Refinement' (Protocol in workflow.md)
