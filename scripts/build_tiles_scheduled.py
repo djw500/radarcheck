@@ -342,60 +342,82 @@ def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
         return True
 
 
-def build_cycle():
-    """Run one build cycle for all models and regions."""
-    logger.info("Starting build cycle")
-    write_scheduler_status(state="running")
-    
+def process_model(model_cfg: dict) -> tuple[int, int, list]:
+    """Process a single model - find and build missing runs.
+
+    Returns (builds_attempted, builds_succeeded, targets).
+    """
+    model_id = model_cfg["id"]
+    max_hours = model_cfg["max_hours"]
     builds_attempted = 0
     builds_succeeded = 0
-    all_targets = []
+    targets = []
 
-    for model_cfg in MODELS_CONFIG:
-        model_id = model_cfg["id"]
-        max_hours = model_cfg["max_hours"]
+    # Get all runs we SHOULD have according to tiered policy (last 72h)
+    runs_to_process = get_required_runs(model_id, lookback_hours=72)
 
-        # Get all runs we SHOULD have according to tiered policy (last 72h)
-        runs_to_process = get_required_runs(model_id, lookback_hours=72)
-        
-        if runs_to_process:
-            for r in runs_to_process:
-                all_targets.append(f"{model_id}/{r}")
-            # Update status with known targets
-            write_scheduler_status(state="running", targets=all_targets)
-        
-        if not runs_to_process:
-            logger.warning(f"No available runs found for {model_id}")
+    if not runs_to_process:
+        logger.warning(f"No available runs found for {model_id}")
+        return 0, 0, []
+
+    for r in runs_to_process:
+        targets.append(f"{model_id}/{r}")
+
+    num_runs = len(runs_to_process)
+    print(f"[{model_id}] Checking {num_runs} required runs...")
+
+    for i, run_id in enumerate(runs_to_process):
+        # Skip if run is too new
+        if not run_is_ready(run_id):
             continue
 
-        num_runs = len(runs_to_process)
-        print(f"Checking {num_runs} required runs for {model_id} (last 72h)...")
+        # Get run-specific max hours (e.g., HRRR synoptic vs non-synoptic)
+        run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
 
-        for i, run_id in enumerate(runs_to_process):
-            # Skip if run is too new
-            if not run_is_ready(run_id):
-                print(f"[{model_id} {i+1}/{num_runs}] Skipping {run_id} (too new)")
+        for region_id in REGIONS:
+            # Skip if tiles already exist and are complete
+            if tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
                 continue
 
-            # Get run-specific max hours (e.g., HRRR synoptic vs non-synoptic)
-            run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
+            print(f"[{model_id}] Building {run_id}...")
+            builds_attempted += 1
+            if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
+                builds_succeeded += 1
+                print(f"[{model_id}] Completed {run_id}")
 
-            for region_id in REGIONS:
-                # Skip if tiles already exist and are complete
-                if tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
-                    print(f"[{model_id} {i+1}/{num_runs}] Verified complete: {run_id}")
-                    continue
+    return builds_attempted, builds_succeeded, targets
 
-                print(f"[{model_id} {i+1}/{num_runs}] Building/Completing {run_id}...")
-                builds_attempted += 1
-                if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
-                    builds_succeeded += 1
 
-                # Rate limit between builds
-                time.sleep(2)
+def build_cycle():
+    """Run one build cycle for all models in parallel."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    print(f"Build cycle complete: {builds_succeeded}/{builds_attempted} succeeded")
-    return builds_attempted, builds_succeeded, all_targets
+    logger.info("Starting build cycle")
+    write_scheduler_status(state="running")
+
+    total_attempted = 0
+    total_succeeded = 0
+    all_targets = []
+
+    # Process all models in parallel
+    with ThreadPoolExecutor(max_workers=len(MODELS_CONFIG)) as executor:
+        futures = {executor.submit(process_model, cfg): cfg["id"] for cfg in MODELS_CONFIG}
+
+        for future in as_completed(futures):
+            model_id = futures[future]
+            try:
+                attempted, succeeded, targets = future.result()
+                total_attempted += attempted
+                total_succeeded += succeeded
+                all_targets.extend(targets)
+                if attempted > 0:
+                    print(f"[{model_id}] Done: {succeeded}/{attempted} builds succeeded")
+            except Exception as e:
+                logger.error(f"Error processing {model_id}: {e}")
+
+    write_scheduler_status(state="running", targets=all_targets)
+    print(f"Build cycle complete: {total_succeeded}/{total_attempted} succeeded")
+    return total_attempted, total_succeeded, all_targets
 
 
 def cleanup_old_gribs(max_runs_per_model: int = 2):
