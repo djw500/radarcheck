@@ -11,14 +11,14 @@
 - [x] Task: Conductor - User Manual Verification 'Research & Prototyping' (Protocol in workflow.md) 60102ac
 
 ## Phase 2: Implementation (Backend)
-- [x] Task: Implement ECMWF Data Fetching.
+- [x] Task: Implement ECMWF Data Fetching. 007434a
     - [x] Sub-task: Create/Update `ecmwf.py` with the chosen method (Herbie or Request-based).
     - [x] Sub-task: Write tests for `ecmwf.py` to ensure it correctly identifies latest runs and URLs.
-- [x] Task: Integrate into Tile Builder.
+- [x] Task: Integrate into Tile Builder. 007434a
     - [x] Sub-task: Update `build_tiles.py` (or `config.py`) to enable ECMWF model processing.
     - [x] Sub-task: Verify `grib2` to `npz` conversion works for ECMWF grids (projection handling).
     - [x] Sub-task: Write test `tests/test_ecmwf_integration.py` to verify end-to-end tile creation.
-- [x] Task: Conductor - User Manual Verification 'Implementation (Backend)' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Implementation (Backend)' (Protocol in workflow.md) 007434a
 
 ## Phase 3: Frontend & Deployment
 - [ ] Task: Update Frontend.
