@@ -21,10 +21,10 @@
 - [x] Task: Conductor - User Manual Verification 'Implementation (Backend)' (Protocol in workflow.md) 007434a
 
 ## Phase 3: Frontend & Deployment
-- [ ] Task: Update Frontend.
-    - [ ] Sub-task: Update `config.py` to expose ECMWF in `MODELS` list.
-    - [ ] Sub-task: Verify `index.html` / `table.html` displays ECMWF column/option.
-- [ ] Task: Deployment Prep.
-    - [ ] Sub-task: Update `requirements.txt` (if Herbie is used).
-    - [ ] Sub-task: Run full test suite.
-- [ ] Task: Conductor - User Manual Verification 'Frontend & Deployment' (Protocol in workflow.md)
+- [x] Task: Update Frontend. 0287fa6
+    - [x] Sub-task: Update `config.py` to expose ECMWF in `MODELS` list.
+    - [x] Sub-task: Verify `index.html` / `table.html` displays ECMWF column/option.
+- [x] Task: Deployment Prep. 0287fa6
+    - [x] Sub-task: Update `requirements.txt` (if Herbie is used).
+    - [x] Sub-task: Run full test suite.
+- [x] Task: Conductor - User Manual Verification 'Frontend & Deployment' (Protocol in workflow.md) 0287fa6
