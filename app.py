@@ -2170,6 +2170,12 @@ def api_status_summary():
         "timestamp": datetime.now(pytz.UTC).isoformat()
     })
 
+@app.route("/status")
+@require_api_key
+def status_page():
+    """Render system status dashboard."""
+    return render_template("status.html")
+
 @app.route("/api/status/logs")
 @require_api_key
 def api_status_logs():

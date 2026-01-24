@@ -36,3 +36,8 @@ def test_status_logs_endpoint(mock_read, client):
     assert len(data["lines"]) == 2
     assert data["lines"][0] == "Log 1"
     mock_read.assert_called_with(lines=10)
+
+def test_status_page_route(client):
+    response = client.get("/status")
+    assert response.status_code == 200
+    assert b"System Status" in response.data
