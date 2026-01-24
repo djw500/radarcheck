@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from config import repomap
 from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust, is_tile_valid
-from utils import download_file, format_forecast_hour, time_function, audit_stats
+from utils import download_file, format_forecast_hour, time_function
+from cache_builder import get_available_model_runs, download_all_hours_parallel
 import requests
 import xarray as xr
 from filelock import FileLock, Timeout
