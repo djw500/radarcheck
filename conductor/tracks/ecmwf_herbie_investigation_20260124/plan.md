@@ -27,4 +27,4 @@
 - [x] Task: Deployment Prep. 0287fa6
     - [x] Sub-task: Update `requirements.txt` (if Herbie is used).
     - [x] Sub-task: Run full test suite.
-- [x] Task: Conductor - User Manual Verification 'Frontend & Deployment' (Protocol in workflow.md) 0287fa6
+- [x] Task: Conductor - User Manual Verification 'Frontend & Deployment' (Protocol in workflow.md) e14c58f
