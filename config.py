@@ -409,12 +409,15 @@ repomap = {
 
     # Region tiling (grid statistics) configuration
     "TILING_REGIONS": {
-        # Northeast US box used for coarse 0.1° tiles
+        # Expanded Northeast region to include Charlotte (NC) and Nashville (TN)
+        # Previous bounds: lat 38–47, lon -80–-66
+        # New bounds:     lat 33–47, lon -88–-66
+        # This minimally expands south and west to cover both metros
         "ne": {
-            "name": "Northeast US",
-            "lat_min": 38.0,
+            "name": "Northeast US (Expanded)",
+            "lat_min": 33.0,
             "lat_max": 47.0,
-            "lon_min": -80.0,
+            "lon_min": -88.0,
             "lon_max": -66.0,
             "default_resolution_deg": 0.1,
             "stats": ["min", "max", "mean"],
