@@ -1,14 +1,14 @@
 # Implementation Plan - ECMWF & Herbie Investigation
 
 ## Phase 1: Research & Prototyping
-- [x] Task: Research Herbie documentation and dependencies.
+- [x] Task: Research Herbie documentation and dependencies. 60102ac
     - [x] Sub-task: Check Herbie's support for ECMWF Open Data.
     - [x] Sub-task: Analyze Herbie's dependency weight (is it too heavy for a lightweight app?).
     - [x] Sub-task: Create a small script `scripts/test_herbie_ecmwf.py` to attempt a download of a single field (e.g., 2m temp).
-- [x] Task: Evaluate Feasibility.
+- [x] Task: Evaluate Feasibility. 60102ac
     - [x] Sub-task: Compare `scripts/test_herbie_ecmwf.py` performance vs existing `build_tiles.py` method.
     - [x] Sub-task: Decision point: Use Herbie or direct HTTP for ECMWF?
-- [x] Task: Conductor - User Manual Verification 'Research & Prototyping' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Research & Prototyping' (Protocol in workflow.md) 60102ac
 
 ## Phase 2: Implementation (Backend)
 - [~] Task: Implement ECMWF Data Fetching.
