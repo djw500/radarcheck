@@ -34,3 +34,13 @@
     - [x] Sub-task: Verify dashboard correctly identifies a manually triggered partial run.
     - [x] Sub-task: Confirm all status data is accessible via `curl` for headless monitoring.
 - [x] Task: Conductor - User Manual Verification 'Final Integration & Navigation' (Protocol in workflow.md) 45c8e88
+
+## Phase 5: Refinement (UX & Verification)
+- [ ] Task: Unify UX Style.
+    - [ ] Implement: Update `templates/status.html` to match `templates/index.html` structure (nav bar, fonts, colors).
+- [ ] Task: Fix Data Loading.
+    - [ ] Investigate: Debug why data loading might be failing (browser console logs simulation/review logic).
+    - [ ] Fix: Update `static/js/statusView.js` to ensure correct API calls and error handling.
+- [ ] Task: Enable CLI Verification.
+    - [ ] Verification: Ensure `curl http://localhost:5001/status` returns full HTML with expected structure (not just empty div placeholders).
+- [ ] Task: Conductor - User Manual Verification 'Refinement' (Protocol in workflow.md)
