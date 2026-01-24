@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 
 from config import repomap
-from utils import convert_units
+from utils import convert_units, time_function
 
 
 def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any]) -> xr.DataArray:
@@ -175,6 +175,7 @@ def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.D
         raise e
 
 
+@time_function
 def build_tiles_for_variable(
     grib_paths_by_hour: Dict[int, str],
     variable_config: Dict[str, Any],
@@ -474,3 +475,28 @@ def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Di
         runs.sort(reverse=True)
         result[model_id] = runs
     return result
+
+
+def is_tile_valid(meta_path: str, region_config: Dict[str, Any], expected_res: float) -> bool:
+    """
+    Check if a tile is valid by comparing its metadata with the current configuration.
+    """
+    if not os.path.exists(meta_path):
+        return False
+    try:
+        with open(meta_path, "r") as f:
+            meta = json.load(f)
+        
+        tol = 1e-6
+        # Compare bounds
+        if abs(float(meta.get("lat_min", 0)) - float(region_config["lat_min"])) > tol: return False
+        if abs(float(meta.get("lat_max", 0)) - float(region_config["lat_max"])) > tol: return False
+        if abs(float(meta.get("lon_min", 0)) - float(region_config["lon_min"])) > tol: return False
+        if abs(float(meta.get("lon_max", 0)) - float(region_config["lon_max"])) > tol: return False
+        
+        # Compare resolution
+        if abs(float(meta.get("resolution_deg", 0)) - expected_res) > tol: return False
+        
+        return True
+    except Exception:
+        return False

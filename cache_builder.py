@@ -36,6 +36,8 @@ from utils import (
     download_file,
     format_forecast_hour,
     fetch_county_shapefile,
+    time_function,
+    audit_stats,
 )
 
 # Set up logging
@@ -148,6 +150,31 @@ def get_available_model_runs(model_id: str, max_runs: int = 5) -> list[dict[str,
 
         forecast_hour = format_forecast_hour(1, model_id)
         
+        if model_config.get("source") == "herbie":
+            # For Herbie (ECMWF), assume synoptic runs are available after a short delay
+            model_time = datetime(
+                year=check_time.year,
+                month=check_time.month,
+                day=check_time.day,
+                hour=int(init_hour),
+                minute=0,
+                second=0,
+                tzinfo=pytz.UTC
+            )
+            # ECMWF open data is usually available ~1-2 hours after synoptic time
+            if (now - model_time).total_seconds() > 7200:
+                run_info = {
+                    'date_str': date_str,
+                    'init_hour': init_hour,
+                    'init_time': model_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    'run_id': f"run_{date_str}_{init_hour}"
+                }
+                available_runs.append(run_info)
+                logger.info(f"Assumed available {model_id} run: {run_info['run_id']}")
+                continue
+            else:
+                continue
+
         if model_config.get("source") == "dwd":
             # DWD check: construct URL to a key file (availability_check_var)
             check_var = model_config.get("availability_check_var", "t_2m")
@@ -250,9 +277,6 @@ def fetch_grib(
 
     filename = os.path.join(run_cache_dir, f"grib_{forecast_hour}.grib2")
 
-    # Use CONUS region for all downloads to ensure full coverage and deduplication
-    download_region = repomap["DOWNLOAD_REGIONS"]["conus"]
-    
     # Determine preferred stepType filter
     preferred = None
     if variable_config.get("is_accumulation"):
@@ -262,6 +286,52 @@ def fetch_grib(
     if variable_config.get("short_name") == "prate" and not preferred:
         preferred = {'stepType': 'instant'}
 
+    def try_load_grib(filename: str) -> bool:
+        """Try to load and validate a GRIB file"""
+        if not os.path.exists(filename) or os.path.getsize(filename) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
+            return False
+        try:
+            with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
+                # Try to open the file without chunks first
+                ds = open_dataset_robust(filename, preferred)
+                data_to_plot = select_variable_from_dataset(ds, variable_config)
+                # Check for magnitude/components if vector
+                if variable_config.get("vector_components"):
+                    # select_variable_from_dataset for vectors already doeshypot
+                    pass
+                data_to_plot.values
+                ds.close()
+                return True
+        except Timeout as exc:
+            logger.error(f"Timeout acquiring lock for {filename}: {exc}")
+            raise GribValidationError(f"Lock timeout for {filename}") from exc
+        except Exception as exc:
+            if "End of resource reached when reading message" in str(exc):
+                logger.error(f"GRIB file corrupted (premature EOF): {filename}")
+            else:
+                logger.warning(f"GRIB file invalid: {filename}, Error: {str(exc)}")
+            with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
+                try:
+                    if os.path.exists(filename):
+                        os.remove(filename)
+                        logger.info(f"Deleted invalid file: {filename}")
+                    # Also clean up any partial downloads
+                    if os.path.exists(f"{filename}.tmp"):
+                        os.remove(f"{filename}.tmp")
+                except OSError as exc:
+                    logger.error(f"Error cleaning up invalid files: {str(exc)}")
+            return False
+
+    # Audit Check: skip if GRIB already exists and is valid
+    if try_load_grib(filename):
+        logger.info(f"[CACHE HIT] {model_id} {variable_id} {forecast_hour}")
+        audit_stats["grib_hits"] += 1
+        return filename
+
+    audit_stats["grib_misses"] += 1
+    # Use CONUS region for all downloads to ensure full coverage and deduplication
+    download_region = repomap["DOWNLOAD_REGIONS"]["conus"]
+    
     # ECMWF download path (Herbie)
     if model_config.get("source") == "herbie":
         temp_filename = f"{filename}.tmp"
@@ -385,43 +455,6 @@ def fetch_grib(
         download_region,
     )
     
-    def try_load_grib(filename: str) -> bool:
-        """Try to load and validate a GRIB file"""
-        if not os.path.exists(filename) or os.path.getsize(filename) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
-            return False
-        try:
-            with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
-                # Try to open the file without chunks first
-                ds = open_dataset_robust(filename, preferred)
-                data_to_plot = select_variable_from_dataset(ds, variable_config)
-                data_to_plot.values
-                ds.close()
-                return True
-        except Timeout as exc:
-            logger.error(f"Timeout acquiring lock for {filename}: {exc}")
-            raise GribValidationError(f"Lock timeout for {filename}") from exc
-        except Exception as exc:
-            if "End of resource reached when reading message" in str(exc):
-                logger.error(f"GRIB file corrupted (premature EOF): {filename}")
-            else:
-                logger.warning(f"GRIB file invalid: {filename}, Error: {str(exc)}")
-            with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
-                try:
-                    if os.path.exists(filename):
-                        os.remove(filename)
-                        logger.info(f"Deleted invalid file: {filename}")
-                    # Also clean up any partial downloads
-                    if os.path.exists(f"{filename}.tmp"):
-                        os.remove(f"{filename}.tmp")
-                except OSError as exc:
-                    logger.error(f"Error cleaning up invalid files: {str(exc)}")
-            return False
-
-    # Try to use cached file
-    if try_load_grib(filename):
-        # logger.info(f"Using cached valid GRIB file: {filename}") # Reduce noise
-        return filename
-
     # Try downloading up to 3 times
     for attempt in range(repomap["MAX_DOWNLOAD_RETRIES"]):
         try:
@@ -470,6 +503,7 @@ def fetch_grib(
     raise GribDownloadError("Failed to obtain valid GRIB file after retries")
 
 
+@time_function
 def download_all_hours_parallel(
     model_id: str,
     variable_id: str,

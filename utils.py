@@ -10,8 +10,28 @@ import requests
 
 from config import repomap
 
+import time
+from functools import wraps
+
 logger = logging.getLogger(__name__)
 
+# Audit stats for build monitoring
+audit_stats = {
+    "tiles_skipped": 0,
+    "tiles_processed": 0,
+    "grib_hits": 0,
+    "grib_misses": 0
+}
+
+def time_function(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = f(*args, **kwargs)
+        end = time.perf_counter()
+        logger.info(f"PERF: {f.__name__} took {end - start:.4f}s")
+        return result
+    return wrapper
 
 class GribDownloadError(Exception):
     """Failed to download GRIB file from NOMADS."""
@@ -118,10 +138,14 @@ def convert_units(data: Any, conversion: Optional[str]) -> Any:
         return data * 0.0393701 * 3600
     if conversion == "m_to_in":
         return data * 39.3701
+    if conversion == "m_water_to_in_snow":
+        return data * 393.701
     if conversion == "m_to_mi":
         return data * 0.000621371
     if conversion == "c_to_f":
         return data * 9 / 5 + 32
+    if conversion == "pa_to_mb":
+        return data / 100.0
     return data
 
 

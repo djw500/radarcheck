@@ -6,9 +6,8 @@ import os
 from typing import Any, Dict, List, Optional
 
 from config import repomap
-from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust
-from utils import download_file, format_forecast_hour
-from cache_builder import get_available_model_runs, download_all_hours_parallel
+from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust, is_tile_valid
+from utils import download_file, format_forecast_hour, time_function, audit_stats
 import requests
 import xarray as xr
 from filelock import FileLock, Timeout
@@ -31,6 +30,10 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("cfgrib").setLevel(logging.WARNING)
 
 
+# Audit stats
+audit_stats = {"tiles_skipped": 0, "tiles_processed": 0, "grib_hits": 0, "grib_misses": 0}
+
+@time_function
 def build_region_tiles(
     region_id: str,
     model_id: str,
@@ -39,6 +42,7 @@ def build_region_tiles(
     resolution_deg: Optional[float] = None,
     max_hours: Optional[int] = None,
     clean_gribs: bool = False,
+    audit_only: bool = False,
 ) -> None:
     regions = repomap["TILING_REGIONS"]
     if region_id not in regions:
@@ -81,6 +85,22 @@ def build_region_tiles(
         if model_id in variable_config.get("model_exclusions", []):
             continue
 
+        # Audit Check: skip if tiles already exist and are valid
+        res_dir = f"{res_deg:.3f}deg".rstrip("0").rstrip(".")
+        npz_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_info["run_id"], f"{variable_id}.npz")
+        meta_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_info["run_id"], f"{variable_id}.meta.json")
+        
+        if os.path.exists(npz_path) and is_tile_valid(meta_path, region, res_deg):
+            print(f"--- [SKIP] {variable_id} (Valid tiles already exist) ---")
+            audit_stats["tiles_skipped"] += 1
+            continue
+
+        if audit_only:
+            print(f"--- [AUDIT] {variable_id} (Would process) ---")
+            audit_stats["tiles_processed"] += 1
+            continue
+
+        audit_stats["tiles_processed"] += 1
         print(f"--- Processing {variable_id} ---")
         # Download GRIBs for all hours using cache_builder logic
         grib_paths = download_all_hours_parallel(
@@ -175,6 +195,7 @@ def main() -> None:
     parser.add_argument("--resolution", type=float, default=None, help="Grid resolution in degrees (default per region)")
     parser.add_argument("--max-hours", type=int, default=None, help="Optional cap on hours")
     parser.add_argument("--clean-gribs", action="store_true", help="Delete GRIB files after processing to save space")
+    parser.add_argument("--audit", action="store_true", help="Dry run: show what would be built without doing it")
     args = parser.parse_args()
 
     os.makedirs(repomap["TILES_DIR"], exist_ok=True)
@@ -186,7 +207,29 @@ def main() -> None:
         resolution_deg=args.resolution,
         max_hours=args.max_hours,
         clean_gribs=args.clean_gribs,
+        audit_only=args.audit,
     )
+
+    # Print Audit Summary
+    print("\n" + "="*40)
+    print("BUILD AUDIT SUMMARY")
+    print("="*40)
+    print(f"Tiles Skipped (Cache Hit):  {audit_stats['tiles_skipped']}")
+    print(f"Tiles Processed (Miss):     {audit_stats['tiles_processed']}")
+    total_tiles = audit_stats['tiles_skipped'] + audit_stats['tiles_processed']
+    if total_tiles > 0:
+        ratio = (audit_stats['tiles_skipped'] / total_tiles) * 100
+        print(f"Tile Efficiency:            {ratio:.1f}%")
+    
+    print("-" * 40)
+    print(f"GRIB Cache Hits:            {audit_stats['grib_hits']}")
+    print(f"GRIB Cache Misses:          {audit_stats['grib_misses']}")
+    total_gribs = audit_stats['grib_hits'] + audit_stats['grib_misses']
+    if total_gribs > 0:
+        ratio = (audit_stats['grib_hits'] / total_gribs) * 100
+        print(f"GRIB Efficiency:            {ratio:.1f}%")
+    print("="*40 + "\n")
+
 
 
 if __name__ == "__main__":
