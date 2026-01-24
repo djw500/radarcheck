@@ -319,6 +319,11 @@ MODELS = {
         "source": "herbie",
         "dataset": "ecmwf-high-resolution-forecast",
         "forecast_hour_digits": 3,
+        "availability_check_var": "t2m",
+        "forecast_hour_schedule": [
+            {"start": 3, "end": 144, "step": 3},
+            {"start": 150, "end": 240, "step": 6},
+        ],
         # Placeholders
         "nomads_url": "",
         "dir_pattern": "",
@@ -331,6 +336,7 @@ MODELS = {
         "source": "herbie",
         "dataset": "ecmwf-ensemble-forecast",
         "forecast_hour_digits": 3,
+        "availability_check_var": "t2m",
         # Placeholders
         "nomads_url": "",
         "dir_pattern": "",
