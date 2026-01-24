@@ -20,12 +20,12 @@
 - [x] Task: Conductor - User Manual Verification 'API Endpoints' (Protocol in workflow.md) ea0db13
 
 ## Phase 3: Frontend Dashboard
-- [ ] Task: Create Dashboard Template.
-    - [ ] Write Tests: Add Jest tests in `tests/js/statusView.test.js` for data rendering logic.
-    - [ ] Implement: Create `templates/status.html` with Tailwind CSS, including the Run Status Grid and Disk Usage charts (if applicable) or cards.
-- [ ] Task: Implement Log Deep-Dive View.
-    - [ ] Implement: Add a searchable/filterable log viewer component to `status.html` or a separate `templates/logs.html`.
-- [ ] Task: Conductor - User Manual Verification 'Frontend Dashboard' (Protocol in workflow.md)
+- [x] Task: Create Dashboard Template. ddda967
+    - [x] Write Tests: Add Jest tests in `tests/js/statusView.test.js` for data rendering logic.
+    - [x] Implement: Create `templates/status.html` with Tailwind CSS, including the Run Status Grid and Disk Usage charts (if applicable) or cards.
+- [x] Task: Implement Log Deep-Dive View. ddda967
+    - [x] Implement: Add a searchable/filterable log viewer component to `status.html` or a separate `templates/logs.html`.
+- [x] Task: Conductor - User Manual Verification 'Frontend Dashboard' (Protocol in workflow.md) ddda967
 
 ## Phase 4: Final Integration & Navigation
 - [ ] Task: Add Navigation Links.
