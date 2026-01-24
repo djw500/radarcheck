@@ -28,9 +28,9 @@
 - [x] Task: Conductor - User Manual Verification 'Frontend Dashboard' (Protocol in workflow.md) ddda967
 
 ## Phase 4: Final Integration & Navigation
-- [ ] Task: Add Navigation Links.
-    - [ ] Implement: Add "System Status" link to the footer of `templates/index.html`.
-- [ ] Task: End-to-End Verification.
-    - [ ] Sub-task: Verify dashboard correctly identifies a manually triggered partial run.
-    - [ ] Sub-task: Confirm all status data is accessible via `curl` for headless monitoring.
-- [ ] Task: Conductor - User Manual Verification 'Final Integration & Navigation' (Protocol in workflow.md)
+- [x] Task: Add Navigation Links. 45c8e88
+    - [x] Implement: Add "System Status" link to the footer of `templates/index.html`.
+- [x] Task: End-to-End Verification. 45c8e88
+    - [x] Sub-task: Verify dashboard correctly identifies a manually triggered partial run.
+    - [x] Sub-task: Confirm all status data is accessible via `curl` for headless monitoring.
+- [x] Task: Conductor - User Manual Verification 'Final Integration & Navigation' (Protocol in workflow.md) 45c8e88
