@@ -36,14 +36,14 @@
 - [x] Task: Conductor - User Manual Verification 'Final Integration & Navigation' (Protocol in workflow.md) 45c8e88
 
 ## Phase 5: Refinement (UX & Verification)
-- [ ] Task: Unify UX Style.
-    - [ ] Implement: Update `templates/status.html` to match `templates/index.html` structure (nav bar, fonts, colors).
-- [ ] Task: Fix Data Loading.
-    - [ ] Investigate: Debug why data loading might be failing (browser console logs simulation/review logic).
-    - [ ] Fix: Update `static/js/statusView.js` to ensure correct API calls and error handling.
-- [ ] Task: Enable CLI Verification.
-    - [ ] Verification: Ensure `curl http://localhost:5001/status` returns full HTML with expected structure (not just empty div placeholders).
-- [ ] Task: Scheduler Status Reporting.
-    - [ ] Implement: Update `scripts/build_tiles_scheduled.py` to write a status file (e.g., `cache/scheduler_status.json`) with last run time, next run time, last error, and list of target runs/slots being monitored.
-    - [ ] Implement: Update `api_status_summary` in `app.py` to read this status file.
-- [ ] Task: Conductor - User Manual Verification 'Refinement' (Protocol in workflow.md)
+- [x] Task: Unify UX Style. 8ba70cc
+    - [x] Implement: Update `templates/status.html` to match `templates/index.html` structure (nav bar, fonts, colors).
+- [x] Task: Fix Data Loading. 8ba70cc
+    - [x] Investigate: Debug why data loading might be failing (browser console logs simulation/review logic).
+    - [x] Fix: Update `static/js/statusView.js` to ensure correct API calls and error handling.
+- [x] Task: Enable CLI Verification. 8ba70cc
+    - [x] Verification: Ensure `curl http://localhost:5001/status` returns full HTML with expected structure (not just empty div placeholders).
+- [x] Task: Scheduler Status Reporting. 8ba70cc
+    - [x] Implement: Update `scripts/build_tiles_scheduled.py` to write a status file (e.g., `cache/scheduler_status.json`) with last run time, next run time, last error, and list of target runs/slots being monitored.
+    - [x] Implement: Update `api_status_summary` in `app.py` to read this status file.
+- [x] Task: Conductor - User Manual Verification 'Refinement' (Protocol in workflow.md) 8ba70cc
