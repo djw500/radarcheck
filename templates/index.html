@@ -195,6 +195,8 @@ const STORAGE_KEY_LAST_LOC = 'radarcheck_last_location';
 const STORAGE_KEY_LAST_VAR = 'radarcheck_last_variable';
 const STORAGE_KEY_CACHE_PREFIX = 'radarcheck_cache_v1:';
 const LOCAL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+// Read API key from URL so authenticated fetches work in production
+const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
 let chartInstance = null;
 let currentLat = null;
 let currentLon = null;
@@ -296,7 +298,9 @@ async function fetchJSON(url) {
         }
     }
 
-    const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
+    const headers = { 'Accept': 'application/json' };
+    if (API_KEY) headers['X-API-Key'] = API_KEY;
+    const res = await fetch(url, { headers });
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
     const data = await res.json();
     
