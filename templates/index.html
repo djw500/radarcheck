@@ -5,9 +5,7 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>Forecast Analysis | RadarCheck</title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
     <script>
@@ -35,12 +33,6 @@
     </script>
     <style>
         body { font-family: 'Inter', sans-serif; }
-        .chart-glow-cyan { filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.5)); }
-        .chart-glow-orange { filter: drop-shadow(0 0 4px rgba(251, 146, 60, 0.5)); }
-        .chart-glow-purple { filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.5)); }
-        .chart-glow-pink { filter: drop-shadow(0 0 4px rgba(236, 72, 153, 0.5)); }
-        .chart-glow-blue { filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.5)); }
-        .chart-glow-red { filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.5)); }
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-200 min-h-screen flex flex-col font-display antialiased selection:bg-primary selection:text-white">
@@ -106,9 +98,7 @@
 
     <!-- Chart Card -->
     <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm relative h-[60vh] min-h-[400px]">
-        <div class="absolute inset-0 p-4">
-            <canvas id="snowChart"></canvas>
-        </div>
+        <div id="snowChart" class="w-full h-full"></div>
     </div>
 
     <!-- Data Table Toggle -->
@@ -179,6 +169,15 @@
 </main>
 
 <script>
+window.onerror = function(msg, url, line, col, error) {
+    const status = document.getElementById('statusText');
+    if (status) {
+        status.innerHTML = `<span style="color:red">Global Error: ${msg} <br> Line: ${line}</span>`;
+    }
+    console.error("Global Error:", msg, error);
+    return false;
+};
+
 // --- Configuration ---
 const STORAGE_KEY_LAST_LOC = 'radarcheck_last_location';
 const STORAGE_KEY_LAST_VAR = 'radarcheck_last_variable';
@@ -187,7 +186,7 @@ let currentLat = null;
 let currentLon = null;
 let currentName = null;
 let currentData = null; // Store fetched data locally for toggling
-let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR) || 'asnow';
+let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR);
 
 const MODEL_CONFIG = {
     'hrrr': { color: '#3b82f6', glow: 'chart-glow-blue' },     // Blue
@@ -198,10 +197,15 @@ const MODEL_CONFIG = {
 };
 
 const VAR_CONFIG = {
-    'asnow': { label: 'Snowfall', unit: '"', stepSize: 6, beginAtZero: true },
-    't2m': { label: 'Temperature', unit: '°F', stepSize: 10, beginAtZero: false },
-    'wind_10m': { label: 'Wind Speed', unit: ' mph', stepSize: 10, beginAtZero: true }
+    'asnow': { label: 'Snowfall', unit: ' in' },
+    't2m': { label: 'Temperature', unit: ' °F' },
+    'wind_10m': { label: 'Wind Speed', unit: ' mph' }
 };
+
+// Validate currentVariable
+if (!currentVariable || !VAR_CONFIG[currentVariable]) {
+    currentVariable = 'asnow';
+}
 
 // --- UI Interaction ---
 document.getElementById('searchTrigger').addEventListener('click', (e) => {
@@ -271,426 +275,166 @@ async function fetchJSON(url) {
     return res.json();
 }
 
-// --- Chart Logic ---
-function initChart() {
-    const ctx = document.getElementById('snowChart').getContext('2d');
-    
-    // Custom Chart.js defaults for dark/light mode
-    Chart.defaults.color = document.documentElement.classList.contains('dark') ? '#94a3b8' : '#64748b';
-    Chart.defaults.borderColor = document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0';
-
-    chartInstance = new Chart(ctx, {
-        type: 'line',
-        data: { datasets: [] },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'x', // Align by X-axis value (time), not dataset index
-                axis: 'x',
-                intersect: false,
-            },
-            plugins: {
-                legend: { display: false }, // Using custom toggles instead
-                tooltip: {
-                    backgroundColor: document.documentElement.classList.contains('dark') ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-                    titleColor: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f1742',
-                    bodyColor: document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#334155',
-                    borderColor: document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0',
-                    borderWidth: 1,
-                    padding: window.innerWidth < 640 ? 6 : 10, // Smaller on mobile
-                    cornerRadius: 8,
-                    titleFont: { family: 'Inter', weight: '600', size: window.innerWidth < 640 ? 11 : 13 },
-                    bodyFont: { family: 'Inter', size: window.innerWidth < 640 ? 10 : 12 },
-                    displayColors: true,
-                    boxPadding: 4,
-                    itemSort: (a, b) => a.datasetIndex - b.datasetIndex, // Sort by dataset order (Latest is 0)
-                    callbacks: {
-                        title: (items) => {
-                            if (!items.length) return '';
-                            const date = new Date(items[0].parsed.x);
-                            return date.toLocaleString('en-US', { 
-                                weekday: 'short', month: 'short', day: 'numeric', 
-                                hour: 'numeric'
-                            });
-                        },
-                        label: (context) => {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += context.parsed.y.toFixed(1) + VAR_CONFIG[currentVariable].unit;
-                            }
-                            return label;
-                        }
-                    }
-                },
-                zoom: {
-                    zoom: {
-                        wheel: { enabled: true },
-                        pinch: { enabled: true },
-                        mode: 'x',
-                    },
-                    pan: {
-                        enabled: true,
-                        mode: 'x',
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    type: 'time',
-                    time: {
-                        unit: 'hour',
-                        stepSize: 6, // Force 6-hour tick intervals
-                        displayFormats: { hour: 'h a' },
-                        tooltipFormat: 'EEE MMM d, h:mm a'
-                    },
-                    ticks: {
-                        maxRotation: 0,
-                        autoSkip: false, // Don't skip - we control with stepSize
-                        font: { size: 11 },
-                        callback: function(value) {
-                            const d = new Date(value);
-                            const h = d.getHours();
-                            // Show Day Name + Date at midnight, otherwise just time
-                            if (h === 0) {
-                                return [d.toLocaleString('en-US', { hour: 'numeric' }), d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })];
-                            }
-                            return d.toLocaleString('en-US', { hour: 'numeric' });
-                        }
-                    },
-                    grid: {
-                        display: true,
-                        color: (context) => {
-                            if (context.tick && context.tick.value) {
-                                const date = new Date(context.tick.value);
-                                const h = date.getHours();
-                                const isDark = document.documentElement.classList.contains('dark');
-
-                                // Midnight: Thick/Dark
-                                if (h === 0) return isDark ? '#475569' : '#94a3b8';
-
-                                // 6-hour intervals (6, 12, 18): Medium/Light
-                                if (h % 6 === 0) return isDark ? 'rgba(71, 85, 105, 0.4)' : 'rgba(203, 213, 225, 0.4)';
-                            }
-                            return 'transparent';
-                        },
-                        lineWidth: (context) => {
-                            if (context.tick && context.tick.value) {
-                                const h = new Date(context.tick.value).getHours();
-                                if (h === 0) return 2;
-                                if (h % 6 === 0) return 1;
-                            }
-                            return 0;
-                        }
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    grid: { borderDash: [4, 4] },
-                    title: { display: false } // Minimal look
-                }
-            }
-        }
-    });
-}
-
+// --- Plotly Chart Logic ---
 function updateChart(data) {
-    if (!chartInstance) initChart();
-    
-    // Get active models from toggles
-    const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
-    
-    // Flatten runs
-    const runs = Object.values(data.runs).filter(r => activeModels.includes(r.model_id));
-    
-    // Sort runs by init time descending
-    runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
-
-    const latestRunByModel = {};
-    runs.forEach(run => {
-        if (!latestRunByModel[run.model_id]) {
-            latestRunByModel[run.model_id] = run.run_id;
-        }
-    });
-
-    const latestInit = Math.max(...runs.map(r => new Date(r.init_time).getTime()));
-
-    // Filter out potential duplicates (same model, same run_id)
-    const uniqueRuns = [];
-    const seenRuns = new Set();
-    runs.forEach(r => {
-        const key = `${r.model_id}|${r.run_id}`;
-        if (!seenRuns.has(key)) {
-            seenRuns.add(key);
-            uniqueRuns.push(r);
-        }
-    });
-    
-    // Calculate global time range for X-axis scaling based on selected period
-    const now = new Date();
-    // Round down to nearest 6 hours for chart start (Synoptic alignment)
-    const startHour = Math.floor(now.getHours() / 6) * 6;
-    const startTime = new Date(now);
-    startTime.setHours(startHour, 0, 0, 0);
-    
-    const selectedDays = parseInt(document.querySelector('.period-btn.bg-primary').dataset.days);
-    const endTime = new Date(startTime.getTime() + selectedDays * 24 * 60 * 60 * 1000);
-
-    // Generate a master timeline (hourly) covering the full range
-    // This ensures all datasets have points at the same X-coordinates for the tooltip
-    const masterTimeline = [];
-    const endTimeMs = endTime.getTime();
-    
-    // Start at aligned start time
-    let currentTime = startTime.getTime();
-    
-    while (currentTime <= endTimeMs) {
-        masterTimeline.push(currentTime);
-        currentTime += 3600000; // +1 hour
-    }
-
-    // Helper to interpolate value at a specific time
-    const interpolate = (series, targetTime) => {
-        if (!series || !series.length) return null;
-        
-        // Find surrounding points
-        // Series is sorted by time? It should be from the API, but let's assume yes or sort it.
-        // Assuming series is [{valid_time: 'ISO', value: 1.2}, ...]
-        
-        // Convert series times to timestamps once for perf could be better, but map is fast enough
-        const times = series.map(p => new Date(p.valid_time).getTime());
-        
-        // Exact match?
-        const idx = times.indexOf(targetTime);
-        if (idx !== -1) return series[idx].value;
-        
-        // Find left and right neighbors
-        let leftIdx = -1;
-        let rightIdx = -1;
-        for (let i = 0; i < times.length; i++) {
-            if (times[i] < targetTime) leftIdx = i;
-            if (times[i] > targetTime) {
-                rightIdx = i;
-                break;
-            }
+    try {
+        if (!chartInstance) {
+            // No initChart needed for Plotly, we just newPlot
         }
         
-        if (leftIdx === -1 || rightIdx === -1) return null; // Out of bounds - Do not extrapolate
+        // Get active models from toggles
+        const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
         
-        // Linear interp
-        const t1 = times[leftIdx];
-        const v1 = series[leftIdx].value;
-        const t2 = times[rightIdx];
-        const v2 = series[rightIdx].value;
+        // Flatten runs
+        const runs = Object.values(data.runs).filter(r => activeModels.includes(r.model_id));
         
-        const fraction = (targetTime - t1) / (t2 - t1);
-        return v1 + (v2 - v1) * fraction;
-    };
-
-    const datasets = uniqueRuns.map((run) => {
-        const isLatest = latestRunByModel[run.model_id] === run.run_id;
-        
-        const modelConf = MODEL_CONFIG[run.model_id] || MODEL_CONFIG['other'];
-        const modelName = run.model_id.toUpperCase().replace('_', ' ');
-        
-        // Calculate age for ghosting (transparency)
-        const runDate = new Date(run.init_time);
-        const ageHours = (latestInit - runDate.getTime()) / 3600000;
-        
-        let opacity = 1.0;
-        let lineWidth = 4;
-        let borderDash = [];
-        let label = modelName;
-
-        if (!isLatest) {
-            if (ageHours < 12) {
-                opacity = 0.5;
-                lineWidth = 2.5;
-            } else {
-                opacity = 0.2;
-                lineWidth = 2;
-            }
-            opacity = Math.max(0.1, opacity - (ageHours / 100)); 
-            label += ` (${Math.round(ageHours)}h ago)`;
-        } else {
-            label += " (Latest)";
-        }
-
-        const hex = modelConf.color.replace('#', '');
-        const r = parseInt(hex.substring(0, 2), 16);
-        const g = parseInt(hex.substring(2, 4), 16);
-        const b = parseInt(hex.substring(4, 6), 16);
-        const color = `rgba(${r}, ${g}, ${b}, ${opacity})`;
-
-        // Resample data to master timeline
-        // This creates a point for every hour, interpolating if necessary
-        const resampledData = masterTimeline.map(t => ({
-            x: t,
-            y: interpolate(run.series, t)
-        }));
-
-        return {
-            label: label,
-            data: resampledData,
-            borderColor: color,
-            backgroundColor: color,
-            borderWidth: lineWidth,
-            borderDash: borderDash,
-            pointRadius: 0, // Hide points for clean line
-            pointHoverRadius: 0, // No big dots on hover, rely on vertical line
-            fill: false,
-            tension: 0.3,
-            order: isLatest ? 0 : 1,
-            spanGaps: true // Draw lines over nulls if any remain
-        };
-    });
-
-    //Sort datasets so latest runs are drawn on top
-    datasets.sort((a, b) => b.order - a.order);
-
-    chartInstance.data.datasets = datasets;
-    
-    // Explicitly set X-axis limits to enforce the "Forecast Up To" selection
-    chartInstance.options.scales.x.min = startTime.toISOString();
-    chartInstance.options.scales.x.max = endTime.toISOString();
-    
-    // Update Y-axis based on variable config
-    const varCfg = VAR_CONFIG[currentVariable];
-    chartInstance.options.scales.y.beginAtZero = varCfg.beginAtZero;
-
-    chartInstance.update();
-
-    renderTable(data, masterTimeline);
-}
-
-function renderTable(data, timeline) {
-    const tableBody = document.getElementById('dataTableBody');
-    const tableHeadRow = document.querySelector('#dataTableContainer thead tr');
-
-    // Clear existing
-    tableBody.innerHTML = '';
-    tableHeadRow.innerHTML = '<th class="px-4 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>';
-
-    // Get active models from toggles
-    const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
-
-    // Group runs by model
-    const runsByModel = {};
-    Object.values(data.runs).forEach(run => {
-        if (!activeModels.includes(run.model_id)) return;
-        if (!runsByModel[run.model_id]) runsByModel[run.model_id] = [];
-        runsByModel[run.model_id].push(run);
-    });
-
-    // For each model, select latest 3 runs, always retaining a synoptic (00Z or 12Z) run
-    const SYNOPTIC_HOURS = ['00', '12'];
-    const selectedRuns = [];
-
-    Object.entries(runsByModel).forEach(([modelId, runs]) => {
-        // Sort by init_time descending (newest first)
+        // Sort runs by init time descending
         runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
 
-        // Extract run hour from run_id (e.g., "2026012318" -> "18")
-        const getRunHour = (run) => run.run_id.slice(-2);
-
-        // Find synoptic runs and non-synoptic runs
-        const synopticRuns = runs.filter(r => SYNOPTIC_HOURS.includes(getRunHour(r)));
-        const nonSynopticRuns = runs.filter(r => !SYNOPTIC_HOURS.includes(getRunHour(r)));
-
-        // Take latest 2 non-synoptic + latest synoptic (or just latest 3 if no synoptic)
-        let selected = [];
-        if (synopticRuns.length > 0) {
-            selected = nonSynopticRuns.slice(0, 2);
-            selected.push(synopticRuns[0]); // Add latest synoptic
-        } else {
-            selected = runs.slice(0, 3);
-        }
-
-        // Sort selected by init_time descending for display
-        selected.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
-        selected.forEach(run => selectedRuns.push({ ...run, modelId }));
-    });
-
-    // Sort selected runs by model order then by init time
-    const modelOrder = ['hrrr', 'nam_nest', 'gfs', 'nbm'];
-    selectedRuns.sort((a, b) => {
-        const orderA = modelOrder.indexOf(a.modelId);
-        const orderB = modelOrder.indexOf(b.modelId);
-        if (orderA !== orderB) return orderA - orderB;
-        return new Date(b.init_time) - new Date(a.init_time);
-    });
-
-    // Build header with model groups
-    const modelColors = {
-        'hrrr': '#3b82f6',
-        'nam_nest': '#ef4444',
-        'gfs': '#22d3ee',
-        'nbm': '#a855f7'
-    };
-
-    selectedRuns.forEach(run => {
-        const th = document.createElement('th');
-        th.className = "px-3 py-2 text-xs whitespace-nowrap";
-        const runHour = run.run_id.slice(-2) + 'Z';
-        const isSynoptic = SYNOPTIC_HOURS.includes(run.run_id.slice(-2));
-        const color = modelColors[run.modelId] || '#94a3b8';
-        // Format date from init_time (e.g., "Jan 23")
-        const initDate = new Date(run.init_time);
-        const dateStr = initDate.toLocaleString('en-US', { month: 'short', day: 'numeric' });
-        th.innerHTML = `<span style="color: ${color}">${run.model_id.toUpperCase().replace('_', ' ')}</span><br><span class="text-slate-500 font-normal">${dateStr} ${runHour}${isSynoptic ? '*' : ''}</span>`;
-        tableHeadRow.appendChild(th);
-    });
-
-    // Precompute interpolated values for each run at each timeline point
-    const runData = selectedRuns.map(run => {
-        return timeline.map(t => interpolateValue(run.series, t));
-    });
-
-    // Render rows (every 3 hours to keep table readable)
-    const HOUR_STEP = 3;
-    timeline.forEach((time, idx) => {
-        if (idx % HOUR_STEP !== 0) return; // Skip to show every 3 hours
-
-        const date = new Date(time);
-        const tr = document.createElement('tr');
-        tr.className = "bg-white border-b dark:bg-card-dark dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800";
-
-        // Time cell
-        const timeCell = document.createElement('td');
-        timeCell.className = "px-4 py-2 text-xs font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark";
-        const h = date.getHours();
-        if (h === 0) {
-            timeCell.innerHTML = `<span class="font-bold">${date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span><br>12 AM`;
-        } else {
-            timeCell.textContent = date.toLocaleString('en-US', { hour: 'numeric' });
-        }
-        tr.appendChild(timeCell);
-
-        // Value cells for each run
-        runData.forEach((data, runIdx) => {
-            const td = document.createElement('td');
-            td.className = "px-3 py-2 text-xs text-center";
-            const val = data[idx];
-            if (val !== null) {
-                td.textContent = val.toFixed(1) + VAR_CONFIG[currentVariable].unit;
-            } else {
-                td.textContent = '-';
-                td.classList.add('text-slate-400');
+        const latestRunByModel = {};
+        runs.forEach(run => {
+            if (!latestRunByModel[run.model_id]) {
+                latestRunByModel[run.model_id] = run.run_id;
             }
-            tr.appendChild(td);
         });
 
-        tableBody.appendChild(tr);
-    });
+        const latestInit = Math.max(...runs.map(r => new Date(r.init_time).getTime()));
+        
+        // De-dupe runs
+        const uniqueRuns = [];
+        const seenRuns = new Set();
+        runs.forEach(r => {
+            const key = `${r.model_id}|${r.run_id}`;
+            if (!seenRuns.has(key)) {
+                seenRuns.add(key);
+                uniqueRuns.push(r);
+            }
+        });
+
+        // --- Build Traces for Plotly ---
+        const traces = uniqueRuns.map(run => {
+            const isLatest = latestRunByModel[run.model_id] === run.run_id;
+            const modelConf = MODEL_CONFIG[run.model_id] || MODEL_CONFIG['other'];
+            const modelName = run.model_id.toUpperCase().replace('_', ' ');
+            
+            // Ghosting logic
+            const runDate = new Date(run.init_time);
+            const ageHours = (latestInit - runDate.getTime()) / 3600000;
+            
+            let opacity = 1.0;
+            let width = 3;
+            let name = modelName;
+
+            if (!isLatest) {
+                if (ageHours < 12) {
+                    opacity = 0.7; // Was 0.5
+                    lineWidth = 2.5;
+                } else {
+                    opacity = 0.4; // Was 0.2
+                    lineWidth = 2;
+                }
+                // Less aggressive fade rate, higher floor
+                opacity = Math.max(0.3, opacity - (ageHours / 200)); 
+                label += ` (${Math.round(ageHours)}h ago)`;
+            } else {
+                label += " (Latest)";
+            }
+            
+            // Extract X and Y
+            const x = run.series.map(p => p.valid_time);
+            const y = run.series.map(p => p.value);
+
+            return {
+                x: x,
+                y: y,
+                type: 'scatter',
+                mode: 'lines',
+                name: name,
+                line: {
+                    color: modelConf.color,
+                    width: width
+                },
+                opacity: opacity,
+                hoverinfo: 'y+name',
+                hovertemplate: `<b>${name}</b>: %{y:.1f}${VAR_CONFIG[currentVariable].unit}<extra></extra>`
+            };
+        });
+
+        // --- Layout Config ---
+        const isDark = document.documentElement.classList.contains('dark');
+        const periodBtn = document.querySelector('.period-btn.bg-primary');
+        const selectedDays = periodBtn ? parseInt(periodBtn.dataset.days) : 3;
+        
+        // Determine Time Range
+        const now = new Date();
+        const startHour = Math.floor(now.getHours() / 6) * 6;
+        const startTime = new Date(now);
+        startTime.setHours(startHour, 0, 0, 0);
+        const endTime = new Date(startTime.getTime() + selectedDays * 24 * 60 * 60 * 1000);
+        
+        // Determine Tick Interval (dtick) based on selected days
+        let dtick = 21600000; // 1 Day: 6 hours
+        if (selectedDays > 1) dtick = 43200000; // 3 Days: 12 hours
+        if (selectedDays > 3) dtick = 86400000; // 7 Days: 24 hours
+
+        const layout = {
+            font: {
+                family: 'Inter, sans-serif',
+                color: isDark ? '#94a3b8' : '#64748b'
+            },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            margin: { l: 40, r: 20, t: 20, b: 40 },
+            showlegend: false, // We use custom toggles
+            xaxis: {
+                type: 'date',
+                range: [startTime.toISOString(), endTime.toISOString()],
+                tickformat: '%-I %p\n%a %b %d', // "6 AM \n Sat Jan 24"
+                dtick: dtick, 
+                gridcolor: isDark ? '#334155' : '#e2e8f0',
+                zeroline: false,
+                fixedrange: true // Disable zoom on x-axis to keep strict range
+            },
+            yaxis: {
+                gridcolor: isDark ? '#334155' : '#e2e8f0',
+                zeroline: false,
+                fixedrange: true // Disable zoom on y-axis
+            },
+            hovermode: false, // Tooltip disabled per user request
+            hoverlabel: {
+                bgcolor: isDark ? '#1e293b' : '#ffffff',
+                bordercolor: isDark ? '#475569' : '#cbd5e1',
+                font: { color: isDark ? '#f8fafc' : '#0f1742' }
+            }
+        };
+
+        const config = {
+            responsive: true,
+            displayModeBar: false
+        };
+
+        Plotly.newPlot('snowChart', traces, layout, config);
+        chartInstance = true; // Mark as initialized
+        
+        // Also build the table using a timeline for interpolation
+        // Create master timeline
+        const masterTimeline = [];
+        let t = startTime.getTime();
+        const endT = endTime.getTime();
+        while (t <= endT) {
+            masterTimeline.push(t);
+            t += 3600000;
+        }
+        renderTable(data, masterTimeline);
+    } catch (e) {
+        console.error("Chart Error:", e);
+        const statusEl = document.getElementById('statusText');
+        if (statusEl) statusEl.innerHTML = `<span style="color:red">Chart Error: ${e.message}</span>`;
+    }
 }
 
-// Helper for table interpolation
 function interpolateValue(series, targetTime) {
     if (!series || !series.length) return null;
-
     const times = series.map(p => new Date(p.valid_time).getTime());
     const idx = times.indexOf(targetTime);
     if (idx !== -1) return series[idx].value;
@@ -698,14 +442,126 @@ function interpolateValue(series, targetTime) {
     let leftIdx = -1, rightIdx = -1;
     for (let i = 0; i < times.length; i++) {
         if (times[i] < targetTime) leftIdx = i;
-        if (times[i] > targetTime) { rightIdx = i; break; }
+        if (times[i] > targetTime) {
+            rightIdx = i;
+            break;
+        }
     }
-
     if (leftIdx === -1 || rightIdx === -1) return null;
 
     const t1 = times[leftIdx], v1 = series[leftIdx].value;
     const t2 = times[rightIdx], v2 = series[rightIdx].value;
-    return v1 + (v2 - v1) * (targetTime - t1) / (t2 - t1);
+    return v1 + (v2 - v1) * ((targetTime - t1) / (t2 - t1));
+}
+
+function renderTable(data, timeline) {
+    try {
+        const tableBody = document.getElementById('dataTableBody');
+        const tableHeadRow = document.querySelector('#dataTableContainer thead tr');
+
+        if (!tableBody || !tableHeadRow) return;
+
+        // Clear existing
+        tableBody.innerHTML = '';
+        tableHeadRow.innerHTML = '<th class="px-4 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>';
+
+        // Get active models from toggles
+        const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
+
+        // Group runs by model
+        const runsByModel = {};
+        Object.values(data.runs).forEach(run => {
+            if (!activeModels.includes(run.model_id)) return;
+            if (!runsByModel[run.model_id]) runsByModel[run.model_id] = [];
+            runsByModel[run.model_id].push(run);
+        });
+
+        const SYNOPTIC_HOURS = ['00', '12'];
+        const selectedRuns = [];
+
+        Object.entries(runsByModel).forEach(([modelId, runs]) => {
+            runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+            const getRunHour = (run) => run.run_id.slice(-2);
+            const synopticRuns = runs.filter(r => SYNOPTIC_HOURS.includes(getRunHour(r)));
+            const nonSynopticRuns = runs.filter(r => !SYNOPTIC_HOURS.includes(getRunHour(r)));
+            let selected = [];
+            if (synopticRuns.length > 0) {
+                selected = nonSynopticRuns.slice(0, 2);
+                selected.push(synopticRuns[0]);
+            } else {
+                selected = runs.slice(0, 3);
+            }
+            selected.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+            selected.forEach(run => selectedRuns.push({ ...run, modelId }));
+        });
+
+        const modelOrder = ['hrrr', 'nam_nest', 'gfs', 'nbm'];
+        selectedRuns.sort((a, b) => {
+            const orderA = modelOrder.indexOf(a.modelId);
+            const orderB = modelOrder.indexOf(b.modelId);
+            if (orderA !== orderB) return orderA - orderB;
+            return new Date(b.init_time) - new Date(a.init_time);
+        });
+
+        const modelColors = {
+            'hrrr': '#3b82f6',
+            'nam_nest': '#ef4444',
+            'gfs': '#22d3ee',
+            'nbm': '#a855f7'
+        };
+
+        selectedRuns.forEach(run => {
+            const th = document.createElement('th');
+            th.className = "px-3 py-2 text-xs whitespace-nowrap";
+            const runHour = run.run_id.slice(-2) + 'Z';
+            const isSynoptic = SYNOPTIC_HOURS.includes(run.run_id.slice(-2));
+            const color = modelColors[run.modelId] || '#94a3b8';
+            const initDate = new Date(run.init_time);
+            const dateStr = initDate.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+            th.innerHTML = `<span style="color: ${color}">${run.model_id.toUpperCase().replace('_', ' ')}</span><br><span class="text-slate-500 font-normal">${dateStr} ${runHour}${isSynoptic ? '*' : ''}</span>`;
+            tableHeadRow.appendChild(th);
+        });
+
+        const runData = selectedRuns.map(run => {
+            return timeline.map(t => interpolateValue(run.series, t));
+        });
+
+        const HOUR_STEP = 3;
+        timeline.forEach((time, idx) => {
+            if (idx % HOUR_STEP !== 0) return;
+
+            const date = new Date(time);
+            const tr = document.createElement('tr');
+            tr.className = "bg-white border-b dark:bg-card-dark dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800";
+
+            const timeCell = document.createElement('td');
+            timeCell.className = "px-4 py-2 text-xs font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark";
+            const h = date.getHours();
+            if (h === 0) {
+                timeCell.innerHTML = `<span class="font-bold">${date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span><br>12 AM`;
+            } else {
+                timeCell.textContent = date.toLocaleString('en-US', { hour: 'numeric' });
+            }
+            tr.appendChild(timeCell);
+
+            runData.forEach((data, runIdx) => {
+                const td = document.createElement('td');
+                td.className = "px-3 py-2 text-xs text-center";
+                const val = data[idx];
+                if (val !== null) {
+                    td.textContent = val.toFixed(1) + VAR_CONFIG[currentVariable].unit;
+                } else {
+                    td.textContent = '-';
+                    td.classList.add('text-slate-400');
+                }
+                tr.appendChild(td);
+            });
+
+            tableBody.appendChild(tr);
+        });
+    } catch (e) {
+        console.error("Table Error:", e);
+    }
 }
 
 document.getElementById('toggleTableBtn').addEventListener('click', () => {
@@ -722,26 +578,41 @@ async function loadData(daysOverride = null) {
     
     updateVarButtons();
 
-    const days = daysOverride || document.querySelector('.period-btn.bg-primary').dataset.days;
+    let days = daysOverride;
+    if (!days) {
+        const periodBtn = document.querySelector('.period-btn.bg-primary');
+        days = periodBtn ? periodBtn.dataset.days : '3';
+    }
+    
     document.getElementById('statusText').textContent = 'Updating forecast...';
     
     try {
-        const data = await fetchJSON(`/api/timeseries/multirun?lat=${currentLat}&lon=${currentLon}&model=all&variable=${currentVariable}&days=${days}`);
+        const url = `/api/timeseries/multirun?lat=${currentLat}&lon=${currentLon}&model=all&variable=${currentVariable}&days=${days}`;
+        console.log('Fetching:', url);
+        const data = await fetchJSON(url);
+        console.log('Got data, runs:', Object.keys(data.runs).length);
         currentData = data; // Store for toggling
-        
+
         updateChart(data);
         const modelCount = new Set(Object.values(data.runs).map(r => r.model_id)).size;
-        document.getElementById('statusText').textContent = `Forecast from ${modelCount} models • Live 12Z`;
-        
+        document.getElementById('statusText').textContent = `Forecast from ${modelCount} models`;
+
     } catch (e) {
         document.getElementById('statusText').textContent = `Error: ${e.message}`;
-        console.error(e);
+        console.error('loadData error:', e);
+        console.error('Stack:', e.stack);
     }
 }
 
 function setLocation(lat, lon, name) {
-    currentLat = parseFloat(lat).toFixed(4);
-    currentLon = parseFloat(lon).toFixed(4);
+    const parsedLat = parseFloat(lat);
+    const parsedLon = parseFloat(lon);
+    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+        console.warn('Invalid coordinates:', lat, lon);
+        return;
+    }
+    currentLat = parsedLat.toFixed(4);
+    currentLon = parsedLon.toFixed(4);
     currentName = name;
     
     document.getElementById('locName').textContent = name;
@@ -797,9 +668,14 @@ document.getElementById('geolocateBtn').addEventListener('click', () => {
 });
 
 // Init
-const last = JSON.parse(localStorage.getItem(STORAGE_KEY_LAST_LOC));
-if (last) {
-    setLocation(last.lat, last.lon, last.name);
+let last = null;
+try {
+    last = JSON.parse(localStorage.getItem(STORAGE_KEY_LAST_LOC));
+} catch (e) {
+    console.warn('Failed to parse stored location:', e);
+}
+if (last && last.lat && last.lon) {
+    setLocation(last.lat, last.lon, last.name || 'Saved Location');
 } else {
     setLocation(40.0488, -75.3890, "Philadelphia");
 }
