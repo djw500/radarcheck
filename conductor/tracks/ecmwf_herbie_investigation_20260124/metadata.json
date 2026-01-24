@@ -1,0 +1,8 @@
+{
+  "track_id": "ecmwf_herbie_investigation_20260124",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-01-24T00:00:00Z",
+  "updated_at": "2026-01-24T00:00:00Z",
+  "description": "Investigate Herbie for ECMWF data fetching and implement ECMWF support if feasible"
+}
