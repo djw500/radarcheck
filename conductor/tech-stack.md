@@ -10,6 +10,7 @@
 - **Source:** NOAA NOMADS (GRIB2 format)
 
 ## Infrastructure
+- **Virtual Environment:** `.venv` (already configured and required for development)
 - **Server:** Gunicorn behind Nginx (via Fly.io default)
 - **Background Tasks:** Supervisor (managing `build_tiles.py`)
 - **Deployment:** Docker on Fly.io
