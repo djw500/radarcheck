@@ -4,8 +4,11 @@
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>Forecast Analysis | RadarCheck</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
     <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script id="plotlyScript" src="https://cdn.plot.ly/plotly-basic-2.27.0.min.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
     <script>
@@ -33,6 +36,14 @@
     </script>
     <style>
         body { font-family: 'Inter', sans-serif; }
+        /* Fallback sizing so chart space renders instantly even before Tailwind loads */
+        #chartCard { position: relative; height: 60vh; min-height: 400px; }
+        #snowChart { width: 100%; height: 100%; }
+        /* Lightweight skeleton shimmer while data/Plotly load */
+        .chart-skeleton { position: absolute; inset: 0; z-index: 10; overflow: hidden; background: linear-gradient(180deg, rgba(148,163,184,0.10), rgba(148,163,184,0.08)); }
+        html.dark .chart-skeleton { background: linear-gradient(180deg, rgba(30,41,59,0.45), rgba(30,41,59,0.4)); }
+        .chart-skeleton::before { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background-image: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.45), rgba(255,255,255,0)); animation: chart-shimmer 1.1s infinite; }
+        @keyframes chart-shimmer { from { transform: translateX(-100%);} to { transform: translateX(100%);} }
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-200 min-h-screen flex flex-col font-display antialiased selection:bg-primary selection:text-white">
@@ -97,8 +108,9 @@
     </div>
 
     <!-- Chart Card -->
-    <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm relative h-[60vh] min-h-[400px]">
+    <div id="chartCard" class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm relative h-[60vh] min-h-[400px]">
         <div id="snowChart" class="w-full h-full"></div>
+        <div id="chartSkeleton" class="chart-skeleton" aria-hidden="true"></div>
     </div>
 
     <!-- Data Table Toggle -->
@@ -181,12 +193,14 @@ window.onerror = function(msg, url, line, col, error) {
 // --- Configuration ---
 const STORAGE_KEY_LAST_LOC = 'radarcheck_last_location';
 const STORAGE_KEY_LAST_VAR = 'radarcheck_last_variable';
+const STORAGE_KEY_CACHE_PREFIX = 'radarcheck_cache_v1:';
+const LOCAL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 let chartInstance = null;
 let currentLat = null;
 let currentLon = null;
 let currentName = null;
 let currentData = null; // Store fetched data locally for toggling
-let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR);
+let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR) || 'asnow';
 
 const MODEL_CONFIG = {
     'hrrr': { color: '#3b82f6', glow: 'chart-glow-blue' },     // Blue
@@ -264,15 +278,83 @@ function updateVarButtons() {
 
 document.querySelectorAll('.model-toggle').forEach(toggle => {
     toggle.addEventListener('change', () => {
-        if (currentData) updateChart(currentData);
+        if (currentData) updateChartSafe(currentData);
     });
 });
 
-// --- API Helpers ---
+// ... API Helpers ...
+const requestCache = new Map();
+const CACHE_DURATION = 300 * 1000; // 5 minutes
+
 async function fetchJSON(url) {
+    const now = Date.now();
+    if (requestCache.has(url)) {
+        const { timestamp, data } = requestCache.get(url);
+        if (now - timestamp < CACHE_DURATION) {
+            console.log('Cache hit:', url);
+            return data;
+        }
+    }
+
     const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
-    return res.json();
+    const data = await res.json();
+    
+    requestCache.set(url, { timestamp: now, data });
+    return data;
+}
+
+// --- Render readiness + skeleton helpers ---
+function whenPlotlyReady() {
+    return new Promise((resolve) => {
+        if (window.Plotly) return resolve();
+        const s = document.getElementById('plotlyScript');
+        if (s) {
+            s.addEventListener('load', () => resolve(), { once: true });
+        } else {
+            const iv = setInterval(() => {
+                if (window.Plotly) { clearInterval(iv); resolve(); }
+            }, 50);
+        }
+    });
+}
+
+function hideChartSkeleton() {
+    const el = document.getElementById('chartSkeleton');
+    if (el) el.style.display = 'none';
+}
+
+function showChartSkeleton() {
+    const el = document.getElementById('chartSkeleton');
+    if (el) el.style.display = '';
+}
+
+async function ensureEmptyChart() {
+    await whenPlotlyReady();
+    if (!chartInstance) {
+        const isDark = document.documentElement.classList.contains('dark');
+        const layout = {
+            font: { family: 'Inter, sans-serif', color: isDark ? '#94a3b8' : '#64748b' },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            margin: { l: 40, r: 20, t: 20, b: 40 },
+            xaxis: { type: 'date', gridcolor: isDark ? '#334155' : '#e2e8f0', zeroline: false, fixedrange: true },
+            yaxis: { gridcolor: isDark ? '#334155' : '#e2e8f0', zeroline: false, fixedrange: true },
+            hovermode: false
+        };
+        Plotly.newPlot('snowChart', [], layout, { responsive: true, displayModeBar: false });
+        chartInstance = true;
+    }
+}
+
+async function updateChartSafe(data) {
+    await whenPlotlyReady();
+    updateChart(data);
+    hideChartSkeleton();
+}
+
+function cacheKeyFor(lat, lon, variable, days) {
+    return `${STORAGE_KEY_CACHE_PREFIX}${lat},${lon}|${variable}|${days}`;
 }
 
 // --- Plotly Chart Logic ---
@@ -290,6 +372,13 @@ function updateChart(data) {
         
         // Sort runs by init time descending
         runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
+
+        // Guard against empty runs
+        if (runs.length === 0) {
+            Plotly.newPlot('snowChart', [], {}, { responsive: true, displayModeBar: false });
+            renderTable(data, []);
+            return;
+        }
 
         const latestRunByModel = {};
         runs.forEach(run => {
@@ -327,17 +416,17 @@ function updateChart(data) {
 
             if (!isLatest) {
                 if (ageHours < 12) {
-                    opacity = 0.7; // Was 0.5
-                    lineWidth = 2.5;
+                    opacity = 0.7;
+                    width = 2.5;
                 } else {
-                    opacity = 0.4; // Was 0.2
-                    lineWidth = 2;
+                    opacity = 0.4;
+                    width = 2;
                 }
                 // Less aggressive fade rate, higher floor
-                opacity = Math.max(0.3, opacity - (ageHours / 200)); 
-                label += ` (${Math.round(ageHours)}h ago)`;
+                opacity = Math.max(0.3, opacity - (ageHours / 200));
+                name += ` (${Math.round(ageHours)}h ago)`;
             } else {
-                label += " (Latest)";
+                name += " (Latest)";
             }
             
             // Extract X and Y
@@ -356,7 +445,7 @@ function updateChart(data) {
                 },
                 opacity: opacity,
                 hoverinfo: 'y+name',
-                hovertemplate: `<b>${name}</b>: %{y:.1f}${VAR_CONFIG[currentVariable].unit}<extra></extra>`
+                hovertemplate: `<b>${name}</b>: %{y:.1f}${(VAR_CONFIG[currentVariable] || {unit:''}).unit}<extra></extra>`
             };
         });
 
@@ -413,7 +502,8 @@ function updateChart(data) {
             displayModeBar: false
         };
 
-        Plotly.newPlot('snowChart', traces, layout, config);
+        // Use Plotly.react for efficient updates (diffing)
+        Plotly.react('snowChart', traces, layout, config);
         chartInstance = true; // Mark as initialized
         
         // Also build the table using a timeline for interpolation
@@ -583,8 +673,29 @@ async function loadData(daysOverride = null) {
         const periodBtn = document.querySelector('.period-btn.bg-primary');
         days = periodBtn ? periodBtn.dataset.days : '3';
     }
-    
-    document.getElementById('statusText').textContent = 'Updating forecast...';
+    // Show skeleton and render an empty chart immediately
+    showChartSkeleton();
+    ensureEmptyChart().catch(() => {});
+
+    const statusEl = document.getElementById('statusText');
+    statusEl.textContent = 'Updating forecast...';
+
+    // Try localStorage cache for instant render
+    const key = cacheKeyFor(currentLat, currentLon, currentVariable, String(days));
+    try {
+        const cached = localStorage.getItem(key);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            const freshEnough = parsed && parsed.ts && (Date.now() - parsed.ts) < LOCAL_CACHE_TTL_MS;
+            if (parsed && parsed.data && freshEnough) {
+                currentData = parsed.data;
+                updateChartSafe(currentData);
+                statusEl.textContent = 'Showing cached forecast… updating…';
+            }
+        }
+    } catch (e) {
+        console.debug('Cache read failed', e);
+    }
     
     try {
         const url = `/api/timeseries/multirun?lat=${currentLat}&lon=${currentLon}&model=all&variable=${currentVariable}&days=${days}`;
@@ -592,15 +703,29 @@ async function loadData(daysOverride = null) {
         const data = await fetchJSON(url);
         console.log('Got data, runs:', Object.keys(data.runs).length);
         currentData = data; // Store for toggling
-
-        updateChart(data);
+        await updateChartSafe(data);
+        // persist to localStorage for instant render on reload
+        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
         const modelCount = new Set(Object.values(data.runs).map(r => r.model_id)).size;
-        document.getElementById('statusText').textContent = `Forecast from ${modelCount} models`;
+        statusEl.textContent = `Forecast from ${modelCount} models`;
+        
+        // Trigger background preload for other variables
+        preloadData(days);
 
     } catch (e) {
-        document.getElementById('statusText').textContent = `Error: ${e.message}`;
+        statusEl.textContent = `Error: ${e.message}`;
         console.error('loadData error:', e);
         console.error('Stack:', e.stack);
+    }
+}
+
+async function preloadData(days) {
+    for (const varId of Object.keys(VAR_CONFIG)) {
+        if (varId === currentVariable) continue;
+        
+        const url = `/api/timeseries/multirun?lat=${currentLat}&lon=${currentLon}&model=all&variable=${varId}&days=${days}`;
+        // We just fetch to populate cache, we don't use the result here
+        fetchJSON(url).catch(e => console.debug(`Preload failed for ${varId}:`, e));
     }
 }
 
