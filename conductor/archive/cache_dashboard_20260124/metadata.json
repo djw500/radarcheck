@@ -1,0 +1,8 @@
+{
+  "track_id": "cache_dashboard_20260124",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-01-24T17:00:00Z",
+  "updated_at": "2026-01-24T17:00:00Z",
+  "description": "create a cache dashboard page reachable from the main site so that i can easily see the status of the cache, as well as what runs are expected to be downloaded next"
+}
