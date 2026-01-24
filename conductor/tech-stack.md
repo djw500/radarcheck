@@ -7,7 +7,7 @@
 ## Data Engineering
 - **Processing:** NumPy, xarray, cfgrib, pandas, geopandas
 - **Geospatial:** Rasterio, Shapely
-- **Source:** NOAA NOMADS (GRIB2 format)
+- **Source:** NOAA NOMADS (GRIB2 format), ECMWF Open Data (via Herbie)
 
 ## Infrastructure
 - **Virtual Environment:** `.venv` (already configured and required for development)
