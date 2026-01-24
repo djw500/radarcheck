@@ -32,6 +32,7 @@ primary_region = 'ewr'
   TILE_BUILD_INTERVAL_MINUTES = "15"
   TILE_BUILD_MAX_HOURS_HRRR = "24"
   TILE_BUILD_MAX_HOURS_GFS = "168"
+  TILE_BUILD_VARIABLES = "asnow,t2m,wind_10m,gust,apcp,csnow,snod,prate"
 
 [[vm]]
   memory = '1gb'
