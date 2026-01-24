@@ -71,6 +71,8 @@ MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
 MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
 KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
 BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
+# Max builds per model per cycle - ensures all models get attention
+MAX_BUILDS_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PER_MODEL", "3"))
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -232,22 +234,32 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
                 return False
             hours = d['hours']
             actual_hours = len(hours)
-        
+
         # If we have at least 90% of expected hours, consider it complete
         if actual_hours >= expected_max_hours * 0.9:
             return True
-            
-        # If the run is older than 8 hours, it's as complete as it will ever be
+
+        # Get run age
         try:
-            # run_id format: run_YYYYMMDD_HH
             parts = run_id.split('_')
             run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
             now = datetime.datetime.now(datetime.timezone.utc)
-            if (now - run_dt).total_seconds() > 8 * 3600:
-                return True
+            age_hours = (now - run_dt).total_seconds() / 3600
         except:
-            pass
-            
+            age_hours = 999  # Assume old if can't parse
+
+        # If the run is older than 6 hours, NOMADS has published everything it will
+        # Accept whatever hours we have as complete
+        if age_hours > 6:
+            return True
+
+        # For runs < 6h old: require at least 50% of hours that SHOULD be available
+        # NOMADS publishes ~1 hour of forecast per 5-10 minutes after init
+        # So a 2h old run should have ~12-24 hours available
+        hours_should_be_available = min(expected_max_hours, int(age_hours * 12))
+        if hours_should_be_available > 0 and actual_hours >= hours_should_be_available * 0.5:
+            return True
+
         return False
     except Exception:
         return False
@@ -386,6 +398,36 @@ def build_cycle():
     return builds_attempted, builds_succeeded, all_targets
 
 
+def cleanup_old_gribs(max_runs_per_model: int = 2):
+    """Clean up old GRIB files to save disk space.
+
+    GRIBs are only needed during tile building, so we keep minimal runs cached.
+    """
+    grib_dir = repomap.get("GRIB_CACHE_DIR", "cache/gribs")
+    if not os.path.isdir(grib_dir):
+        return
+
+    for model_id in os.listdir(grib_dir):
+        model_dir = os.path.join(grib_dir, model_id)
+        if not os.path.isdir(model_dir):
+            continue
+
+        runs = sorted(
+            [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
+            reverse=True
+        )
+
+        # Keep only the most recent runs
+        for old_run in runs[max_runs_per_model:]:
+            old_run_dir = os.path.join(model_dir, old_run)
+            logger.info(f"GRIB cleanup: Removing {model_id}/{old_run}")
+            try:
+                import shutil
+                shutil.rmtree(old_run_dir)
+            except Exception as e:
+                logger.error(f"Failed to remove {old_run_dir}: {e}")
+
+
 def cleanup_old_runs(max_runs_to_keep: int = 48):
     """Clean up old tile runs using a tiered retention policy to track evolution:
     - Keep ALL runs for the last 12 hours (high-res evolution)
@@ -504,8 +546,9 @@ def main():
             # Run build cycle
             _, _, targets = build_cycle()
 
-            # Cleanup old runs periodically using tiered policy
+            # Cleanup old runs and GRIBs periodically
             cleanup_old_runs()
+            cleanup_old_gribs()
             
             # Record success and sleep state
             now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -532,5 +575,6 @@ if __name__ == "__main__":
         logger.info("Running single build cycle (--once mode)")
         build_cycle()
         cleanup_old_runs()
+        cleanup_old_gribs()
     else:
         main()
