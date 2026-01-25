@@ -77,17 +77,8 @@ def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> N
                 logger.error(f"Body preview: {preview[:200]!r}")
             raise ValueError(f"Unexpected content-type '{ctype}' from server")
 
-        # Heuristic guard: reject very small responses when CL is present
-        if clen is not None:
-            try:
-                if int(clen) < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
-                    logger.error(
-                        f"Content-Length too small ({clen} < {repomap['MIN_GRIB_FILE_SIZE_BYTES']}); rejecting download."
-                    )
-                    raise ValueError("Response too small for GRIB")
-            except ValueError:
-                # If header is malformed, ignore and continue
-                pass
+        # Do not rely on Content-Length for streaming endpoints (e.g., NOMADS filter CGI),
+        # which may report 0 while still returning a valid GRIB body. Validate by streamed size.
 
         # Create directory if it doesn't exist
         dir_path = os.path.dirname(local_path)
