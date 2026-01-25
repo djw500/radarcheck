@@ -78,6 +78,7 @@ WEATHER_VARIABLES = {
         # e.g., ECMWF 'tp' has units 'm' (meters of water)
         "unit_conversions_by_units": {
             "m": "m_to_in",
+            "m of water equivalent": "m_water_to_in_snow",
             "kg m-2": "kg_m2_to_in",
             "kg m**-2": "kg_m2_to_in",
         },
@@ -184,6 +185,16 @@ WEATHER_VARIABLES = {
         "category": "wind",
         "conversion": "m_s_to_mph",
         "model_exclusions": ["icon"],
+    },
+    "msl": {
+        "display_name": "MSL Pressure",
+        "units": "mb",
+        "short_name": "msl",
+        "colormap": "viridis",
+        "vmin": 950,
+        "vmax": 1050,
+        "category": "surface",
+        "conversion": "pa_to_mb",
     },
     "cape": {
         "nomads_params": ["var_CAPE"],

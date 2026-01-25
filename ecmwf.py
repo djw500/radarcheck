@@ -47,6 +47,8 @@ def fetch_grib_herbie(
         "t2m": ":2t:",
         "dpt": ":2d:",
         "apcp": ":tp:",  # Total precipitation
+        "asnow": ":sf:", # Snowfall (water equivalent)
+        "cape": ":mucape:", # Most unstable CAPE
         "msl": ":msl:",  # Mean sea level pressure
         "wind_10m": ":10[uv]:",  # u and v components
         "gust": ":10fg:",       # 10m wind gust
