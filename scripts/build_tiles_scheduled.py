@@ -75,7 +75,9 @@ BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
 MAX_BUILDS_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PER_MODEL", "3"))
 # Cleanup settings - keep cache small on constrained environments
 MAX_GRIB_RUNS_TO_KEEP = int(os.environ.get("TILE_BUILD_GRIB_RUNS_KEEP", "1"))
-MAX_TILE_RUNS_TO_KEEP = int(os.environ.get("TILE_BUILD_TILE_RUNS_KEEP", "12"))
+# Tile retention: keep N synoptic (00/06/12/18z) + M hourly runs per model
+MAX_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "4"))
+MAX_HOURLY_RUNS = int(os.environ.get("TILE_BUILD_HOURLY_RUNS", "6"))
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -456,11 +458,11 @@ def cleanup_old_gribs(max_runs_per_model: int = None):
                 logger.error(f"Failed to remove {old_run_dir}: {e}")
 
 
-def cleanup_old_runs(max_runs_per_model: int = None):
-    """Clean up old tile runs - keep only the N most recent per model."""
-    if max_runs_per_model is None:
-        max_runs_per_model = MAX_TILE_RUNS_TO_KEEP
-
+def cleanup_old_runs():
+    """Clean up old tile runs using tiered retention:
+    - Keep up to MAX_SYNOPTIC_RUNS synoptic runs (00, 06, 12, 18z)
+    - Keep up to MAX_HOURLY_RUNS recent hourly runs (for HRRR etc)
+    """
     for region_id in REGIONS:
         res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
         res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
@@ -480,10 +482,31 @@ def cleanup_old_runs(max_runs_per_model: int = None):
                 reverse=True
             )
 
-            # Remove runs beyond the limit
-            runs_to_remove = runs[max_runs_per_model:]
+            if not runs:
+                continue
+
+            # Separate synoptic (00, 06, 12, 18z) from hourly runs
+            synoptic_runs = []
+            hourly_runs = []
+            for run_id in runs:
+                try:
+                    init_hour = int(run_id.split('_')[2])
+                    if init_hour % 6 == 0:
+                        synoptic_runs.append(run_id)
+                    else:
+                        hourly_runs.append(run_id)
+                except (IndexError, ValueError):
+                    hourly_runs.append(run_id)
+
+            # Keep top N synoptic + top M hourly
+            keep_synoptic = set(synoptic_runs[:MAX_SYNOPTIC_RUNS])
+            keep_hourly = set(hourly_runs[:MAX_HOURLY_RUNS])
+            keep_all = keep_synoptic | keep_hourly
+
+            runs_to_remove = [r for r in runs if r not in keep_all]
+
             if runs_to_remove:
-                logger.info(f"Tile cleanup {model_id}: keeping {min(len(runs), max_runs_per_model)}, removing {len(runs_to_remove)}")
+                logger.info(f"Tile cleanup {model_id}: keeping {len(keep_synoptic)} synoptic + {len(keep_hourly)} hourly, removing {len(runs_to_remove)}")
 
             for old_run in runs_to_remove:
                 old_run_dir = os.path.join(model_dir, old_run)
