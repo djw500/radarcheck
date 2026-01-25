@@ -73,11 +73,11 @@ KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
 BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
 # Max builds per model per cycle - ensures all models get attention
 MAX_BUILDS_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PER_MODEL", "3"))
-# Cleanup settings - keep cache small on constrained environments
-MAX_GRIB_RUNS_TO_KEEP = int(os.environ.get("TILE_BUILD_GRIB_RUNS_KEEP", "1"))
+# Cleanup settings - defaults are generous for local dev, fly.toml overrides for prod
+MAX_GRIB_RUNS_TO_KEEP = int(os.environ.get("TILE_BUILD_GRIB_RUNS_KEEP", "2"))
 # Tile retention: keep N synoptic (00/06/12/18z) + M hourly runs per model
-MAX_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "4"))
-MAX_HOURLY_RUNS = int(os.environ.get("TILE_BUILD_HOURLY_RUNS", "6"))
+MAX_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "8"))
+MAX_HOURLY_RUNS = int(os.environ.get("TILE_BUILD_HOURLY_RUNS", "12"))
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
