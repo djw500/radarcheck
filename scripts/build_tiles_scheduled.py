@@ -73,6 +73,9 @@ KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
 BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
 # Max builds per model per cycle - ensures all models get attention
 MAX_BUILDS_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PER_MODEL", "3"))
+# Cleanup settings - keep cache small on constrained environments
+MAX_GRIB_RUNS_TO_KEEP = int(os.environ.get("TILE_BUILD_GRIB_RUNS_KEEP", "1"))
+MAX_TILE_RUNS_TO_KEEP = int(os.environ.get("TILE_BUILD_TILE_RUNS_KEEP", "12"))
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -420,11 +423,14 @@ def build_cycle():
     return total_attempted, total_succeeded, all_targets
 
 
-def cleanup_old_gribs(max_runs_per_model: int = 2):
+def cleanup_old_gribs(max_runs_per_model: int = None):
     """Clean up old GRIB files to save disk space.
 
     GRIBs are only needed during tile building, so we keep minimal runs cached.
     """
+    if max_runs_per_model is None:
+        max_runs_per_model = MAX_GRIB_RUNS_TO_KEEP
+
     grib_dir = repomap.get("GRIB_CACHE_DIR", "cache/gribs")
     if not os.path.isdir(grib_dir):
         return
@@ -450,12 +456,11 @@ def cleanup_old_gribs(max_runs_per_model: int = 2):
                 logger.error(f"Failed to remove {old_run_dir}: {e}")
 
 
-def cleanup_old_runs(max_runs_to_keep: int = 48):
-    """Clean up old tile runs using a tiered retention policy to track evolution:
-    - Keep ALL runs for the last 12 hours (high-res evolution)
-    - Keep one run every 6 hours for the last 3 days (synoptic evolution)
-    - Remove anything older or outside these buckets
-    """
+def cleanup_old_runs(max_runs_per_model: int = None):
+    """Clean up old tile runs - keep only the N most recent per model."""
+    if max_runs_per_model is None:
+        max_runs_per_model = MAX_TILE_RUNS_TO_KEEP
+
     for region_id in REGIONS:
         res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
         res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
@@ -475,59 +480,14 @@ def cleanup_old_runs(max_runs_to_keep: int = 48):
                 reverse=True
             )
 
-            if not runs:
-                continue
-
-            now = datetime.datetime.now(datetime.timezone.utc)
-            kept_runs = []
-            runs_to_remove = []
-
-            # Track which synoptic 6h buckets we've already filled (00, 06, 12, 18)
-            # Key: (date, bucket_hour)
-            filled_6h_buckets = set()
-
-            for run_id in runs:
-                try:
-                    # run_id format: run_YYYYMMDD_HH
-                    parts = run_id.split('_')
-                    run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
-                    age_hours = (now - run_dt).total_seconds() / 3600
-                    
-                    # Tier 1: Keep everything from the last 12 hours
-                    if age_hours <= 12:
-                        print(f"  [KEEP] {model_id}/{run_id}: Recent (age: {age_hours:.1f}h)")
-                        kept_runs.append(run_id)
-                        continue
-                    
-                    # Tier 2: Keep synoptic runs (00, 06, 12, 18) for up to 3 days
-                    if age_hours <= 72:
-                        init_hour = int(parts[2])
-                        bucket = (parts[1], (init_hour // 6) * 6)
-                        if init_hour % 6 == 0 and bucket not in filled_6h_buckets:
-                            print(f"  [KEEP] {model_id}/{run_id}: Synoptic bucket {bucket[1]}z (age: {age_hours:.1f}h)")
-                            kept_runs.append(run_id)
-                            filled_6h_buckets.add(bucket)
-                            continue
-
-                    # If it doesn't fit a tier, it's a candidate for removal
-                    if len(kept_runs) < 5:
-                        print(f"  [KEEP] {model_id}/{run_id}: Safety minimum")
-                        kept_runs.append(run_id)
-                    else:
-                        print(f"  [DROP] {model_id}/{run_id}: Outside retention policy")
-                        runs_to_remove.append(run_id)
-                except Exception as e:
-                    if len(kept_runs) < 5:
-                        kept_runs.append(run_id)
-                    else:
-                        runs_to_remove.append(run_id)
-
+            # Remove runs beyond the limit
+            runs_to_remove = runs[max_runs_per_model:]
             if runs_to_remove:
-                logger.info(f"Cleanup summary for {model_id}: Keeping {len(kept_runs)}, Removing {len(runs_to_remove)}")
-            
+                logger.info(f"Tile cleanup {model_id}: keeping {min(len(runs), max_runs_per_model)}, removing {len(runs_to_remove)}")
+
             for old_run in runs_to_remove:
                 old_run_dir = os.path.join(model_dir, old_run)
-                logger.info(f"Tiered cleanup: Removing old run {old_run}")
+                logger.info(f"Removing old tile run: {model_id}/{old_run}")
                 try:
                     import shutil
                     shutil.rmtree(old_run_dir)

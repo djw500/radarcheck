@@ -28,11 +28,17 @@ primary_region = 'ewr'
     path = '/health'
 
 # Environment variables for tile builder (used by supervisor)
+# Tuned for 1GB volume - aggressive cleanup, fewer hours
 [env]
   TILE_BUILD_INTERVAL_MINUTES = "15"
-  TILE_BUILD_MAX_HOURS_HRRR = "24"
-  TILE_BUILD_MAX_HOURS_GFS = "168"
+  TILE_BUILD_MAX_HOURS_HRRR = "18"
+  TILE_BUILD_MAX_HOURS_NAM = "36"
+  TILE_BUILD_MAX_HOURS_GFS = "72"
+  TILE_BUILD_MAX_HOURS_NBM = "72"
   TILE_BUILD_VARIABLES = "asnow,t2m,wind_10m,gust,apcp,csnow,snod,prate"
+  # Keep cache small
+  TILE_BUILD_GRIB_RUNS_KEEP = "1"
+  TILE_BUILD_TILE_RUNS_KEEP = "6"
 
 [[vm]]
   memory = '1gb'
