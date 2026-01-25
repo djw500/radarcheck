@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from config import repomap
 from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust, is_tile_valid
 from utils import download_file, format_forecast_hour, time_function
-from cache_builder import get_available_model_runs, download_all_hours_parallel
+from cache_builder import get_available_model_runs, download_all_hours_parallel, get_valid_forecast_hours
 import requests
 import xarray as xr
 from filelock import FileLock, Timeout
@@ -91,10 +91,22 @@ def build_region_tiles(
         npz_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_info["run_id"], f"{variable_id}.npz")
         meta_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_info["run_id"], f"{variable_id}.meta.json")
         
+        # If tiles exist and meta matches region, verify hours completeness as well
         if os.path.exists(npz_path) and is_tile_valid(meta_path, region, res_deg):
-            print(f"--- [SKIP] {variable_id} (Valid tiles already exist) ---")
-            audit_stats["tiles_skipped"] += 1
-            continue
+            try:
+                expected_hours = get_valid_forecast_hours(model_id, max_hours)
+                import numpy as _np
+                with _np.load(npz_path) as d:
+                    existing_hours = d.get('hours', _np.array([], dtype=_np.int32)).tolist()
+                if existing_hours == expected_hours:
+                    print(f"--- [SKIP] {variable_id} (Tiles complete and valid) ---")
+                    audit_stats["tiles_skipped"] += 1
+                    continue
+                else:
+                    print(f"--- [REBUILD] {variable_id} (Incomplete hours: have {len(existing_hours)} expected {len(expected_hours)}) ---")
+            except Exception:
+                # Fall through to rebuild on any error reading/validating hours
+                pass
 
         if audit_only:
             print(f"--- [AUDIT] {variable_id} (Would process) ---")
@@ -114,6 +126,12 @@ def build_region_tiles(
         )
         if not grib_paths:
             continue
+        # Optional: diagnostics if incomplete
+        expected_hours = get_valid_forecast_hours(model_id, max_hours)
+        got_hours = sorted(grib_paths.keys())
+        if got_hours != expected_hours:
+            missing = [h for h in expected_hours if h not in grib_paths]
+            print(f"WARNING: Missing {len(missing)} steps for {variable_id}: first few {missing[:5]}")
 
         try:
             mins, maxs, means, hours, index_meta = build_tiles_for_variable(

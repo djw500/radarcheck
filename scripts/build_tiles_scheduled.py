@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import repomap
 from utils import format_forecast_hour
+from cache_builder import get_valid_forecast_hours
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -199,8 +200,10 @@ def tiles_exist_any(region_id: str, model_id: str) -> bool:
 
 
 def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: int = 24) -> bool:
-    """Check if tiles already exist and are sufficiently complete for a specific run.
-    If the run is very recent, we might want to retry if it has fewer hours than expected.
+    """Check if tiles already exist and match the exact expected forecast steps.
+
+    Deterministic policy: require the hours array in a proxy variable (t2m)
+    to exactly match the model's schedule up to expected_max_hours.
     """
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
     res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
@@ -231,41 +234,13 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
         # If meta can't be read, force rebuild
         return False
         
-    # Check if the run is complete enough
+    # Strict completeness check against model schedule
     try:
         import numpy as np
         with np.load(npz_path) as d:
-            if 'hours' not in d:
-                return False
-            hours = d['hours']
-            actual_hours = len(hours)
-
-        # If we have at least 90% of expected hours, consider it complete
-        if actual_hours >= expected_max_hours * 0.9:
-            return True
-
-        # Get run age
-        try:
-            parts = run_id.split('_')
-            run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
-            now = datetime.datetime.now(datetime.timezone.utc)
-            age_hours = (now - run_dt).total_seconds() / 3600
-        except:
-            age_hours = 999  # Assume old if can't parse
-
-        # If the run is older than 6 hours, NOMADS has published everything it will
-        # Accept whatever hours we have as complete
-        if age_hours > 6:
-            return True
-
-        # For runs < 6h old: require at least 50% of hours that SHOULD be available
-        # NOMADS publishes ~1 hour of forecast per 5-10 minutes after init
-        # So a 2h old run should have ~12-24 hours available
-        hours_should_be_available = min(expected_max_hours, int(age_hours * 12))
-        if hours_should_be_available > 0 and actual_hours >= hours_should_be_available * 0.5:
-            return True
-
-        return False
+            have = d.get('hours', np.array([], dtype=np.int32)).tolist()
+        expected = get_valid_forecast_hours(model_id, expected_max_hours)
+        return have == expected
     except Exception:
         return False
 

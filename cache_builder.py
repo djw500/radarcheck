@@ -513,30 +513,22 @@ def download_all_hours_parallel(
     max_hours: int,
 ) -> dict[int, str]:
     """Download GRIB files in parallel using a thread pool.
-    Short-circuits if consecutive valid hours fail, indicating the run hasn't extended that far.
 
-    Respects model-specific forecast hour schedules (e.g., NBM is hourly 1-36, then 3-hourly).
+    Strictly schedules every expected hour for the model/run based on
+    get_valid_forecast_hours. No short-circuiting; every step is attempted to
+    ensure deterministic caching on a model/run/step/var basis.
     """
     results: dict[int, str] = {}
     max_workers = repomap["PARALLEL_DOWNLOAD_WORKERS"]
     model_config = repomap["MODELS"][model_id]
     digits = model_config.get("forecast_hour_digits", 2)
 
-    # Get valid forecast hours for this model (respects hourly/3-hourly/6-hourly schedules)
+    # Enumerate valid forecast hours for this model (hourly/3-hourly/6-hourly etc.)
     valid_hours = get_valid_forecast_hours(model_id, max_hours)
-    valid_hours_set = set(valid_hours)
-
-    # Track missing hours to detect when run data ends
-    missing_hours = set()
-    # Index in valid_hours where we detected 3 consecutive misses
-    first_missing_idx = [len(valid_hours)]
 
     print(f"Downloading {len(valid_hours)} forecast hours: ", end="", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        def fetch_with_check(h, idx):
-            # If we've already determined the run ended, skip remaining hours
-            if idx > first_missing_idx[0] + 3:  # Allow 3-hour buffer in valid-hour space
-                return None
+        def fetch_with_check(h):
             try:
                 res = fetch_grib(
                     model_id,
@@ -548,26 +540,12 @@ def download_all_hours_parallel(
                 )
                 return res
             except Exception as e:
-                missing_hours.add(h)
-                # Check for 3 consecutive valid-hour misses (not calendar hours)
-                # Look at previous 2 valid hours
-                if idx >= 2:
-                    prev_hours = {valid_hours[idx - 1], valid_hours[idx - 2]}
-                    if prev_hours.issubset(missing_hours):
-                        first_missing_idx[0] = min(first_missing_idx[0], idx - 2)
                 raise e
 
-        futures = {
-            executor.submit(fetch_with_check, hour, idx): (hour, idx)
-            for idx, hour in enumerate(valid_hours)
-        }
-        
-        # Sort by (hour, idx) to process in order
+        futures = {executor.submit(fetch_with_check, hour): hour for hour in valid_hours}
+        # Consume futures in submission order by sorting on planned hour
         for future in sorted(futures.keys(), key=lambda f: futures[f]):
-            hour, idx = futures[future]
-            if idx > first_missing_idx[0] + 3:
-                continue
-
+            hour = futures[future]
             try:
                 val = future.result()
                 if val:
