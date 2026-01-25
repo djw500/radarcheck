@@ -284,6 +284,11 @@ MODELS = {
         "file_pattern": "gfs.t{init_hour}z.pgrb2.0p25.f{forecast_hour}",
         "availability_check_var": "var_TMP",
         "forecast_hour_digits": 3,
+        # GFS 0.25° provides 3-hourly output to 240h, then 6-hourly to 384h
+        "forecast_hour_schedule": [
+            {"start": 3, "end": 240, "step": 3},
+            {"start": 246, "end": 384, "step": 6},
+        ],
     },
     "nbm": {
         "name": "National Blend (NBM)",
