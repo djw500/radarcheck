@@ -97,12 +97,12 @@
             
             <div class="flex flex-col sm:flex-row gap-3">
                 <!-- Variable Switcher -->
-                <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto">
-                    <button data-var="asnow" class="var-btn px-4 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap transition">Snow</button>
-                    <button data-var="snod" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Depth</button>
-                    <button data-var="prate" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Precip</button>
-                    <button data-var="t2m" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
-                    <button data-var="wind_10m" class="var-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
+                <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto max-w-full">
+                    <button data-var="asnow" class="var-btn px-3 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap transition">Snow</button>
+                    <button data-var="t2m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
+                    <button data-var="wind_10m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
+                    <button data-var="gust" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Gust</button>
+                    <button data-var="apcp" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Precip</button>
                 </div>
 
                 <!-- Time Period -->
@@ -235,7 +235,12 @@ const VAR_CONFIG = {
     'snod': { label: 'Snow Depth', unit: ' in' },
     'prate': { label: 'Precip Rate', unit: ' in/hr' },
     't2m': { label: 'Temperature', unit: ' °F' },
-    'wind_10m': { label: 'Wind Speed', unit: ' mph' }
+    'wind_10m': { label: 'Wind Speed', unit: ' mph' },
+    'gust': { label: 'Wind Gust', unit: ' mph' },
+    'apcp': { label: 'Precipitation', unit: ' in' },
+    'rh': { label: 'Humidity', unit: '%' },
+    'cape': { label: 'CAPE', unit: ' J/kg' },
+    'msl': { label: 'Pressure', unit: ' mb' }
 };
 
 // Validate currentVariable
