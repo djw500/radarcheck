@@ -449,8 +449,8 @@ function updateChart(data) {
                 name += " (Latest)";
             }
             
-            // Extract X and Y
-            const x = run.series.map(p => p.valid_time);
+            // Extract X and Y - convert to Date objects for local timezone display
+            const x = run.series.map(p => new Date(p.valid_time));
             const y = run.series.map(p => p.value);
 
             return {
@@ -497,9 +497,9 @@ function updateChart(data) {
             showlegend: false, // We use custom toggles
             xaxis: {
                 type: 'date',
-                range: [startTime.toISOString(), endTime.toISOString()],
+                range: [startTime, endTime],
                 tickformat: '%-I %p\n%a %b %d', // "6 AM \n Sat Jan 24"
-                tick0: startTime.toISOString(), // Anchor ticks to chart start
+                tick0: startTime,
                 dtick: dtick,
                 gridcolor: isDark ? '#334155' : '#e2e8f0',
                 zeroline: false,
