@@ -6,7 +6,7 @@ import cache_builder as cb
 def test_download_all_hours_schedules_every_expected_hour(monkeypatch):
     calls = []
 
-    def fake_fetch_grib(model_id, variable_id, date_str, init_hour, forecast_hour, run_id, location_config=None):
+    def fake_fetch_grib(model_id, variable_id, date_str, init_hour, forecast_hour, run_id, location_config=None, use_hourly=False):
         calls.append(int(forecast_hour))
         # Simulate 404 for an hour that isn't a multiple of 3/6 depending on model schedule
         # but our get_valid_forecast_hours will only pass valid ones; just return a fake path
@@ -37,7 +37,7 @@ def test_download_all_hours_schedules_every_expected_hour(monkeypatch):
 def test_nbm_schedule_covers_hourly_then_six_hourly(monkeypatch):
     calls = []
 
-    def fake_fetch_grib(model_id, variable_id, date_str, init_hour, forecast_hour, run_id, location_config=None):
+    def fake_fetch_grib(model_id, variable_id, date_str, init_hour, forecast_hour, run_id, location_config=None, use_hourly=False):
         calls.append(int(forecast_hour))
         return f"/fake/{model_id}/{variable_id}/{run_id}/grib_{forecast_hour}.grib2"
 
@@ -57,4 +57,3 @@ def test_nbm_schedule_covers_hourly_then_six_hourly(monkeypatch):
 
     # Ensure we attempted exactly those expected steps
     assert sorted(calls) == hours
-

@@ -95,6 +95,62 @@ def get_valid_forecast_hours(model_id: str, max_hours: int) -> list[int]:
     return sorted(set(h for h in hours if h <= max_hours))
 
 
+def _nomads_head(url: str) -> bool:
+    try:
+        response = requests.head(url, timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"])
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def detect_hourly_support(model_id: str, date_str: str, init_hour: str) -> bool:
+    """Detect if this run supports hourly files for the first hours.
+
+    - For NOMADS models with a configured hourly file pattern (e.g., GFS pgrb2b), probe hour 001.
+    - For Herbie (ECMWF), assume hourly available if configured via hourly_override_first_hours.
+    """
+    model_config = repomap["MODELS"].get(model_id, {})
+    hourly_first = int(model_config.get("hourly_override_first_hours", 0) or 0)
+    if hourly_first <= 0:
+        return False
+
+    if model_config.get("source") == "herbie":
+        return True
+
+    hourly_pattern = model_config.get("file_pattern_hourly")
+    if not hourly_pattern:
+        return False
+    fhour = format_forecast_hour(1, model_id)
+    file_name = hourly_pattern.format(init_hour=init_hour, forecast_hour=fhour)
+    dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+    url = (
+        f"{model_config['nomads_url']}?"
+        f"file={file_name}&"
+        f"dir={dir_path}&"
+        f"{model_config['availability_check_var']}=on"
+    )
+    return _nomads_head(url)
+
+
+def get_run_forecast_hours(model_id: str, date_str: str, init_hour: str, max_hours: int) -> list[int]:
+    """Return expected hours for this run, applying hourly override if supported.
+
+    Base schedule is get_valid_forecast_hours; if hourly_override_first_hours is set and
+    detect_hourly_support() returns True, use hourly 1..N and then resume base schedule > N.
+    """
+    base = get_valid_forecast_hours(model_id, max_hours)
+    model_config = repomap["MODELS"].get(model_id, {})
+    hourly_first = int(model_config.get("hourly_override_first_hours", 0) or 0)
+    if hourly_first <= 0:
+        return base
+    if not detect_hourly_support(model_id, date_str, init_hour):
+        return base
+    n = min(hourly_first, max_hours)
+    hourly = list(range(1, n + 1))
+    rest = [h for h in base if h > n]
+    return hourly + rest
+
+
 def build_variable_query(variable_config: dict[str, Any]) -> str:
     params = [f"{param}=on" for param in variable_config.get("nomads_params", [])]
     levels = variable_config.get("level_params", [])
@@ -446,14 +502,28 @@ def fetch_grib(
 
     # NOMADS download path
     variable_query = build_variable_query(variable_config)
-    url = build_model_url(
-        model_config,
-        date_str,
-        init_hour,
-        forecast_hour,
-        variable_query,
-        download_region,
-    )
+    # If hourly is requested and a special hourly pattern is configured, use it
+    if use_hourly and model_config.get("file_pattern_hourly"):
+        file_name = model_config["file_pattern_hourly"].format(
+            init_hour=init_hour,
+            forecast_hour=forecast_hour,
+        )
+        dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
+        url = (
+            f"{model_config['nomads_url']}?"
+            f"file={file_name}&"
+            f"dir={dir_path}&"
+            f"{variable_query}"
+        )
+    else:
+        url = build_model_url(
+            model_config,
+            date_str,
+            init_hour,
+            forecast_hour,
+            variable_query,
+            download_region,
+        )
     
     # Try downloading up to 3 times
     for attempt in range(repomap["MAX_DOWNLOAD_RETRIES"]):
@@ -523,8 +593,13 @@ def download_all_hours_parallel(
     model_config = repomap["MODELS"][model_id]
     digits = model_config.get("forecast_hour_digits", 2)
 
-    # Enumerate valid forecast hours for this model (hourly/3-hourly/6-hourly etc.)
-    valid_hours = get_valid_forecast_hours(model_id, max_hours)
+    # Enumerate expected hours for this run (applying hourly override if supported)
+    valid_hours = get_run_forecast_hours(model_id, date_str, init_hour, max_hours)
+    # Identify the set of hours in the hourly override window (for NOMADS models needing alt pattern)
+    model_cfg = repomap["MODELS"][model_id]
+    hourly_first = int(model_cfg.get("hourly_override_first_hours", 0) or 0)
+    hourly_cutoff = min(hourly_first, max_hours)
+    hourly_set = set(range(1, hourly_cutoff + 1)) if (hourly_cutoff > 0 and detect_hourly_support(model_id, date_str, init_hour)) else set()
 
     print(f"Downloading {len(valid_hours)} forecast hours: ", end="", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -537,6 +612,7 @@ def download_all_hours_parallel(
                     init_hour,
                     f"{h:0{digits}d}",
                     run_id,
+                    use_hourly=(h in hourly_set),
                 )
                 return res
             except Exception as e:

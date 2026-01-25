@@ -282,8 +282,12 @@ MODELS = {
         "nomads_url": "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl",
         "dir_pattern": "%2Fgfs.{date_str}%2F{init_hour}%2Fatmos",
         "file_pattern": "gfs.t{init_hour}z.pgrb2.0p25.f{forecast_hour}",
+        # Some installations provide hourly pgrb2b stream; enable detection+use if present
+        "file_pattern_hourly": "gfs.t{init_hour}z.pgrb2b.0p25.f{forecast_hour}",
         "availability_check_var": "var_TMP",
         "forecast_hour_digits": 3,
+        # Attempt hourly for first 48h when supported
+        "hourly_override_first_hours": 48,
         # GFS 0.25° provides 3-hourly output to 240h, then 6-hourly to 384h
         "forecast_hour_schedule": [
             {"start": 3, "end": 240, "step": 3},
@@ -325,6 +329,8 @@ MODELS = {
         "dataset": "ecmwf-high-resolution-forecast",
         "forecast_hour_digits": 3,
         "availability_check_var": "t2m",
+        # Hourly data often available to ~90h; use 48h to match requirement
+        "hourly_override_first_hours": 48,
         "forecast_hour_schedule": [
             {"start": 3, "end": 144, "step": 3},
             {"start": 150, "end": 240, "step": 6},

@@ -2,9 +2,10 @@ import os
 import glob
 import json
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from collections import deque
 from config import repomap
+from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -91,6 +92,172 @@ def scan_cache_status(region="ne"):
             }
             
     return status
+
+# Scheduler model configuration - mirrors build_tiles_scheduled.py
+SCHEDULED_MODELS = [
+    {"id": "hrrr", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "48"))},
+    {"id": "nam_nest", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))},
+    {"id": "gfs", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))},
+    {"id": "nbm", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))},
+    {"id": "ecmwf_hres", "max_hours": 240},
+]
+
+
+def _get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
+    """Get max forecast hours for a specific run, accounting for init-hour variations."""
+    model_config = repomap["MODELS"].get(model_id, {})
+    max_hours_by_init = model_config.get("max_hours_by_init")
+
+    if not max_hours_by_init:
+        return default_max
+
+    try:
+        init_hour = run_id.split("_")[2]
+        return max_hours_by_init.get(init_hour, max_hours_by_init.get("default", default_max))
+    except (IndexError, KeyError):
+        return default_max
+
+
+def _get_expected_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
+    """Get list of runs we expect to have based on scheduler policy.
+
+    Policy:
+    - Tier 1: All runs in last 12 hours
+    - Tier 2: Synoptic runs (00, 06, 12, 18z) in last 72 hours
+    """
+    model_config = repomap["MODELS"].get(model_id, {})
+    if not model_config:
+        return []
+
+    now = datetime.now(timezone.utc)
+    update_freq = model_config.get("update_frequency_hours", 1)
+    expected_runs = []
+
+    for hours_ago in range(lookback_hours):
+        check_time = now - timedelta(hours=hours_ago)
+        date_str = check_time.strftime("%Y%m%d")
+        init_hour = check_time.strftime("%H")
+
+        # Skip non-synoptic hours for models with 6-hourly updates
+        if update_freq >= 6 and int(init_hour) % 6 != 0:
+            continue
+
+        # Policy: keep recent (12h) + synoptic runs
+        is_recent = hours_ago <= 12
+        is_synoptic = int(init_hour) % 6 == 0
+
+        if is_recent or is_synoptic:
+            expected_runs.append(f"run_{date_str}_{init_hour}")
+
+    return expected_runs
+
+
+def get_scheduled_runs_status(region="ne"):
+    """
+    Get status of scheduled runs vs what's in cache.
+
+    Returns:
+        list: [
+            {
+                "model_id": str,
+                "model_name": str,
+                "run_id": str,
+                "init_time": str (ISO format),
+                "expected_hours": list[int],
+                "expected_valid_start": str (ISO format),
+                "expected_valid_end": str (ISO format),
+                "cached_hours": list[int],
+                "cached_valid_start": str or None,
+                "cached_valid_end": str or None,
+                "status": "complete" | "partial" | "missing"
+            }
+        ]
+    """
+    tiles_dir = repomap["TILES_DIR"]
+    region_config = repomap["TILING_REGIONS"].get(region)
+    if not region_config:
+        return []
+
+    res = region_config.get("default_resolution_deg", 0.1)
+    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+    base_dir = os.path.join(tiles_dir, region, res_dir)
+
+    results = []
+
+    for model_cfg in SCHEDULED_MODELS:
+        model_id = model_cfg["id"]
+        default_max_hours = model_cfg["max_hours"]
+        model_config = repomap["MODELS"].get(model_id, {})
+        model_name = model_config.get("name", model_id)
+
+        expected_runs = _get_expected_runs(model_id)
+
+        for run_id in expected_runs:
+            # Parse init time from run_id
+            parts = run_id.split("_")
+            try:
+                init_time = datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H")
+                init_time = init_time.replace(tzinfo=timezone.utc)
+            except (IndexError, ValueError):
+                continue
+
+            # Get expected forecast hours for this run
+            max_hours = _get_max_hours_for_run(model_id, run_id, default_max_hours)
+            # Apply per-run hourly override if supported
+            date_str, init_hour = run_id.split('_')[1:]
+            expected_hours = get_run_forecast_hours(model_id, date_str, init_hour, max_hours)
+
+            if not expected_hours:
+                continue
+
+            # Calculate expected valid time range
+            expected_valid_start = init_time + timedelta(hours=expected_hours[0])
+            expected_valid_end = init_time + timedelta(hours=expected_hours[-1])
+
+            # Check what's actually in cache
+            npz_path = os.path.join(base_dir, model_id, run_id, "t2m.npz")
+            cached_hours = []
+            if os.path.exists(npz_path):
+                try:
+                    with np.load(npz_path) as data:
+                        if 'hours' in data:
+                            cached_hours = data['hours'].tolist()
+                except Exception:
+                    pass
+
+            # Calculate cached valid time range
+            cached_valid_start = None
+            cached_valid_end = None
+            if cached_hours:
+                cached_valid_start = (init_time + timedelta(hours=cached_hours[0])).isoformat()
+                cached_valid_end = (init_time + timedelta(hours=cached_hours[-1])).isoformat()
+
+            # Determine status
+            if cached_hours == expected_hours:
+                status = "complete"
+            elif cached_hours:
+                status = "partial"
+            else:
+                status = "missing"
+
+            results.append({
+                "model_id": model_id,
+                "model_name": model_name,
+                "run_id": run_id,
+                "init_time": init_time.isoformat(),
+                "expected_hours": expected_hours,
+                "expected_valid_start": expected_valid_start.isoformat(),
+                "expected_valid_end": expected_valid_end.isoformat(),
+                "cached_hours": cached_hours,
+                "cached_valid_start": cached_valid_start,
+                "cached_valid_end": cached_valid_end,
+                "status": status,
+            })
+
+    # Sort by init_time descending (newest first)
+    results.sort(key=lambda x: x["init_time"], reverse=True)
+    return results
+
 
 def _get_dir_size(path):
     total = 0
