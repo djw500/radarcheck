@@ -365,6 +365,21 @@ def process_model(model_cfg: dict) -> tuple[int, int, list]:
                 builds_succeeded += 1
                 print(f"[{model_id}] Completed {run_id}")
 
+    # Post-pass normalization: ensure older runs (excluding newest) are fully synced
+    if runs_to_process:
+        newest = runs_to_process[0]
+        for run_id in runs_to_process[1:]:
+            # Only consider runs that are ready
+            if not run_is_ready(run_id):
+                continue
+            run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
+            for region_id in REGIONS:
+                if not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
+                    print(f"[{model_id}] Normalizing {run_id} (rebuild to match schedule)")
+                    builds_attempted += 1
+                    if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
+                        builds_succeeded += 1
+
     return builds_attempted, builds_succeeded, targets
 
 
