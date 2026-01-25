@@ -499,7 +499,8 @@ function updateChart(data) {
                 type: 'date',
                 range: [startTime.toISOString(), endTime.toISOString()],
                 tickformat: '%-I %p\n%a %b %d', // "6 AM \n Sat Jan 24"
-                dtick: dtick, 
+                tick0: startTime.toISOString(), // Anchor ticks to chart start
+                dtick: dtick,
                 gridcolor: isDark ? '#334155' : '#e2e8f0',
                 zeroline: false,
                 fixedrange: true // Disable zoom on x-axis to keep strict range
