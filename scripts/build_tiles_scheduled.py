@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import repomap
 from utils import format_forecast_hour
-from cache_builder import get_valid_forecast_hours
+from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -239,7 +239,8 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
         import numpy as np
         with np.load(npz_path) as d:
             have = d.get('hours', np.array([], dtype=np.int32)).tolist()
-        expected = get_valid_forecast_hours(model_id, expected_max_hours)
+        parts = run_id.split('_')
+        expected = get_run_forecast_hours(model_id, parts[1], parts[2], expected_max_hours)
         return have == expected
     except Exception:
         return False

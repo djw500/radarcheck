@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from config import repomap
 from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust, is_tile_valid
 from utils import download_file, format_forecast_hour, time_function
-from cache_builder import get_available_model_runs, download_all_hours_parallel, get_valid_forecast_hours
+from cache_builder import get_available_model_runs, download_all_hours_parallel, get_run_forecast_hours
 import requests
 import xarray as xr
 from filelock import FileLock, Timeout
@@ -94,7 +94,7 @@ def build_region_tiles(
         # If tiles exist and meta matches region, verify hours completeness as well
         if os.path.exists(npz_path) and is_tile_valid(meta_path, region, res_deg):
             try:
-                expected_hours = get_valid_forecast_hours(model_id, max_hours)
+                expected_hours = get_run_forecast_hours(model_id, run_info["date_str"], run_info["init_hour"], max_hours)
                 import numpy as _np
                 with _np.load(npz_path) as d:
                     existing_hours = d.get('hours', _np.array([], dtype=_np.int32)).tolist()
@@ -127,7 +127,7 @@ def build_region_tiles(
         if not grib_paths:
             continue
         # Optional: diagnostics if incomplete
-        expected_hours = get_valid_forecast_hours(model_id, max_hours)
+        expected_hours = get_run_forecast_hours(model_id, run_info["date_str"], run_info["init_hour"], max_hours)
         got_hours = sorted(grib_paths.keys())
         if got_hours != expected_hours:
             missing = [h for h in expected_hours if h not in grib_paths]

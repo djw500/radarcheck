@@ -152,6 +152,24 @@ def _get_expected_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
     return expected_runs
 
 
+def _target_expected_hours(model_id: str, run_id: str, default_max: int) -> list[int]:
+    """Compute the target expected hours for display purposes.
+
+    Always apply hourly_override_first_hours if configured in the model, regardless of
+    per-run detection, so the dashboard communicates the intended policy clearly.
+    """
+    max_hours = _get_max_hours_for_run(model_id, run_id, default_max)
+    base = get_valid_forecast_hours(model_id, max_hours)
+    model_cfg = repomap["MODELS"].get(model_id, {})
+    hourly_first = int(model_cfg.get("hourly_override_first_hours", 0) or 0)
+    if hourly_first <= 0:
+        return base
+    n = min(hourly_first, max_hours)
+    hourly = list(range(1, n + 1))
+    rest = [h for h in base if h > n]
+    return hourly + rest
+
+
 def get_scheduled_runs_status(region="ne"):
     """
     Get status of scheduled runs vs what's in cache.
@@ -201,11 +219,8 @@ def get_scheduled_runs_status(region="ne"):
             except (IndexError, ValueError):
                 continue
 
-            # Get expected forecast hours for this run
-            max_hours = _get_max_hours_for_run(model_id, run_id, default_max_hours)
-            # Apply per-run hourly override if supported
-            date_str, init_hour = run_id.split('_')[1:]
-            expected_hours = get_run_forecast_hours(model_id, date_str, init_hour, max_hours)
+            # Get expected forecast hours for this run (policy target; ignores per-run detection)
+            expected_hours = _target_expected_hours(model_id, run_id, default_max_hours)
 
             if not expected_hours:
                 continue
