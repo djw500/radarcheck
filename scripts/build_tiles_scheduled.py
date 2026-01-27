@@ -36,6 +36,7 @@ from config import repomap
 from utils import format_forecast_hour
 from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
 from tile_db import init_db, delete_tile_run, delete_region_tiles
+from ecmwf import herbie_run_available
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -122,10 +123,10 @@ def get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
 
 # Models to build tiles for (in priority order)
 MODELS_CONFIG = [
-    {"id": "hrrr", "max_hours": MAX_HOURS_HRRR, "check_hours": 6},
-    {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
-    {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
-    {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
+    # {"id": "hrrr", "max_hours": MAX_HOURS_HRRR, "check_hours": 6},
+    # {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
+    # {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
+    # {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
     {"id": "ecmwf_hres", "max_hours": 240, "check_hours": 12},
 ]
 
@@ -140,7 +141,17 @@ def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
         return False
 
     if model_config.get("source") == "herbie":
-        return True
+        # Check availability for hour 1 using Herbie
+        forecast_hour = format_forecast_hour(1, model_id)
+        availability_var = model_config.get("availability_check_var")
+        return herbie_run_available(
+            model_id=model_id,
+            variable_id=availability_var,
+            date_str=date_str,
+            init_hour=init_hour,
+            forecast_hour=forecast_hour,
+            timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"],
+        )
 
     fhour_str = format_forecast_hour(1, model_id)
     file_name = model_config["file_pattern"].format(init_hour=init_hour, forecast_hour=fhour_str)

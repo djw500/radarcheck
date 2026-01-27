@@ -26,7 +26,7 @@ WEATHER_VARIABLES = {
         "category": "winter",
         "conversion": "m_to_in",
         "is_accumulation": True,
-        "model_exclusions": ["nam_nest", "gfs", "icon", "ecmwf_hres", "ecmwf_eps"],
+        "model_exclusions": ["nam_nest", "gfs", "icon"],
         "unit_conversions_by_units": {
             "m": "m_to_in",
             "m of water equivalent": "m_water_to_in_snow",
@@ -344,7 +344,7 @@ MODELS = {
         "forecast_hour_digits": 3,
         "availability_check_var": "t2m",
         # Hourly data often available to ~90h; use 48h to match requirement
-        "hourly_override_first_hours": 48,
+        # "hourly_override_first_hours": 48,
         "forecast_hour_schedule": [
             {"start": 3, "end": 144, "step": 3},
             {"start": 150, "end": 240, "step": 6},
