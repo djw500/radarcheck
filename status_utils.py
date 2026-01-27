@@ -35,7 +35,7 @@ def scan_cache_status(region="ne"):
         
     res = region_config.get("default_resolution_deg", 0.1)
     # Directory structure: cache/tiles/{region}/{res}deg/{model}/{run}
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg"
     base_dir = os.path.join(tiles_dir, region, res_dir)
     
     status = {}
@@ -197,7 +197,7 @@ def get_scheduled_runs_status(region="ne"):
         return []
 
     res = region_config.get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg"
     base_dir = os.path.join(tiles_dir, region, res_dir)
 
     results = []

@@ -3,8 +3,10 @@ from unittest.mock import patch, MagicMock
 from app import app as flask_app
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     flask_app.config['TESTING'] = True
+    # Ensure API key is disabled for tests
+    monkeypatch.setattr("app.API_KEY", None)
     with flask_app.test_client() as client:
         yield client
 

@@ -1179,7 +1179,7 @@ def api_table_bylatlon():
         # Compute and record tile cell lat/lon center for first found variable
         if tile_cell_info is None:
             # read meta to compute cell center
-            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+            res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg"
             meta_path = os.path.join(
                 repomap["TILES_DIR"], region_id, res_dir, model_id, run_id, f"{var_id}.meta.json"
             )

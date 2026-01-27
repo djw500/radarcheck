@@ -23,7 +23,7 @@ def test_strict_tiles_exist_check(tmp_path, monkeypatch):
     # monkeypatch the config to look at our tmp path
     from config import repomap
     monkeypatch.setitem(repomap, "TILING_REGIONS", {"ne": {"default_resolution_deg": 0.1}})
-    monkeypatch.setitem(repomap, "TILES_DIR", str(tmp_path.parent))
+    monkeypatch.setitem(repomap, "TILES_DIR", str(tmp_path))
 
     ok = tiles_exist("ne", "hrrr", "run_20260101_12", expected_max_hours=4)
     assert ok is True
