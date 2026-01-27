@@ -188,6 +188,7 @@ WEATHER_VARIABLES = {
         "model_exclusions": ["icon"],
     },
     "msl": {
+        "nomads_params": ["var_PRMSL"],
         "display_name": "MSL Pressure",
         "units": "mb",
         "short_name": "msl",

@@ -275,7 +275,7 @@ def save_tiles_npz(
     hours: List[int],
     meta: Dict[str, Any],
 ) -> str:
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{resolution_deg:.3f}".rstrip("0").rstrip(".") + "deg"
     out_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
     os.makedirs(out_dir, exist_ok=True)
     npz_path = os.path.join(out_dir, f"{variable_id}.npz")
@@ -312,7 +312,7 @@ def load_timeseries_for_point(
     """
     Load a timeseries for the cell containing (lat, lon). Returns (hours, values).
     """
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{resolution_deg:.3f}".rstrip("0").rstrip(".") + "deg"
     npz_path = os.path.join(base_dir, region_id, res_dir, model_id, run_id, f"{variable_id}.npz")
     meta_path = os.path.join(base_dir, region_id, res_dir, model_id, run_id, f"{variable_id}.meta.json")
     if not os.path.exists(npz_path) or not os.path.exists(meta_path):
@@ -418,7 +418,7 @@ def load_grid_slice(
 
 
 def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{resolution_deg:.3f}".rstrip("0").rstrip(".") + "deg"
     model_dir = os.path.join(base_dir, region_id, res_dir, model_id)
     if not os.path.isdir(model_dir):
         return []
@@ -435,7 +435,7 @@ def list_tile_variables(
     run_id: str,
 ) -> Dict[str, Dict[str, Any]]:
     """Return variables present for a tile run with basic info (hours, file size)."""
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{resolution_deg:.3f}".rstrip("0").rstrip(".") + "deg"
     run_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
     out: Dict[str, Dict[str, Any]] = {}
     if not os.path.isdir(run_dir):
@@ -462,7 +462,7 @@ def list_tile_variables(
 
 def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:
     """Return models present under a region/resolution with their available runs."""
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{resolution_deg:.3f}".rstrip("0").rstrip(".") + "deg"
     region_dir = os.path.join(base_dir, region_id, res_dir)
     result: Dict[str, List[str]] = {}
     if not os.path.isdir(region_dir):

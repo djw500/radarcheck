@@ -29,8 +29,8 @@ def mock_fs(tmp_path):
     ne_dir = tiles_dir / "ne"
     ne_dir.mkdir()
     
-    # Resolution: 0.100deg
-    res_dir = ne_dir / "0.100deg"
+    # Resolution: 0.1deg
+    res_dir = ne_dir / "0.1deg"
     res_dir.mkdir()
     
     # Model: HRRR
