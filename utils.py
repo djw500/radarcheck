@@ -92,7 +92,13 @@ def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> N
                     continue
                 total += len(chunk)
                 f.write(chunk)
-        # logger.info(f"Downloaded: {local_path} ({total} bytes)")
+
+        # Post-download size validation
+        if total < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
+            os.remove(local_path)
+            raise ValueError(
+                f"Downloaded file too small ({total} < {repomap['MIN_GRIB_FILE_SIZE_BYTES']} bytes); rejecting"
+            )
     else:
         # logger.info(f"Using cached file: {local_path}")
         pass
