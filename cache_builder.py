@@ -25,7 +25,7 @@ import numpy as np
 import psutil
 
 from config import repomap
-from ecmwf import fetch_grib_herbie  # using Herbie for ECMWF
+from ecmwf import fetch_grib_herbie, herbie_run_available  # using Herbie for ECMWF
 from plotting import create_plot, select_variable_from_dataset
 from tiles import open_dataset_robust
 from utils import (
@@ -207,7 +207,6 @@ def get_available_model_runs(model_id: str, max_runs: int = 5) -> list[dict[str,
         forecast_hour = format_forecast_hour(1, model_id)
         
         if model_config.get("source") == "herbie":
-            # For Herbie (ECMWF), assume synoptic runs are available after a short delay
             model_time = datetime(
                 year=check_time.year,
                 month=check_time.month,
@@ -215,21 +214,33 @@ def get_available_model_runs(model_id: str, max_runs: int = 5) -> list[dict[str,
                 hour=int(init_hour),
                 minute=0,
                 second=0,
-                tzinfo=pytz.UTC
+                tzinfo=pytz.UTC,
             )
-            # ECMWF open data is usually available ~1-2 hours after synoptic time
-            if (now - model_time).total_seconds() > 7200:
+            availability_var = model_config.get("availability_check_var")
+            if herbie_run_available(
+                model_id=model_id,
+                variable_id=availability_var,
+                date_str=date_str,
+                init_hour=init_hour,
+                forecast_hour=forecast_hour,
+                timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"],
+            ):
                 run_info = {
-                    'date_str': date_str,
-                    'init_hour': init_hour,
-                    'init_time': model_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    'run_id': f"run_{date_str}_{init_hour}"
+                    "date_str": date_str,
+                    "init_hour": init_hour,
+                    "init_time": model_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "run_id": f"run_{date_str}_{init_hour}",
                 }
                 available_runs.append(run_info)
-                logger.info(f"Assumed available {model_id} run: {run_info['run_id']}")
+                logger.info(f"Confirmed Herbie run for {model_id}: {run_info['run_id']}")
                 continue
-            else:
-                continue
+            logger.info(
+                "Herbie run not yet available for %s %s %s",
+                model_id,
+                date_str,
+                init_hour,
+            )
+            continue
 
         if model_config.get("source") == "dwd":
             # DWD check: construct URL to a key file (availability_check_var)

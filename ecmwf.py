@@ -8,10 +8,103 @@ Usage notes:
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
-from typing import Any, Dict
-from datetime import datetime
+from typing import Optional
+
+import requests
+from herbie import Herbie
+
+logger = logging.getLogger(__name__)
+
+VAR_MAP = {
+    "t2m": ":2t:",
+    "dpt": ":2d:",
+    "apcp": ":tp:",  # Total precipitation
+    "asnow": ":sf:",  # Snowfall (water equivalent)
+    "cape": ":mucape:",  # Most unstable CAPE
+    "msl": ":msl:",  # Mean sea level pressure
+    "wind_10m": ":10[uv]:",  # u and v components
+    "gust": ":10fg:",  # 10m wind gust
+    "gh": ":gh:",  # Geopotential height
+}
+
+
+def get_herbie_search_string(variable_id: str) -> str:
+    if variable_id not in VAR_MAP:
+        raise RuntimeError(f"Variable '{variable_id}' not mapped for ECMWF Herbie fetch.")
+    return VAR_MAP[variable_id]
+
+
+def _resolve_herbie_model(model_id: str) -> dict[str, str]:
+    # Map internal model ID to Herbie model name
+    # 'ecmwf_eps' might map to 'aifs' or other products, but use IFS until updated.
+    return {"model": "ifs", "product": "oper"}
+
+
+def _url_exists(url: str, timeout: int) -> bool:
+    try:
+        response = requests.head(url, timeout=timeout)
+        if response.status_code == 200:
+            return True
+        if response.status_code in {403, 405}:
+            response = requests.get(url, timeout=timeout)
+            return response.status_code == 200
+        return False
+    except requests.RequestException:
+        return False
+
+
+def herbie_run_available(
+    model_id: str,
+    variable_id: Optional[str],
+    date_str: str,
+    init_hour: str,
+    forecast_hour: str,
+    timeout: int = 10,
+) -> bool:
+    """Check availability for an ECMWF Herbie run and optional variable inventory."""
+    herbie_config = _resolve_herbie_model(model_id)
+    dt_str = f"{date_str} {init_hour}:00"
+    H = Herbie(
+        dt_str,
+        model=herbie_config["model"],
+        product=herbie_config["product"],
+        fxx=int(forecast_hour),
+        verbose=False,
+    )
+    idx_url = getattr(H, "idx", None)
+    if not idx_url or not _url_exists(idx_url, timeout):
+        logger.info(
+            "Herbie index unavailable for %s %s %s f%s (idx=%s)",
+            model_id,
+            date_str,
+            init_hour,
+            forecast_hour,
+            idx_url,
+        )
+        return False
+
+    if not variable_id:
+        return True
+
+    try:
+        search_string = get_herbie_search_string(variable_id)
+    except RuntimeError as exc:
+        logger.warning("Herbie variable mapping missing: %s", exc)
+        return False
+
+    try:
+        inventory = H.inventory(search_string, verbose=False)
+    except Exception as exc:
+        logger.warning("Herbie inventory check failed for %s: %s", search_string, exc)
+        return False
+
+    if inventory.empty:
+        logger.info("Herbie inventory empty for %s (%s)", model_id, search_string)
+        return False
+    return True
 
 
 def fetch_grib_herbie(
@@ -35,35 +128,11 @@ def fetch_grib_herbie(
     Returns:
         The local path to the downloaded GRIB file (should match target_path).
     """
-    try:
-        from herbie import Herbie
-    except ImportError as exc:
-        raise RuntimeError(
-            "herbie-data is required for ECMWF downloads. Install with 'pip install herbie-data'."
-        ) from exc
-
     # Variable mapping: internal_id -> Herbie search string (regex)
-    var_map = {
-        "t2m": ":2t:",
-        "dpt": ":2d:",
-        "apcp": ":tp:",  # Total precipitation
-        "asnow": ":sf:", # Snowfall (water equivalent)
-        "cape": ":mucape:", # Most unstable CAPE
-        "msl": ":msl:",  # Mean sea level pressure
-        "wind_10m": ":10[uv]:",  # u and v components
-        "gust": ":10fg:",       # 10m wind gust
-        "gh": ":gh:",           # Geopotential height
-    }
-
-    if variable_id not in var_map:
-        raise RuntimeError(f"Variable '{variable_id}' not mapped for ECMWF Herbie fetch.")
-
-    search_string = var_map[variable_id]
+    search_string = get_herbie_search_string(variable_id)
 
     # Map internal model ID to Herbie model name
-    herbie_model = "ifs"  # Default to IFS (HRES)
-    # Note: 'ecmwf_eps' might map to 'aifs' or specific product types in Herbie, 
-    # but 'ifs' is the main deterministic one.
+    herbie_config = _resolve_herbie_model(model_id)
 
     # Format date for Herbie
     dt_str = f"{date_str} {init_hour}:00"
@@ -71,12 +140,13 @@ def fetch_grib_herbie(
     try:
         H = Herbie(
             dt_str,
-            model=herbie_model,
-            product="oper",  # Operational high-resolution
+            model=herbie_config["model"],
+            product=herbie_config["product"],
             fxx=int(forecast_hour),
             save_dir=os.path.dirname(target_path), # Save near target to minimize move cost? 
             # Actually, Herbie has its own structure. We'll let it save there and move/copy.
             # Or we can try to force it. Let's use default Herbie cache and move.
+            verbose=False,
         )
         
         # Download the specific variable(s)
