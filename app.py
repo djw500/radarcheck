@@ -55,7 +55,13 @@ from tiles import (
     list_tile_variables,
     list_tile_models,
 )
-from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs, read_scheduler_status
+from status_utils import (
+    scan_cache_status,
+    get_disk_usage,
+    read_scheduler_logs,
+    read_scheduler_status,
+    get_scheduled_runs_status,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
