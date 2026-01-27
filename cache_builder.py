@@ -322,6 +322,7 @@ def fetch_grib(
     forecast_hour: str,
     run_id: str,
     location_config: Optional[dict[str, Any]] = None, # Kept for signature compatibility but ignored for fetch region
+    use_hourly: bool = False,  # Use hourly file pattern if available (e.g., GFS pgrb2b)
 ) -> str:
     """Download and cache the GRIB file for a specific forecast hour in the central GRIB cache."""
     model_config = repomap["MODELS"][model_id]
