@@ -141,8 +141,9 @@ def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
         return False
 
     if model_config.get("source") == "herbie":
-        # Check availability for hour 1 using Herbie
-        forecast_hour = format_forecast_hour(1, model_id)
+        # Check availability for first valid hour using Herbie
+        first_hour = get_valid_forecast_hours(model_id, 24)[0]
+        forecast_hour = format_forecast_hour(first_hour, model_id)
         availability_var = model_config.get("availability_check_var")
         return herbie_run_available(
             model_id=model_id,

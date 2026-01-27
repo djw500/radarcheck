@@ -207,7 +207,9 @@ def get_available_model_runs(model_id: str, max_runs: int = 5) -> list[dict[str,
         if update_freq >= 6 and int(init_hour) % 6 != 0:
             continue
 
-        forecast_hour = format_forecast_hour(1, model_id)
+        # Use the first valid forecast hour for availability check (e.g. 3 for ECMWF)
+        first_hour = get_valid_forecast_hours(model_id, 24)[0]
+        forecast_hour = format_forecast_hour(first_hour, model_id)
         
         if model_config.get("source") == "herbie":
             model_time = datetime(
