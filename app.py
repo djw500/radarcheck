@@ -55,7 +55,7 @@ from tiles import (
     list_tile_variables,
     list_tile_models,
 )
-from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs, read_scheduler_status
+from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs, read_scheduler_status, get_scheduled_runs_status
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -2169,6 +2169,18 @@ def api_status_summary():
         "cache_status": cache_status,
         "disk_usage": disk_usage,
         "scheduler_status": scheduler_status,
+        "timestamp": datetime.now(pytz.UTC).isoformat()
+    })
+
+
+@app.route("/api/status/scheduled")
+@require_api_key
+def api_status_scheduled():
+    """Get scheduled runs status for the dashboard."""
+    region_id = request.args.get("region", "ne")
+    runs = get_scheduled_runs_status(region=region_id)
+    return jsonify({
+        "runs": runs,
         "timestamp": datetime.now(pytz.UTC).isoformat()
     })
 

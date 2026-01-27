@@ -79,7 +79,7 @@ function renderDiskUsage(usage) {
 }
 
 function renderScheduledRuns(runs) {
-    const container = document.getElementById('scheduledRunsGrid');
+    const container = document.getElementById('scheduledRunsGrid') || document.getElementById('statusGrid');
     if (!container) return;
 
     if (!runs || runs.length === 0) {
