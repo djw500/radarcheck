@@ -9,7 +9,7 @@
 - [x] Task: Conductor - User Manual Verification 'System Definition' (Protocol in workflow.md)
 
 ## Phase 2: Queue Infrastructure (`jobs/`)
-- [ ] Task: Initialize `jobs` package and SQLite connection.
+- [~] Task: Initialize `jobs` package and SQLite connection.
     - [ ] Sub-task: Create `jobs/__init__.py` and `jobs/db.py`.
     - [ ] Sub-task: Write tests for DB schema creation.
 - [ ] Task: Implement Job Management (Enqueue/Dequeue).
