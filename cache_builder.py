@@ -95,6 +95,8 @@ def get_valid_forecast_hours(model_id: str, max_hours: int) -> list[int]:
     return sorted(set(h for h in hours if h <= max_hours))
 
 
+from functools import lru_cache
+
 def _nomads_head(url: str) -> bool:
     try:
         response = requests.head(url, timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"])
@@ -103,6 +105,7 @@ def _nomads_head(url: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=128)
 def detect_hourly_support(model_id: str, date_str: str, init_hour: str) -> bool:
     """Detect if this run supports hourly files for the first hours.
 
