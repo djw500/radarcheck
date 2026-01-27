@@ -123,11 +123,11 @@ def get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
 
 # Models to build tiles for (in priority order)
 MODELS_CONFIG = [
-    # {"id": "hrrr", "max_hours": MAX_HOURS_HRRR, "check_hours": 6},
-    # {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
-    # {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
-    # {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
-    {"id": "ecmwf_hres", "max_hours": 240, "check_hours": 12},
+    {"id": "hrrr", "max_hours": MAX_HOURS_HRRR, "check_hours": 6},
+    {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
+    {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
+    {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
+    # {"id": "ecmwf_hres", "max_hours": 240, "check_hours": 12},
 ]
 
 # Regions to build
@@ -136,6 +136,7 @@ REGIONS = list(repomap.get("TILING_REGIONS", {}).keys())
 
 def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
     """Check if a model run is available on NOMADS."""
+    logger.info(f"Checking availability for {model_id} {date_str} {init_hour}")
     model_config = repomap["MODELS"].get(model_id)
     if not model_config:
         return False
