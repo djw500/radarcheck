@@ -2155,6 +2155,15 @@ def index():
     locations = get_available_locations()
     return render_template('index.html', locations=locations)
 
+@app.route("/api/status/scheduled")
+@require_api_key
+def api_status_scheduled():
+    """Get status of scheduled runs vs cache."""
+    region_id = request.args.get("region", "ne")
+    results = get_scheduled_runs_status(region=region_id)
+    return jsonify({"runs": results})
+
+
 @app.route("/api/status/summary")
 @require_api_key
 def api_status_summary():
