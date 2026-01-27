@@ -26,9 +26,10 @@ WEATHER_VARIABLES = {
         "category": "winter",
         "conversion": "m_to_in",
         "is_accumulation": True,
-        "model_exclusions": ["nam_nest", "gfs", "icon", "ecmwf_hres", "ecmwf_eps"],
+        "model_exclusions": ["nam_nest", "gfs", "icon"],
         "unit_conversions_by_units": {
             "m": "m_to_in",
+            "m of water equivalent": "m_water_to_in_snow",
             "kg m-2": "kg_m2_to_in",
             "kg m**-2": "kg_m2_to_in",
         },
