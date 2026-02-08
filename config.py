@@ -394,6 +394,7 @@ repomap = {
     "CACHE_DIR": "cache",
     "GRIB_CACHE_DIR": "cache/gribs",
     "TILES_DIR": "cache/tiles",
+    "TILES_DB_PATH": "cache/tiles.db",
     "DEFAULT_MODEL": "hrrr",
     "DEFAULT_VARIABLE": "refc",
     "WEATHER_VARIABLES": WEATHER_VARIABLES,

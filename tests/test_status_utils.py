@@ -4,10 +4,12 @@ import os
 import datetime
 import numpy as np
 from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs
+from tiles_db import record_tile_run, record_tile_variable
 
 # Mock configuration
 MOCK_REPOMAP = {
     "TILES_DIR": "/fake/cache/tiles",
+    "TILES_DB_PATH": "/fake/cache/tiles.db",
     "GRIB_CACHE_DIR": "/fake/cache/gribs",
     "MODELS": {
         "hrrr": {"max_forecast_hours": 18},
@@ -62,6 +64,36 @@ def mock_fs(tmp_path):
     grib_hrrr.mkdir()
     # Create a dummy grib file
     (grib_hrrr / "test.grib2").write_bytes(b"0" * 1024) # 1KB
+
+    record_tile_run(str(tmp_path / "tiles.db"), "ne", 0.1, "hrrr", "run_20260124_12", None)
+    record_tile_variable(
+        str(tmp_path / "tiles.db"),
+        "ne",
+        0.1,
+        "hrrr",
+        "run_20260124_12",
+        "t2m",
+        list(range(18)),
+        None,
+        str(npz1),
+        str(npz1.with_suffix(".meta.json")),
+        {"lat_min": 0.0, "lat_max": 1.0, "lon_min": 0.0, "lon_max": 1.0, "resolution_deg": 0.1},
+    )
+    record_tile_run(str(tmp_path / "tiles.db"), "ne", 0.1, "hrrr", "run_20260124_13", None)
+    record_tile_variable(
+        str(tmp_path / "tiles.db"),
+        "ne",
+        0.1,
+        "hrrr",
+        "run_20260124_13",
+        "t2m",
+        list(range(5)),
+        None,
+        str(npz2),
+        str(npz2.with_suffix(".meta.json")),
+        {"lat_min": 0.0, "lat_max": 1.0, "lon_min": 0.0, "lon_max": 1.0, "resolution_deg": 0.1},
+    )
+    record_tile_run(str(tmp_path / "tiles.db"), "ne", 0.1, "gfs", "run_20260124_00", None)
     
     return tmp_path
 
@@ -77,6 +109,7 @@ def test_scan_cache_status_integration(mock_repomap, mock_fs):
     mock_repomap.get.return_value = {}
     mock_repomap.__getitem__.side_effect = lambda k: {
         "TILES_DIR": str(mock_fs / "tiles"),
+        "TILES_DB_PATH": str(mock_fs / "tiles.db"),
         "MODELS": {
             "hrrr": {"max_forecast_hours": 18, "name": "HRRR"},
             "gfs": {"max_forecast_hours": 120, "name": "GFS"}
@@ -104,6 +137,7 @@ def test_get_disk_usage(mock_repomap, mock_fs):
     mock_repomap.get.return_value = {}
     mock_repomap.__getitem__.side_effect = lambda k: {
         "TILES_DIR": str(mock_fs / "tiles"),
+        "TILES_DB_PATH": str(mock_fs / "tiles.db"),
         "GRIB_CACHE_DIR": str(mock_fs / "gribs"),
         "MODELS": {
             "hrrr": {}, "gfs": {}

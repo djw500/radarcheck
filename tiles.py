@@ -8,6 +8,13 @@ import numpy as np
 import xarray as xr
 
 from config import repomap
+from tiles_db import (
+    fetch_tile_models,
+    fetch_tile_runs,
+    fetch_tile_variables,
+    record_tile_run,
+    record_tile_variable,
+)
 from utils import convert_units, time_function
 
 
@@ -293,8 +300,35 @@ def save_tiles_npz(
     if "max" in region_stats:
         payload["maxs"] = maxs
     np.savez_compressed(npz_path, **payload)
-    with open(os.path.join(out_dir, f"{variable_id}.meta.json"), "w") as f:
+    meta_path = os.path.join(out_dir, f"{variable_id}.meta.json")
+    with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
+    record_tile_run(
+        repomap["TILES_DB_PATH"],
+        region_id,
+        resolution_deg,
+        model_id,
+        run_id,
+        meta.get("init_time_utc"),
+    )
+    size_bytes = None
+    try:
+        size_bytes = os.path.getsize(npz_path)
+    except OSError:
+        size_bytes = None
+    record_tile_variable(
+        repomap["TILES_DB_PATH"],
+        region_id,
+        resolution_deg,
+        model_id,
+        run_id,
+        variable_id,
+        hours,
+        size_bytes,
+        npz_path,
+        meta_path,
+        meta,
+    )
     return npz_path
 
 
@@ -418,13 +452,7 @@ def load_grid_slice(
 
 
 def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    model_dir = os.path.join(base_dir, region_id, res_dir, model_id)
-    if not os.path.isdir(model_dir):
-        return []
-    runs = [name for name in os.listdir(model_dir) if name.startswith("run_") and os.path.isdir(os.path.join(model_dir, name))]
-    runs.sort(reverse=True)
-    return runs
+    return fetch_tile_runs(repomap["TILES_DB_PATH"], region_id, resolution_deg, model_id)
 
 
 def list_tile_variables(
@@ -435,46 +463,18 @@ def list_tile_variables(
     run_id: str,
 ) -> Dict[str, Dict[str, Any]]:
     """Return variables present for a tile run with basic info (hours, file size)."""
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    run_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
-    out: Dict[str, Dict[str, Any]] = {}
-    if not os.path.isdir(run_dir):
-        return out
-    for name in os.listdir(run_dir):
-        if name.endswith('.npz'):
-            var_id = os.path.splitext(name)[0]
-            npz_path = os.path.join(run_dir, name)
-            meta_path = os.path.join(run_dir, f"{var_id}.meta.json")
-            hours = []
-            try:
-                d = np.load(npz_path)
-                hours = d.get('hours', np.array([], dtype=np.int32)).tolist()
-            except Exception:
-                hours = []
-            size = None
-            try:
-                size = os.path.getsize(npz_path)
-            except OSError:
-                size = None
-            out[var_id] = {"hours": hours, "file": npz_path, "size_bytes": size, "meta": meta_path if os.path.exists(meta_path) else None}
-    return out
+    return fetch_tile_variables(
+        repomap["TILES_DB_PATH"],
+        region_id,
+        resolution_deg,
+        model_id,
+        run_id,
+    )
 
 
 def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:
     """Return models present under a region/resolution with their available runs."""
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    region_dir = os.path.join(base_dir, region_id, res_dir)
-    result: Dict[str, List[str]] = {}
-    if not os.path.isdir(region_dir):
-        return result
-    for model_id in os.listdir(region_dir):
-        model_path = os.path.join(region_dir, model_id)
-        if not os.path.isdir(model_path):
-            continue
-        runs = [r for r in os.listdir(model_path) if r.startswith('run_') and os.path.isdir(os.path.join(model_path, r))]
-        runs.sort(reverse=True)
-        result[model_id] = runs
-    return result
+    return fetch_tile_models(repomap["TILES_DB_PATH"], region_id, resolution_deg)
 
 
 def is_tile_valid(meta_path: str, region_config: Dict[str, Any], expected_res: float) -> bool:

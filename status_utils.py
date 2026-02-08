@@ -1,11 +1,14 @@
 import os
-import glob
 import json
-import numpy as np
 from datetime import datetime, timedelta, timezone
 from collections import deque
 from config import repomap
 from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
+from tiles_db import (
+    fetch_tile_models,
+    fetch_tile_variable_hours,
+    fetch_tile_variable_metadata,
+)
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -28,53 +31,47 @@ def scan_cache_status(region="ne"):
             }
         }
     """
-    tiles_dir = repomap["TILES_DIR"]
     region_config = repomap["TILING_REGIONS"].get(region)
     if not region_config:
         return {}
         
     res = region_config.get("default_resolution_deg", 0.1)
-    # Directory structure: cache/tiles/{region}/{res}deg/{model}/{run}
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    base_dir = os.path.join(tiles_dir, region, res_dir)
-    
     status = {}
-    
-    if not os.path.exists(base_dir):
-        return status
-        
-    models = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-    
-    for model_id in models:
+    models_with_runs = fetch_tile_models(repomap["TILES_DB_PATH"], region, res)
+
+    for model_id, runs in models_with_runs.items():
         model_config = repomap["MODELS"].get(model_id, {})
         status[model_id] = {
             "name": model_config.get("name", model_id),
             "runs": {}
         }
-        
-        model_path = os.path.join(base_dir, model_id)
-        runs = [d for d in os.listdir(model_path) if d.startswith("run_")]
-        
+
         for run_id in runs:
-            run_path = os.path.join(model_path, run_id)
-            
-            # Check for a proxy variable (t2m) to determine completeness
-            # This logic mirrors tiles_exist in build_tiles_scheduled.py
-            npz_path = os.path.join(run_path, "t2m.npz")
-            
-            hours_present = 0
+            hours = fetch_tile_variable_hours(
+                repomap["TILES_DB_PATH"],
+                region,
+                res,
+                model_id,
+                run_id,
+                "t2m",
+            )
+            hours_present = len(hours)
             expected_hours = model_config.get("max_forecast_hours", 24)
             run_status = "partial"
-            last_modified = 0
-            
-            if os.path.exists(npz_path):
-                last_modified = os.path.getmtime(npz_path)
+            last_modified = 0.0
+            meta = fetch_tile_variable_metadata(
+                repomap["TILES_DB_PATH"],
+                region,
+                res,
+                model_id,
+                run_id,
+                "t2m",
+            )
+            if meta and meta.get("updated_at"):
                 try:
-                    with np.load(npz_path) as data:
-                        if 'hours' in data:
-                            hours_present = len(data['hours'])
-                except Exception:
-                    pass
+                    last_modified = datetime.strptime(meta["updated_at"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+                except ValueError:
+                    last_modified = 0.0
             
             # Status determination
             # Allow some tolerance or specific logic? 
@@ -191,14 +188,11 @@ def get_scheduled_runs_status(region="ne"):
             }
         ]
     """
-    tiles_dir = repomap["TILES_DIR"]
     region_config = repomap["TILING_REGIONS"].get(region)
     if not region_config:
         return []
 
     res = region_config.get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    base_dir = os.path.join(tiles_dir, region, res_dir)
 
     results = []
 
@@ -230,15 +224,14 @@ def get_scheduled_runs_status(region="ne"):
             expected_valid_end = init_time + timedelta(hours=expected_hours[-1])
 
             # Check what's actually in cache
-            npz_path = os.path.join(base_dir, model_id, run_id, "t2m.npz")
-            cached_hours = []
-            if os.path.exists(npz_path):
-                try:
-                    with np.load(npz_path) as data:
-                        if 'hours' in data:
-                            cached_hours = data['hours'].tolist()
-                except Exception:
-                    pass
+            cached_hours = fetch_tile_variable_hours(
+                repomap["TILES_DB_PATH"],
+                region,
+                res,
+                model_id,
+                run_id,
+                "t2m",
+            )
 
             # Calculate cached valid time range
             cached_valid_start = None
