@@ -3,90 +3,90 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import numpy as np
-
 import sys
 import types
 
-# Stub heavy optional deps before importing project modules
-class _Dummy:
-    def __getattr__(self, name):
-        return _Dummy()
-    def __call__(self, *a, **k):
-        return None
+import numpy as np
 
-class _DummyColors:
-    class LinearSegmentedColormap:
-        @staticmethod
-        def from_list(name, colors):
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _install_stubs() -> None:
+    """Stub heavy optional deps for standalone e2e runs."""
+    class _Dummy:
+        def __getattr__(self, name):
+            return _Dummy()
+        def __call__(self, *a, **k):
             return None
 
-mpl = types.ModuleType('matplotlib')
-mpl.use = lambda *a, **k: None
-mpl.colors = _DummyColors
-sys.modules['matplotlib'] = mpl
-mpl_colors = types.ModuleType('matplotlib.colors')
-mpl_colors.LinearSegmentedColormap = _DummyColors.LinearSegmentedColormap
-sys.modules['matplotlib.colors'] = mpl_colors
-sys.modules['matplotlib.pyplot'] = types.ModuleType('matplotlib.pyplot')
+    class _DummyColors:
+        class LinearSegmentedColormap:
+            @staticmethod
+            def from_list(name, colors):
+                return None
 
-cartopy = types.ModuleType('cartopy')
-cartopy_crs = types.ModuleType('cartopy.crs')
-cartopy_crs.PlateCarree = object
-cartopy.crs = cartopy_crs
-sys.modules['cartopy'] = cartopy
-sys.modules['cartopy.crs'] = cartopy_crs
+    mpl = types.ModuleType("matplotlib")
+    mpl.use = lambda *a, **k: None
+    mpl.colors = _DummyColors
+    sys.modules["matplotlib"] = mpl
+    mpl_colors = types.ModuleType("matplotlib.colors")
+    mpl_colors.LinearSegmentedColormap = _DummyColors.LinearSegmentedColormap
+    sys.modules["matplotlib.colors"] = mpl_colors
+    sys.modules["matplotlib.pyplot"] = types.ModuleType("matplotlib.pyplot")
 
-geopandas = types.ModuleType('geopandas')
-geopandas.read_file = lambda *a, **k: None
-sys.modules['geopandas'] = geopandas
+    cartopy = types.ModuleType("cartopy")
+    cartopy_crs = types.ModuleType("cartopy.crs")
+    cartopy_crs.PlateCarree = object
+    cartopy.crs = cartopy_crs
+    sys.modules["cartopy"] = cartopy
+    sys.modules["cartopy.crs"] = cartopy_crs
 
-shapely = types.ModuleType('shapely')
-shapely_geometry = types.ModuleType('shapely.geometry')
-shapely_geometry.box = lambda *a, **k: None
-shapely.geometry = shapely_geometry
-sys.modules['shapely'] = shapely
-sys.modules['shapely.geometry'] = shapely_geometry
+    geopandas = types.ModuleType("geopandas")
+    geopandas.read_file = lambda *a, **k: None
+    sys.modules["geopandas"] = geopandas
 
-pil = types.ModuleType('PIL')
-pil_image = types.ModuleType('PIL.Image')
-sys.modules['PIL'] = pil
-sys.modules['PIL.Image'] = pil_image
+    shapely = types.ModuleType("shapely")
+    shapely_geometry = types.ModuleType("shapely.geometry")
+    shapely_geometry.box = lambda *a, **k: None
+    shapely.geometry = shapely_geometry
+    sys.modules["shapely"] = shapely
+    sys.modules["shapely.geometry"] = shapely_geometry
 
-requests_mod = types.ModuleType('requests')
-requests_mod.head = lambda *a, **k: types.SimpleNamespace(status_code=200)
-requests_mod.get = lambda *a, **k: types.SimpleNamespace(status_code=200, content=b"", headers={})
-sys.modules['requests'] = requests_mod
+    pil = types.ModuleType("PIL")
+    pil_image = types.ModuleType("PIL.Image")
+    sys.modules["PIL"] = pil
+    sys.modules["PIL.Image"] = pil_image
 
-filelock_mod = types.ModuleType('filelock')
-class DummyLock:
-    def __init__(self, *a, **k):
+    filelock_mod = types.ModuleType("filelock")
+    class DummyLock:
+        def __init__(self, *a, **k):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+    filelock_mod.FileLock = DummyLock
+    class DummyTimeout(Exception):
         pass
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc, tb):
-        return False
-filelock_mod.FileLock = DummyLock
-class DummyTimeout(Exception):
-    pass
-filelock_mod.Timeout = DummyTimeout
-sys.modules['filelock'] = filelock_mod
+    filelock_mod.Timeout = DummyTimeout
+    sys.modules["filelock"] = filelock_mod
 
-psutil_mod = types.ModuleType('psutil')
-class DummyProc:
-    def __init__(self, pid):
-        pass
-    def memory_info(self):
-        return types.SimpleNamespace(rss=0)
-psutil_mod.Process = DummyProc
-sys.modules['psutil'] = psutil_mod
-
-from config import repomap
-import tiles as tiles_module
-import build_tiles as build_tiles_module
+    psutil_mod = types.ModuleType("psutil")
+    class DummyProc:
+        def __init__(self, pid):
+            pass
+        def memory_info(self):
+            return types.SimpleNamespace(rss=0)
+    psutil_mod.Process = DummyProc
+    sys.modules["psutil"] = psutil_mod
 
 
 def main() -> int:
+    _install_stubs()
+    from config import repomap
+    import tiles as tiles_module
+    import build_tiles as build_tiles_module
+
     # Point tiles to a temp dir under repo
     # Use default TILES_DIR so the server can read these tiles directly
     out_base = Path(repomap["TILES_DIR"]).resolve()

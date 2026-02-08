@@ -1,11 +1,15 @@
-import pytest
-from app import app
 import json
 from unittest.mock import patch, MagicMock
+
+import pytest
+
+import app as app_module
+from app import app
 
 @pytest.fixture
 def client():
     app.config['TESTING'] = True
+    app_module.API_KEY = None
     with app.test_client() as client:
         yield client
 

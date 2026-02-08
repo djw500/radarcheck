@@ -6,6 +6,8 @@ import cache_builder as cb
 def test_download_all_hours_schedules_every_expected_hour(monkeypatch):
     calls = []
 
+    monkeypatch.setattr(cb, "detect_hourly_support", lambda *a, **k: False)
+
     def fake_fetch_grib(model_id, variable_id, date_str, init_hour, forecast_hour, run_id, location_config=None, use_hourly=False):
         calls.append(int(forecast_hour))
         # Simulate 404 for an hour that isn't a multiple of 3/6 depending on model schedule

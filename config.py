@@ -188,6 +188,8 @@ WEATHER_VARIABLES = {
         "model_exclusions": ["icon"],
     },
     "msl": {
+        "nomads_params": ["var_PRMSL"],
+        "level_params": ["lev_mean_sea_level=on"],
         "display_name": "MSL Pressure",
         "units": "mb",
         "short_name": "msl",
@@ -394,6 +396,8 @@ repomap = {
     "CACHE_DIR": "cache",
     "GRIB_CACHE_DIR": "cache/gribs",
     "TILES_DIR": "cache/tiles",
+    "JOBS_DB_PATH": "cache/jobs.db",
+    "TILES_DB_PATH": "cache/jobs.db",
     "DEFAULT_MODEL": "hrrr",
     "DEFAULT_VARIABLE": "refc",
     "WEATHER_VARIABLES": WEATHER_VARIABLES,

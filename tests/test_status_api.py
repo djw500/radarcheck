@@ -1,10 +1,12 @@
 import pytest
 from unittest.mock import patch, MagicMock
+import app as app_module
 from app import app as flask_app
 
 @pytest.fixture
 def client():
     flask_app.config['TESTING'] = True
+    app_module.API_KEY = None
     with flask_app.test_client() as client:
         yield client
 

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from config import repomap
 from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust, is_tile_valid
+from tile_db import init_db, record_tile_run, record_tile_variable
 from utils import download_file, format_forecast_hour, time_function
 from cache_builder import get_available_model_runs, download_all_hours_parallel, get_run_forecast_hours
 import requests
@@ -36,6 +37,25 @@ audit_stats = {"tiles_skipped": 0, "tiles_processed": 0, "grib_hits": 0, "grib_m
 
 @time_function
 def build_region_tiles(
+    region_id: str,
+    model_id: str,
+    run_id: Optional[str],
+    variables: Optional[List[str]] = None,
+    resolution_deg: Optional[float] = None,
+    max_hours: Optional[int] = None,
+    clean_gribs: bool = False,
+    audit_only: bool = False,
+) -> None:
+    conn = init_db(repomap.get("TILES_DB_PATH"))
+    try:
+        _build_region_tiles(conn, region_id, model_id, run_id, variables, resolution_deg, max_hours, clean_gribs, audit_only)
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _build_region_tiles(
+    conn,
     region_id: str,
     model_id: str,
     run_id: Optional[str],
@@ -77,6 +97,19 @@ def build_region_tiles(
     model_config = repomap["MODELS"][model_id]
     if max_hours is None:
         max_hours = model_config.get("max_forecast_hours", 24)
+
+    init_time_utc = None
+    if run_info.get("init_time"):
+        init_time_utc = run_info["init_time"]
+    elif run_info.get("date_str") and run_info.get("init_hour"):
+        from datetime import datetime
+        try:
+            dt = datetime.strptime(f"{run_info['date_str']}{run_info['init_hour']}", "%Y%m%d%H")
+            init_time_utc = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            init_time_utc = None
+
+    record_tile_run(conn, region_id, res_deg, model_id, run_info["run_id"], init_time_utc)
 
     var_ids = variables or list(repomap["WEATHER_VARIABLES"].keys())
     for variable_id in var_ids:
@@ -144,18 +177,6 @@ def build_region_tiles(
                 res_deg,
             )
 
-            # Compute init_time_utc from run_info
-            init_time_utc = None
-            if run_info.get("init_time"):
-                init_time_utc = run_info["init_time"]
-            elif run_info.get("date_str") and run_info.get("init_hour"):
-                from datetime import datetime
-                try:
-                    dt = datetime.strptime(f"{run_info['date_str']}{run_info['init_hour']}", "%Y%m%d%H")
-                    init_time_utc = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-                except ValueError:
-                    pass
-
             meta = {
                 "region_id": region_id,
                 "model_id": model_id,
@@ -184,6 +205,29 @@ def build_region_tiles(
                 means,
                 hours,
                 meta,
+            )
+            try:
+                size_bytes = os.path.getsize(out_path)
+            except OSError:
+                size_bytes = None
+            record_tile_variable(
+                conn,
+                region_id,
+                res_deg,
+                model_id,
+                run_info["run_id"],
+                variable_id,
+                out_path,
+                os.path.join(
+                    repomap["TILES_DIR"],
+                    region_id,
+                    f"{res_deg:.3f}deg".rstrip("0").rstrip("."),
+                    model_id,
+                    run_info["run_id"],
+                    f"{variable_id}.meta.json",
+                ),
+                hours,
+                size_bytes,
             )
             print(f"Saved {variable_id} tiles to {out_path}")
         except Exception as e:
