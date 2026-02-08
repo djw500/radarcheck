@@ -62,6 +62,7 @@ from status_utils import (
     read_scheduler_status,
     get_scheduled_runs_status,
 )
+from jobs import init_db, count_by_status
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -2180,10 +2181,14 @@ def api_status_summary():
     disk_usage = get_disk_usage()
     scheduler_status = read_scheduler_status()
     
+    conn = init_db(repomap.get("JOBS_DB_PATH", "cache/jobs.db"))
+    job_counts = count_by_status(conn)
+
     return jsonify({
         "cache_status": cache_status,
         "disk_usage": disk_usage,
         "scheduler_status": scheduler_status,
+        "job_counts": job_counts,
         "timestamp": datetime.now(pytz.UTC).isoformat()
     })
 

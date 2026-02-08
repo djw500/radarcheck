@@ -15,6 +15,7 @@ async function initStatusPage() {
         renderScheduledRuns(scheduledData.runs);
         renderDiskUsage(summaryData.disk_usage);
         renderSchedulerStats(summaryData.scheduler_status);
+        renderJobQueueStats(summaryData.job_counts);
 
         await loadLogs();
 
@@ -205,6 +206,19 @@ function renderSchedulerStats(status) {
     }
 }
 
+function renderJobQueueStats(counts) {
+    if (!counts) return;
+    const elPending = document.getElementById('jobsPending');
+    const elProcessing = document.getElementById('jobsProcessing');
+    const elCompleted = document.getElementById('jobsCompleted');
+    const elFailed = document.getElementById('jobsFailed');
+
+    if (elPending) elPending.textContent = counts.pending || 0;
+    if (elProcessing) elProcessing.textContent = counts.processing || 0;
+    if (elCompleted) elCompleted.textContent = counts.completed || 0;
+    if (elFailed) elFailed.textContent = counts.failed || 0;
+}
+
 if (typeof module !== 'undefined') {
-    module.exports = { initStatusPage, renderScheduledRuns, renderDiskUsage, renderLogs, renderSchedulerStats };
+    module.exports = { initStatusPage, renderScheduledRuns, renderDiskUsage, renderLogs, renderSchedulerStats, renderJobQueueStats };
 }

@@ -6,12 +6,13 @@ from datetime import datetime, timedelta, timezone
 from collections import deque
 from config import repomap
 from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
+from jobs import init_db, get_jobs
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
 def scan_cache_status(region="ne"):
     """
-    Scans the tile cache for the given region and returns the status of model runs.
+    Scans the job DB and returns the status of model runs.
     
     Returns:
         dict: {
@@ -28,69 +29,25 @@ def scan_cache_status(region="ne"):
             }
         }
     """
-    tiles_dir = repomap["TILES_DIR"]
-    region_config = repomap["TILING_REGIONS"].get(region)
-    if not region_config:
-        return {}
-        
-    res = region_config.get("default_resolution_deg", 0.1)
-    # Directory structure: cache/tiles/{region}/{res}deg/{model}/{run}
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    base_dir = os.path.join(tiles_dir, region, res_dir)
-    
+    # Reuse get_scheduled_runs_status logic but format differently for summary
+    runs_list = get_scheduled_runs_status(region)
     status = {}
     
-    if not os.path.exists(base_dir):
-        return status
-        
-    models = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-    
-    for model_id in models:
-        model_config = repomap["MODELS"].get(model_id, {})
-        status[model_id] = {
-            "name": model_config.get("name", model_id),
-            "runs": {}
-        }
-        
-        model_path = os.path.join(base_dir, model_id)
-        runs = [d for d in os.listdir(model_path) if d.startswith("run_")]
-        
-        for run_id in runs:
-            run_path = os.path.join(model_path, run_id)
-            
-            # Check for a proxy variable (t2m) to determine completeness
-            # This logic mirrors tiles_exist in build_tiles_scheduled.py
-            npz_path = os.path.join(run_path, "t2m.npz")
-            
-            hours_present = 0
-            expected_hours = model_config.get("max_forecast_hours", 24)
-            run_status = "partial"
-            last_modified = 0
-            
-            if os.path.exists(npz_path):
-                last_modified = os.path.getmtime(npz_path)
-                try:
-                    with np.load(npz_path) as data:
-                        if 'hours' in data:
-                            hours_present = len(data['hours'])
-                except Exception:
-                    pass
-            
-            # Status determination
-            # Allow some tolerance or specific logic? 
-            # For now: >= 90% is complete
-            if hours_present >= expected_hours * 0.9:
-                run_status = "complete"
-            elif hours_present == 0:
-                run_status = "empty" # Or just don't list it? Better to list.
-            
-            status[model_id]["runs"][run_id] = {
-                "status": run_status,
-                "hours_present": hours_present,
-                "expected_hours": expected_hours,
-                "last_modified": last_modified
+    for run in runs_list:
+        model_id = run["model_id"]
+        if model_id not in status:
+            status[model_id] = {
+                "name": run["model_name"],
+                "runs": {}
             }
-            
+        
+        status[model_id]["runs"][run["run_id"]] = {
+            "status": run["status"],
+            "hours_present": len(run["cached_hours"]),
+            "expected_hours": len(run["expected_hours"]),
+            "last_modified": 0 # Not tracking modification time in DB easily
+        }
+
     return status
 
 # Scheduler model configuration - mirrors build_tiles_scheduled.py
@@ -172,33 +129,31 @@ def _target_expected_hours(model_id: str, run_id: str, default_max: int) -> list
 
 def get_scheduled_runs_status(region="ne"):
     """
-    Get status of scheduled runs vs what's in cache.
-
-    Returns:
-        list: [
-            {
-                "model_id": str,
-                "model_name": str,
-                "run_id": str,
-                "init_time": str (ISO format),
-                "expected_hours": list[int],
-                "expected_valid_start": str (ISO format),
-                "expected_valid_end": str (ISO format),
-                "cached_hours": list[int],
-                "cached_valid_start": str or None,
-                "cached_valid_end": str or None,
-                "status": "complete" | "partial" | "missing"
-            }
-        ]
+    Get status of scheduled runs based on job queue DB.
     """
-    tiles_dir = repomap["TILES_DIR"]
-    region_config = repomap["TILING_REGIONS"].get(region)
-    if not region_config:
-        return []
+    conn = init_db(repomap.get("JOBS_DB_PATH", "cache/jobs.db"))
 
-    res = region_config.get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    base_dir = os.path.join(tiles_dir, region, res_dir)
+    # Pre-fetch all ingest jobs to map them to runs
+    # This avoids N queries
+    # Filter by t2m to track progress of a proxy variable
+    ingest_jobs = get_jobs(conn, job_type="ingest_grib", limit=50000)
+
+    # Map run_id -> set of completed hours
+    completed_hours_by_run = {}
+
+    for job in ingest_jobs:
+        args = job.get("args", {})
+        if args.get("variable_id") != "t2m":
+            continue
+
+        run_id = args.get("run_id")
+        if not run_id: continue
+
+        if run_id not in completed_hours_by_run:
+            completed_hours_by_run[run_id] = set()
+
+        if job["status"] == "completed":
+            completed_hours_by_run[run_id].add(args.get("forecast_hour"))
 
     results = []
 
@@ -219,7 +174,7 @@ def get_scheduled_runs_status(region="ne"):
             except (IndexError, ValueError):
                 continue
 
-            # Get expected forecast hours for this run (policy target; ignores per-run detection)
+            # Get expected forecast hours for this run
             expected_hours = _target_expected_hours(model_id, run_id, default_max_hours)
 
             if not expected_hours:
@@ -229,16 +184,9 @@ def get_scheduled_runs_status(region="ne"):
             expected_valid_start = init_time + timedelta(hours=expected_hours[0])
             expected_valid_end = init_time + timedelta(hours=expected_hours[-1])
 
-            # Check what's actually in cache
-            npz_path = os.path.join(base_dir, model_id, run_id, "t2m.npz")
-            cached_hours = []
-            if os.path.exists(npz_path):
-                try:
-                    with np.load(npz_path) as data:
-                        if 'hours' in data:
-                            cached_hours = data['hours'].tolist()
-                except Exception:
-                    pass
+            # Check cached hours from DB
+            cached_set = completed_hours_by_run.get(run_id, set())
+            cached_hours = sorted([h for h in expected_hours if h in cached_set])
 
             # Calculate cached valid time range
             cached_valid_start = None
@@ -248,6 +196,7 @@ def get_scheduled_runs_status(region="ne"):
                 cached_valid_end = (init_time + timedelta(hours=cached_hours[-1])).isoformat()
 
             # Determine status
+            # If all expected hours are present
             if cached_hours == expected_hours:
                 status = "complete"
             elif cached_hours:
