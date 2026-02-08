@@ -1,0 +1,72 @@
+INFO:__main__:Application startup
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/flask_limiter/_extension.py:364: UserWarning: Using the in-memory storage for tracking rate limits as no storage was explicitly specified. This is not recommended for production use. See: https://flask-limiter.readthedocs.io#configuring-a-storage-backend for documentation about configuring the storage backend.
+  warnings.warn(
+ * Serving Flask app 'app'
+ * Debug mode: on
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.0.2:5001
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+INFO:__main__:Application startup
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/flask_limiter/_extension.py:364: UserWarning: Using the in-memory storage for tracking rate limits as no storage was explicitly specified. This is not recommended for production use. See: https://flask-limiter.readthedocs.io#configuring-a-storage-backend for documentation about configuring the storage backend.
+  warnings.warn(
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 410-907-091
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:34] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=asnow&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=apcp&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=gust&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=snod&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=t2m&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=prate&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=wind_10m&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=rh&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=msl&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:06:35] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=cape&days=7 HTTP/1.1" 200 -
+INFO:werkzeug: * Detected change in '/app/scripts/verification/verify_dashboard.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:__main__:Application startup
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/flask_limiter/_extension.py:364: UserWarning: Using the in-memory storage for tracking rate limits as no storage was explicitly specified. This is not recommended for production use. See: https://flask-limiter.readthedocs.io#configuring-a-storage-backend for documentation about configuring the storage backend.
+  warnings.warn(
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 410-907-091
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:04] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=asnow&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=t2m&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=gust&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=wind_10m&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=snod&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=prate&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=rh&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=apcp&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=msl&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:05] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=cape&days=7 HTTP/1.1" 200 -
+INFO:werkzeug: * Detected change in '/app/scripts/verification/verify_dashboard.py', reloading
+INFO:werkzeug: * Restarting with stat
+INFO:__main__:Application startup
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/flask_limiter/_extension.py:364: UserWarning: Using the in-memory storage for tracking rate limits as no storage was explicitly specified. This is not recommended for production use. See: https://flask-limiter.readthedocs.io#configuring-a-storage-backend for documentation about configuring the storage backend.
+  warnings.warn(
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 410-907-091
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:34] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=asnow&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=t2m&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=prate&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=snod&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=rh&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=wind_10m&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=gust&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=msl&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=apcp&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/timeseries/multirun?lat=40.0488&lon=-75.3890&model=all&variable=cape&days=7 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /table/geo HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /static/css/styles.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/models HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/regions HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /forecast HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "GET /api/tile_models?region=ne&resolution=0.1 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "[36mGET /static/css/styles.css HTTP/1.1[0m" 304 -
+ERROR:__main__:Forecast data not available for this location
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 21:07:36] "[33mGET /summary/philly HTTP/1.1[0m" 404 -
