@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import repomap
 from utils import format_forecast_hour
 from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
+from tile_db import init_db, delete_tile_run, delete_region_tiles
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -454,59 +455,66 @@ def cleanup_old_runs():
     - Keep up to MAX_SYNOPTIC_RUNS synoptic runs (00, 06, 12, 18z)
     - Keep up to MAX_HOURLY_RUNS recent hourly runs (for HRRR etc)
     """
-    for region_id in REGIONS:
-        res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-        res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-        region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
+    # Open DB connection once
+    conn = init_db(repomap.get("TILES_DB_PATH"))
+    try:
+        for region_id in REGIONS:
+            res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
+            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+            region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
 
-        if not os.path.isdir(region_dir):
-            continue
-
-        for model_id in os.listdir(region_dir):
-            model_dir = os.path.join(region_dir, model_id)
-            if not os.path.isdir(model_dir):
+            if not os.path.isdir(region_dir):
                 continue
 
-            # Get runs sorted newest to oldest
-            runs = sorted(
-                [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
-                reverse=True
-            )
+            for model_id in os.listdir(region_dir):
+                model_dir = os.path.join(region_dir, model_id)
+                if not os.path.isdir(model_dir):
+                    continue
 
-            if not runs:
-                continue
+                # Get runs sorted newest to oldest
+                runs = sorted(
+                    [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
+                    reverse=True
+                )
 
-            # Separate synoptic (00, 06, 12, 18z) from hourly runs
-            synoptic_runs = []
-            hourly_runs = []
-            for run_id in runs:
-                try:
-                    init_hour = int(run_id.split('_')[2])
-                    if init_hour % 6 == 0:
-                        synoptic_runs.append(run_id)
-                    else:
+                if not runs:
+                    continue
+
+                # Separate synoptic (00, 06, 12, 18z) from hourly runs
+                synoptic_runs = []
+                hourly_runs = []
+                for run_id in runs:
+                    try:
+                        init_hour = int(run_id.split('_')[2])
+                        if init_hour % 6 == 0:
+                            synoptic_runs.append(run_id)
+                        else:
+                            hourly_runs.append(run_id)
+                    except (IndexError, ValueError):
                         hourly_runs.append(run_id)
-                except (IndexError, ValueError):
-                    hourly_runs.append(run_id)
 
-            # Keep top N synoptic + top M hourly
-            keep_synoptic = set(synoptic_runs[:MAX_SYNOPTIC_RUNS])
-            keep_hourly = set(hourly_runs[:MAX_HOURLY_RUNS])
-            keep_all = keep_synoptic | keep_hourly
+                # Keep top N synoptic + top M hourly
+                keep_synoptic = set(synoptic_runs[:MAX_SYNOPTIC_RUNS])
+                keep_hourly = set(hourly_runs[:MAX_HOURLY_RUNS])
+                keep_all = keep_synoptic | keep_hourly
 
-            runs_to_remove = [r for r in runs if r not in keep_all]
+                runs_to_remove = [r for r in runs if r not in keep_all]
 
-            if runs_to_remove:
-                logger.info(f"Tile cleanup {model_id}: keeping {len(keep_synoptic)} synoptic + {len(keep_hourly)} hourly, removing {len(runs_to_remove)}")
+                if runs_to_remove:
+                    logger.info(f"Tile cleanup {model_id}: keeping {len(keep_synoptic)} synoptic + {len(keep_hourly)} hourly, removing {len(runs_to_remove)}")
 
-            for old_run in runs_to_remove:
-                old_run_dir = os.path.join(model_dir, old_run)
-                logger.info(f"Removing old tile run: {model_id}/{old_run}")
-                try:
-                    import shutil
-                    shutil.rmtree(old_run_dir)
-                except Exception as e:
-                    logger.error(f"Failed to remove {old_run_dir}: {e}")
+                for old_run in runs_to_remove:
+                    old_run_dir = os.path.join(model_dir, old_run)
+                    logger.info(f"Removing old tile run: {model_id}/{old_run}")
+                    try:
+                        import shutil
+                        shutil.rmtree(old_run_dir)
+                        # Remove from DB as well
+                        delete_tile_run(conn, region_id, res, model_id, old_run)
+                    except Exception as e:
+                        logger.error(f"Failed to remove {old_run_dir}: {e}")
+    finally:
+        conn.close()
 
 
 def main():
@@ -520,17 +528,22 @@ def main():
     
     if clear_cache:
         logger.warning("CLEARING TILE CACHE requested via --clear flag")
-        for region_id in REGIONS:
-            res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-            region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
-            if os.path.exists(region_dir):
-                logger.info(f"Removing {region_dir}...")
-                try:
-                    import shutil
-                    shutil.rmtree(region_dir)
-                except Exception as e:
-                    logger.error(f"Failed to clear cache: {e}")
+        conn = init_db(repomap.get("TILES_DB_PATH"))
+        try:
+            for region_id in REGIONS:
+                res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
+                res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+                region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
+                if os.path.exists(region_dir):
+                    logger.info(f"Removing {region_dir}...")
+                    try:
+                        import shutil
+                        shutil.rmtree(region_dir)
+                        delete_region_tiles(conn, region_id)
+                    except Exception as e:
+                        logger.error(f"Failed to clear cache: {e}")
+        finally:
+            conn.close()
     
     logger.info(f"Build interval: {BUILD_INTERVAL_MINUTES} minutes")
     logger.info(f"Models: {[m['id'] for m in MODELS_CONFIG]}")
