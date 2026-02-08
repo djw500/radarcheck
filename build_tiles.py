@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from config import repomap
 from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust, is_tile_valid
-from tile_db import init_db, record_tile_run, record_tile_variable
+from tile_db import init_db, record_tile_run, record_tile_variable, record_tile_hour
 from utils import download_file, format_forecast_hour, time_function
 from cache_builder import get_available_model_runs, download_all_hours_parallel, get_run_forecast_hours
 import requests
@@ -229,6 +229,17 @@ def _build_region_tiles(
                 hours,
                 size_bytes,
             )
+            for hour in hours:
+                record_tile_hour(
+                    conn,
+                    region_id,
+                    res_deg,
+                    model_id,
+                    run_info["run_id"],
+                    variable_id,
+                    int(hour),
+                    out_path,
+                )
             print(f"Saved {variable_id} tiles to {out_path}")
         except Exception as e:
             print(f"Error building tiles for {variable_id} in {run_info['run_id']}: {e}")

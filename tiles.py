@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import xarray as xr
+from filelock import FileLock
 
 from config import repomap
 from tile_db import init_db, list_tile_models_db, list_tile_runs_db, list_tile_variables_db
@@ -263,6 +264,34 @@ def build_tiles_for_variable(
     return mins, maxs, means, hours_sorted, index_meta
 
 
+def _save_tiles_npz_internal(
+    npz_path: str,
+    meta_path: str,
+    region_id: str,
+    variable_id: str,
+    mins: np.ndarray,
+    maxs: np.ndarray,
+    means: np.ndarray,
+    hours: List[int],
+    meta: Dict[str, Any],
+) -> None:
+    try:
+        region_stats = repomap.get("TILING_REGIONS", {}).get(region_id, {}).get("stats", ["min", "max", "mean"])  # type: ignore
+    except Exception:
+        region_stats = ["min", "max", "mean"]
+
+    payload: Dict[str, Any] = {"hours": np.array(hours, dtype=np.int32)}
+    if "mean" in region_stats:
+        payload["means"] = means
+    if "min" in region_stats:
+        payload["mins"] = mins
+    if "max" in region_stats:
+        payload["maxs"] = maxs
+    np.savez_compressed(npz_path, **payload)
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+
 def save_tiles_npz(
     base_dir: str,
     region_id: str,
@@ -280,22 +309,12 @@ def save_tiles_npz(
     out_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
     os.makedirs(out_dir, exist_ok=True)
     npz_path = os.path.join(out_dir, f"{variable_id}.npz")
-    # Determine which stats to persist for this region (default: all) 
-    try:
-        region_stats = repomap.get("TILING_REGIONS", {}).get(region_id, {}).get("stats", ["min", "max", "mean"])  # type: ignore
-    except Exception:
-        region_stats = ["min", "max", "mean"]
+    meta_path = os.path.join(out_dir, f"{variable_id}.meta.json")
 
-    payload: Dict[str, Any] = {"hours": np.array(hours, dtype=np.int32)}
-    if "mean" in region_stats:
-        payload["means"] = means
-    if "min" in region_stats:
-        payload["mins"] = mins
-    if "max" in region_stats:
-        payload["maxs"] = maxs
-    np.savez_compressed(npz_path, **payload)
-    with open(os.path.join(out_dir, f"{variable_id}.meta.json"), "w") as f:
-        json.dump(meta, f, indent=2)
+    with FileLock(f"{npz_path}.lock"):
+        _save_tiles_npz_internal(
+            npz_path, meta_path, region_id, variable_id, mins, maxs, means, hours, meta
+        )
     return npz_path
 
 
@@ -317,65 +336,66 @@ def upsert_tiles_npz(
     out_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
     os.makedirs(out_dir, exist_ok=True)
     npz_path = os.path.join(out_dir, f"{variable_id}.npz")
+    meta_path = os.path.join(out_dir, f"{variable_id}.meta.json")
 
-    new_hours = np.array(hours, dtype=np.int32)
-    if not os.path.exists(npz_path):
-        save_tiles_npz(
-            base_dir,
-            region_id,
-            resolution_deg,
-            model_id,
-            run_id,
-            variable_id,
-            mins,
-            maxs,
-            means,
-            hours,
-            meta,
-        )
-        return npz_path, hours
+    with FileLock(f"{npz_path}.lock"):
+        new_hours = np.array(hours, dtype=np.int32)
+        if not os.path.exists(npz_path):
+            _save_tiles_npz_internal(
+                npz_path,
+                meta_path,
+                region_id,
+                variable_id,
+                mins,
+                maxs,
+                means,
+                hours,
+                meta,
+            )
+            return npz_path, hours
 
-    with np.load(npz_path) as data:
-        existing_hours = data.get("hours", np.array([], dtype=np.int32))
-        existing_means = data["means"] if "means" in data.files else None
-        existing_mins = data["mins"] if "mins" in data.files else None
-        existing_maxs = data["maxs"] if "maxs" in data.files else None
+        with np.load(npz_path) as data:
+            existing_hours = data.get("hours", np.array([], dtype=np.int32))
+            existing_means = data["means"] if "means" in data.files else None
+            existing_mins = data["mins"] if "mins" in data.files else None
+            existing_maxs = data["maxs"] if "maxs" in data.files else None
 
-    merged_hours = sorted(set(existing_hours.tolist()) | set(new_hours.tolist()))
-    hour_index = {h: i for i, h in enumerate(merged_hours)}
-    time_len = len(merged_hours)
-    ny, nx = means.shape[1], means.shape[2]
+        merged_hours = sorted(set(existing_hours.tolist()) | set(new_hours.tolist()))
+        hour_index = {h: i for i, h in enumerate(merged_hours)}
+        time_len = len(merged_hours)
+        ny, nx = means.shape[1], means.shape[2]
 
-    def _merge(existing: np.ndarray | None, incoming: np.ndarray | None) -> np.ndarray | None:
-        if incoming is None and existing is None:
-            return None
-        if incoming is None:
-            return existing
-        if existing is None:
-            out = np.full((time_len, ny, nx), np.nan, dtype=np.float32)
-        else:
-            out = np.full((time_len, ny, nx), np.nan, dtype=np.float32)
-            for idx, hour in enumerate(existing_hours.tolist()):
-                out[hour_index[hour]] = existing[idx]
-        for idx, hour in enumerate(new_hours.tolist()):
-            out[hour_index[hour]] = incoming[idx]
-        return out
+        def _merge(existing: np.ndarray | None, incoming: np.ndarray | None) -> np.ndarray | None:
+            if incoming is None and existing is None:
+                return None
+            if incoming is None:
+                return existing
+            if existing is None:
+                out = np.full((time_len, ny, nx), np.nan, dtype=np.float32)
+            else:
+                out = np.full((time_len, ny, nx), np.nan, dtype=np.float32)
+                for idx, hour in enumerate(existing_hours.tolist()):
+                    out[hour_index[hour]] = existing[idx]
+            for idx, hour in enumerate(new_hours.tolist()):
+                out[hour_index[hour]] = incoming[idx]
+            return out
 
-    merged_means = _merge(existing_means, means)
-    merged_mins = _merge(existing_mins, mins)
-    merged_maxs = _merge(existing_maxs, maxs)
+        merged_means = _merge(existing_means, means)
+        merged_mins = _merge(existing_mins, mins)
+        merged_maxs = _merge(existing_maxs, maxs)
 
-    payload: Dict[str, Any] = {"hours": np.array(merged_hours, dtype=np.int32)}
-    if merged_means is not None:
-        payload["means"] = merged_means
-    if merged_mins is not None:
-        payload["mins"] = merged_mins
-    if merged_maxs is not None:
-        payload["maxs"] = merged_maxs
+        payload: Dict[str, Any] = {"hours": np.array(merged_hours, dtype=np.int32)}
+        if merged_means is not None:
+            payload["means"] = merged_means
+        if merged_mins is not None:
+            payload["mins"] = merged_mins
+        if merged_maxs is not None:
+            payload["maxs"] = merged_maxs
 
-    np.savez_compressed(npz_path, **payload)
-    with open(os.path.join(out_dir, f"{variable_id}.meta.json"), "w") as f:
-        json.dump(meta, f, indent=2)
+        np.savez_compressed(npz_path, **payload)
+        with open(meta_path, "w") as f:
+            json.dump(meta, f, indent=2)
+
     return npz_path, merged_hours
 
 def load_timeseries_for_point(
