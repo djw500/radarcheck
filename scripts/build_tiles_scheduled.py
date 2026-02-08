@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import repomap
 from utils import format_forecast_hour
 from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
+from jobs import init_db, enqueue
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -319,19 +320,19 @@ def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
         now = datetime.datetime.now(datetime.timezone.utc)
         age_mins = (now - run_dt).total_seconds() / 60
         return age_mins >= min_age_minutes
-    except:
+    except Exception:
         return True
 
 
-def process_model(model_cfg: dict) -> tuple[int, int, list]:
-    """Process a single model - find and build missing runs.
+def process_model(model_cfg: dict, conn=None) -> tuple[int, int, list]:
+    """Process a single model - enqueue jobs for missing runs.
 
-    Returns (builds_attempted, builds_succeeded, targets).
+    Returns (jobs_enqueued, runs_processed, targets).
     """
     model_id = model_cfg["id"]
     max_hours = model_cfg["max_hours"]
-    builds_attempted = 0
-    builds_succeeded = 0
+    jobs_enqueued = 0
+    runs_processed = 0
     targets = []
 
     # Get all runs we SHOULD have according to tiered policy (last 72h)
@@ -347,73 +348,99 @@ def process_model(model_cfg: dict) -> tuple[int, int, list]:
     num_runs = len(runs_to_process)
     print(f"[{model_id}] Checking {num_runs} required runs...")
 
-    for i, run_id in enumerate(runs_to_process):
+    if conn is None:
+        conn = init_db(repomap.get("JOBS_DB_PATH", "cache/jobs.db"))
+
+    for run_id in runs_to_process:
         # Skip if run is too new
         if not run_is_ready(run_id):
             continue
 
-        # Get run-specific max hours (e.g., HRRR synoptic vs non-synoptic)
+        runs_processed += 1
+
+        try:
+            parts = run_id.split('_')
+            date_str = parts[1]
+            init_hour = parts[2]
+        except IndexError:
+            continue
+
+        # Get run-specific max hours
         run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
+        valid_hours = get_run_forecast_hours(model_id, date_str, init_hour, run_max_hours)
 
-        for region_id in REGIONS:
-            # Skip if tiles already exist and are complete
-            if tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
+        # Enqueue jobs for all variables
+        for var_id in repomap["WEATHER_VARIABLES"]:
+            # Check exclusions
+            var_cfg = repomap["WEATHER_VARIABLES"][var_id]
+            if model_id in var_cfg.get("model_exclusions", []):
                 continue
 
-            print(f"[{model_id}] Building {run_id}...")
-            builds_attempted += 1
-            if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
-                builds_succeeded += 1
-                print(f"[{model_id}] Completed {run_id}")
+            # Enqueue ingest jobs (one per hour)
+            for h in valid_hours:
+                # Recency-based priority: newer runs higher priority
+                # We can use simple logic: 0 for now.
+                # Or based on hour?
+                job_args = {
+                    "model_id": model_id,
+                    "variable_id": var_id,
+                    "date_str": date_str,
+                    "init_hour": init_hour,
+                    "forecast_hour": h,
+                    "run_id": run_id
+                }
+                enqueue(conn, "ingest_grib", job_args, priority=0)
+                jobs_enqueued += 1
 
-    # Post-pass normalization: ensure older runs (excluding newest) are fully synced
-    if runs_to_process:
-        newest = runs_to_process[0]
-        for run_id in runs_to_process[1:]:
-            # Only consider runs that are ready
-            if not run_is_ready(run_id):
-                continue
-            run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
+            # Enqueue build_tile jobs (one per region/var)
             for region_id in REGIONS:
-                if not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
-                    print(f"[{model_id}] Normalizing {run_id} (rebuild to match schedule)")
-                    builds_attempted += 1
-                    if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
-                        builds_succeeded += 1
+                build_args = {
+                    "model_id": model_id,
+                    "run_id": run_id,
+                    "variable_id": var_id,
+                    "region_id": region_id
+                }
+                enqueue(conn, "build_tile", build_args, priority=0)
+                jobs_enqueued += 1
 
-    return builds_attempted, builds_succeeded, targets
+    return jobs_enqueued, runs_processed, targets
 
 
 def build_cycle():
-    """Run one build cycle for all models in parallel."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    """Run one build cycle for all models."""
+    # We no longer need parallel executor because enqueueing is fast
+    # But we can keep it if we want concurrent network checks (check_run_available)
 
     logger.info("Starting build cycle")
     write_scheduler_status(state="running")
 
-    total_attempted = 0
-    total_succeeded = 0
+    conn = init_db(repomap.get("JOBS_DB_PATH", "cache/jobs.db"))
+
+    total_enqueued = 0
+    total_runs = 0
     all_targets = []
 
-    # Process all models in parallel
-    with ThreadPoolExecutor(max_workers=len(MODELS_CONFIG)) as executor:
-        futures = {executor.submit(process_model, cfg): cfg["id"] for cfg in MODELS_CONFIG}
+    for model_cfg in MODELS_CONFIG:
+        model_id = model_cfg["id"]
+        try:
+            enqueued, runs, targets = process_model(model_cfg, conn)
+            total_enqueued += enqueued
+            total_runs += runs
+            all_targets.extend(targets)
+            if enqueued > 0:
+                print(f"[{model_id}] Enqueued {enqueued} jobs for {runs} runs")
+        except Exception as e:
+            logger.error(f"Error processing {model_id}: {e}")
 
-        for future in as_completed(futures):
-            model_id = futures[future]
-            try:
-                attempted, succeeded, targets = future.result()
-                total_attempted += attempted
-                total_succeeded += succeeded
-                all_targets.extend(targets)
-                if attempted > 0:
-                    print(f"[{model_id}] Done: {succeeded}/{attempted} builds succeeded")
-            except Exception as e:
-                logger.error(f"Error processing {model_id}: {e}")
+    # Enqueue cleanup jobs
+    # We can create a generic cleanup job or specific ones
+    enqueue(conn, "cleanup", {"target": "gribs"}, priority=-10)
+    enqueue(conn, "cleanup", {"target": "runs"}, priority=-10)
+    enqueue(conn, "cleanup", {"target": "db"}, priority=-10)
 
     write_scheduler_status(state="running", targets=all_targets)
-    print(f"Build cycle complete: {total_succeeded}/{total_attempted} succeeded")
-    return total_attempted, total_succeeded, all_targets
+    print(f"Build cycle complete: {total_enqueued} jobs enqueued")
+    return total_enqueued, total_runs, all_targets
 
 
 def cleanup_old_gribs(max_runs_per_model: int = None):
@@ -516,7 +543,6 @@ def main():
     
     # Handle command line args
     clear_cache = "--clear" in sys.argv
-    once_mode = "--once" in sys.argv
     
     if clear_cache:
         logger.warning("CLEARING TILE CACHE requested via --clear flag")

@@ -142,10 +142,10 @@ def main() -> int:
 
     tiles_module.xr.open_dataset = fake_open_dataset  # type: ignore
 
-    def fake_download_all_hours_parallel(model_id, variable_id, date_str, init_hour, location_config, run_id, max_hours):
+    def fake_download_all_hours_parallel(model_id, variable_id, date_str, init_hour, run_id, max_hours):
         return {h: f"/fake/grib_{h:02d}.grib2" for h in range(1, min(max_hours, 4) + 1)}
 
-    build_tiles_module._download_all_hours_parallel = fake_download_all_hours_parallel  # type: ignore
+    build_tiles_module.download_all_hours_parallel = fake_download_all_hours_parallel  # type: ignore
 
     # Disable unit conversion for t2m to avoid arithmetic on fake arrays
     repomap["WEATHER_VARIABLES"]["t2m"]["conversion"] = None

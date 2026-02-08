@@ -418,6 +418,9 @@ repomap = {
     # Cache settings
     "CACHE_REFRESH_INTERVAL_MINUTES": 15,
 
+    # Job Queue
+    "JOBS_DB_PATH": "cache/jobs.db",
+
     # Model discovery
     "HOURS_TO_CHECK_FOR_RUNS": 27,
 
