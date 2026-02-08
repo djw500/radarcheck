@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 
 from config import repomap
+from tile_db import init_db, list_tile_models_db, list_tile_runs_db, list_tile_variables_db
 from utils import convert_units, time_function
 
 
@@ -298,6 +299,85 @@ def save_tiles_npz(
     return npz_path
 
 
+def upsert_tiles_npz(
+    base_dir: str,
+    region_id: str,
+    resolution_deg: float,
+    model_id: str,
+    run_id: str,
+    variable_id: str,
+    mins: np.ndarray,
+    maxs: np.ndarray,
+    means: np.ndarray,
+    hours: List[int],
+    meta: Dict[str, Any],
+) -> Tuple[str, List[int]]:
+    """Merge new hour(s) into an existing tile NPZ, or create it if absent."""
+    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
+    out_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
+    os.makedirs(out_dir, exist_ok=True)
+    npz_path = os.path.join(out_dir, f"{variable_id}.npz")
+
+    new_hours = np.array(hours, dtype=np.int32)
+    if not os.path.exists(npz_path):
+        save_tiles_npz(
+            base_dir,
+            region_id,
+            resolution_deg,
+            model_id,
+            run_id,
+            variable_id,
+            mins,
+            maxs,
+            means,
+            hours,
+            meta,
+        )
+        return npz_path, hours
+
+    with np.load(npz_path) as data:
+        existing_hours = data.get("hours", np.array([], dtype=np.int32))
+        existing_means = data["means"] if "means" in data.files else None
+        existing_mins = data["mins"] if "mins" in data.files else None
+        existing_maxs = data["maxs"] if "maxs" in data.files else None
+
+    merged_hours = sorted(set(existing_hours.tolist()) | set(new_hours.tolist()))
+    hour_index = {h: i for i, h in enumerate(merged_hours)}
+    time_len = len(merged_hours)
+    ny, nx = means.shape[1], means.shape[2]
+
+    def _merge(existing: np.ndarray | None, incoming: np.ndarray | None) -> np.ndarray | None:
+        if incoming is None and existing is None:
+            return None
+        if incoming is None:
+            return existing
+        if existing is None:
+            out = np.full((time_len, ny, nx), np.nan, dtype=np.float32)
+        else:
+            out = np.full((time_len, ny, nx), np.nan, dtype=np.float32)
+            for idx, hour in enumerate(existing_hours.tolist()):
+                out[hour_index[hour]] = existing[idx]
+        for idx, hour in enumerate(new_hours.tolist()):
+            out[hour_index[hour]] = incoming[idx]
+        return out
+
+    merged_means = _merge(existing_means, means)
+    merged_mins = _merge(existing_mins, mins)
+    merged_maxs = _merge(existing_maxs, maxs)
+
+    payload: Dict[str, Any] = {"hours": np.array(merged_hours, dtype=np.int32)}
+    if merged_means is not None:
+        payload["means"] = merged_means
+    if merged_mins is not None:
+        payload["mins"] = merged_mins
+    if merged_maxs is not None:
+        payload["maxs"] = merged_maxs
+
+    np.savez_compressed(npz_path, **payload)
+    with open(os.path.join(out_dir, f"{variable_id}.meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    return npz_path, merged_hours
+
 def load_timeseries_for_point(
     base_dir: str,
     region_id: str,
@@ -418,13 +498,11 @@ def load_grid_slice(
 
 
 def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    model_dir = os.path.join(base_dir, region_id, res_dir, model_id)
-    if not os.path.isdir(model_dir):
-        return []
-    runs = [name for name in os.listdir(model_dir) if name.startswith("run_") and os.path.isdir(os.path.join(model_dir, name))]
-    runs.sort(reverse=True)
-    return runs
+    conn = init_db(repomap.get("TILES_DB_PATH"))
+    try:
+        return list_tile_runs_db(conn, region_id, resolution_deg, model_id)
+    finally:
+        conn.close()
 
 
 def list_tile_variables(
@@ -435,46 +513,20 @@ def list_tile_variables(
     run_id: str,
 ) -> Dict[str, Dict[str, Any]]:
     """Return variables present for a tile run with basic info (hours, file size)."""
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    run_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
-    out: Dict[str, Dict[str, Any]] = {}
-    if not os.path.isdir(run_dir):
-        return out
-    for name in os.listdir(run_dir):
-        if name.endswith('.npz'):
-            var_id = os.path.splitext(name)[0]
-            npz_path = os.path.join(run_dir, name)
-            meta_path = os.path.join(run_dir, f"{var_id}.meta.json")
-            hours = []
-            try:
-                d = np.load(npz_path)
-                hours = d.get('hours', np.array([], dtype=np.int32)).tolist()
-            except Exception:
-                hours = []
-            size = None
-            try:
-                size = os.path.getsize(npz_path)
-            except OSError:
-                size = None
-            out[var_id] = {"hours": hours, "file": npz_path, "size_bytes": size, "meta": meta_path if os.path.exists(meta_path) else None}
-    return out
+    conn = init_db(repomap.get("TILES_DB_PATH"))
+    try:
+        return list_tile_variables_db(conn, region_id, resolution_deg, model_id, run_id)
+    finally:
+        conn.close()
 
 
 def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:
     """Return models present under a region/resolution with their available runs."""
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    region_dir = os.path.join(base_dir, region_id, res_dir)
-    result: Dict[str, List[str]] = {}
-    if not os.path.isdir(region_dir):
-        return result
-    for model_id in os.listdir(region_dir):
-        model_path = os.path.join(region_dir, model_id)
-        if not os.path.isdir(model_path):
-            continue
-        runs = [r for r in os.listdir(model_path) if r.startswith('run_') and os.path.isdir(os.path.join(model_path, r))]
-        runs.sort(reverse=True)
-        result[model_id] = runs
-    return result
+    conn = init_db(repomap.get("TILES_DB_PATH"))
+    try:
+        return list_tile_models_db(conn, region_id, resolution_deg)
+    finally:
+        conn.close()
 
 
 def is_tile_valid(meta_path: str, region_config: Dict[str, Any], expected_res: float) -> bool:

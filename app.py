@@ -1098,6 +1098,113 @@ def api_table_multimodel():
     })
 
 
+@app.route("/api/table/multirun")
+@require_api_key
+def api_table_multirun():
+    """Return merged forecast data from the last N runs of a single model at a lat/lon."""
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon are required"}), 400
+
+    model_id = request.args.get("model", repomap["DEFAULT_MODEL"])
+    if model_id not in repomap["MODELS"]:
+        return jsonify({"error": "Invalid model"}), 400
+
+    try:
+        num_runs = int(request.args.get("num_runs", 3))
+    except (TypeError, ValueError):
+        return jsonify({"error": "num_runs must be an integer"}), 400
+    if num_runs < 1:
+        return jsonify({"error": "num_runs must be >= 1"}), 400
+
+    stat = request.args.get("stat", "mean")
+    region_id = request.args.get("region")
+
+    if not region_id:
+        region_id = infer_region_for_latlon(lat, lon)
+        if not region_id:
+            return jsonify({"error": "Point outside configured regions"}), 400
+
+    regions = repomap.get("TILING_REGIONS", {})
+    if region_id not in regions:
+        return jsonify({"error": "Invalid region"}), 400
+
+    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+
+    available_runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
+    if not available_runs:
+        return jsonify({
+            "error": "No tile runs available",
+            "metadata": {"region": region_id, "model_id": model_id, "lat": lat, "lon": lon},
+        }), 404
+
+    selected_runs = []
+    for run_id in available_runs:
+        vars_info = list_tile_variables(repomap["TILES_DIR"], region_id, res, model_id, run_id)
+        if vars_info:
+            selected_runs.append((run_id, vars_info))
+        if len(selected_runs) >= num_runs:
+            break
+
+    if not selected_runs:
+        return jsonify({
+            "error": "No variables present in available tile runs",
+            "metadata": {"region": region_id, "model_id": model_id, "lat": lat, "lon": lon},
+            "candidate_runs": available_runs,
+        }), 404
+
+    rows_by_time: dict[str, dict[str, Any]] = {}
+    runs_info: dict[str, dict[str, Any]] = {}
+
+    for run_id, vars_info in selected_runs:
+        init_dt = parse_run_id_to_init_dt(run_id)
+        if not init_dt:
+            continue
+
+        runs_info[run_id] = {
+            "run_id": run_id,
+            "init_time_utc": init_dt.isoformat(),
+            "variables": list(vars_info.keys()),
+        }
+
+        for var_id in vars_info.keys():
+            try:
+                hours, values = load_timeseries_for_point(
+                    repomap["TILES_DIR"], region_id, res, model_id, run_id, var_id, lat, lon, stat=stat
+                )
+                var_cfg = repomap["WEATHER_VARIABLES"].get(var_id, {})
+                if var_cfg.get("is_accumulation") and values is not None:
+                    values = _accumulate_timeseries(values)
+            except FileNotFoundError:
+                continue
+
+            for hour, val in zip(hours.tolist(), values.tolist()):
+                valid_dt = init_dt + timedelta(hours=int(hour))
+                valid_dt = valid_dt.replace(minute=0, second=0, microsecond=0)
+                time_key = valid_dt.isoformat()
+                row = rows_by_time.setdefault(time_key, {"valid_time": time_key})
+                col_key = f"{run_id}_{var_id}"
+                row[col_key] = None if (val is None or (isinstance(val, float) and np.isnan(val))) else val
+                row[f"{run_id}_hour"] = int(hour)
+
+    rows = [rows_by_time[k] for k in sorted(rows_by_time.keys())]
+
+    return jsonify({
+        "metadata": {
+            "region": region_id,
+            "stat": stat,
+            "resolution_deg": res,
+            "lat": lat,
+            "lon": lon,
+            "model_id": model_id,
+        },
+        "runs": runs_info,
+        "rows": rows,
+    })
+
+
 @app.route("/api/tile_runs/<model_id>")
 @require_api_key
 def api_tile_runs(model_id: str):

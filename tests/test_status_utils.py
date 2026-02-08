@@ -1,9 +1,13 @@
-import pytest
-from unittest.mock import patch, MagicMock, mock_open
-import os
 import datetime
+import os
+from unittest.mock import mock_open, patch
+
 import numpy as np
-from status_utils import scan_cache_status, get_disk_usage, read_scheduler_logs
+import pytest
+
+from status_utils import get_disk_usage, read_scheduler_logs, scan_cache_status
+from status_utils import _parse_updated_at_to_timestamp
+from tile_db import init_db, record_tile_run, record_tile_variable
 
 # Mock configuration
 MOCK_REPOMAP = {
@@ -69,14 +73,15 @@ def mock_fs(tmp_path):
 @patch("status_utils.os.walk")
 def test_scan_cache_status_structure(mock_walk, mock_fs):
     """Verify that scan_cache_status returns the expected data structure."""
-    pass 
+    pass
 
 @patch("status_utils.repomap")
-def test_scan_cache_status_integration(mock_repomap, mock_fs):
-    """Integration test using a temp directory structure."""
-    mock_repomap.get.return_value = {}
-    mock_repomap.__getitem__.side_effect = lambda k: {
-        "TILES_DIR": str(mock_fs / "tiles"),
+def test_scan_cache_status_integration(mock_repomap, tmp_path):
+    """Integration test using DB-backed tile metadata."""
+    db_path = tmp_path / "tiles.db"
+    mapping = {
+        "JOBS_DB_PATH": str(db_path),
+        "TILES_DB_PATH": str(db_path),
         "MODELS": {
             "hrrr": {"max_forecast_hours": 18, "name": "HRRR"},
             "gfs": {"max_forecast_hours": 120, "name": "GFS"}
@@ -84,17 +89,50 @@ def test_scan_cache_status_integration(mock_repomap, mock_fs):
         "TILING_REGIONS": {
             "ne": {"default_resolution_deg": 0.1}
         }
-    }[k]
+    }
+    mock_repomap.get.side_effect = lambda k, default=None: mapping.get(k, default)
+    mock_repomap.__getitem__.side_effect = lambda k: mapping[k]
+
+    conn = init_db(str(db_path))
+    record_tile_run(conn, "ne", 0.1, "hrrr", "run_20260124_12", "2026-01-24T12:00:00Z")
+    record_tile_variable(
+        conn,
+        "ne",
+        0.1,
+        "hrrr",
+        "run_20260124_12",
+        "t2m",
+        "fake.npz",
+        "fake.meta.json",
+        list(range(18)),
+        123,
+    )
+    record_tile_run(conn, "ne", 0.1, "hrrr", "run_20260124_13", "2026-01-24T13:00:00Z")
+    record_tile_variable(
+        conn,
+        "ne",
+        0.1,
+        "hrrr",
+        "run_20260124_13",
+        "t2m",
+        "fake.npz",
+        "fake.meta.json",
+        list(range(5)),
+        123,
+    )
+    record_tile_run(conn, "ne", 0.1, "gfs", "run_20260124_12", "2026-01-24T12:00:00Z")
+    conn.commit()
+    conn.close()
 
     status = scan_cache_status(region="ne")
-    
+
     assert "hrrr" in status
     assert "gfs" in status
-    
+
     # HRRR should have runs
     assert "run_20260124_12" in status["hrrr"]["runs"]
     assert "run_20260124_13" in status["hrrr"]["runs"]
-    
+
     # Check status flags
     assert status["hrrr"]["runs"]["run_20260124_12"]["status"] == "complete"
     assert status["hrrr"]["runs"]["run_20260124_13"]["status"] == "partial"
@@ -129,3 +167,9 @@ def test_read_scheduler_logs():
 
     with patch("status_utils.os.path.exists", return_value=False):
         assert read_scheduler_logs() == []
+
+
+def test_parse_updated_at_to_timestamp():
+    ts = _parse_updated_at_to_timestamp("2024-01-01 12:30:00")
+    assert ts > 0
+    assert _parse_updated_at_to_timestamp("bad") == 0.0

@@ -11,6 +11,8 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
     # Configure TILES_DIR to temp
     from config import repomap
     monkeypatch.setitem(repomap, "TILES_DIR", str(tmp_path / "tiles"))
+    monkeypatch.setitem(repomap, "JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setitem(repomap, "TILES_DB_PATH", str(tmp_path / "jobs.db"))
 
     # Minimal region config to ensure inference is not needed
     monkeypatch.setitem(
@@ -191,3 +193,17 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
         meta = json.load(f)
     assert meta["resolution_deg"] == 0.1
     assert meta["region_id"] == "ne"
+
+    # Verify DB index updated
+    from tile_db import init_db, list_tile_models_db, list_tile_runs_db, list_tile_variables_db
+    conn = init_db(str(tmp_path / "jobs.db"))
+    try:
+        models = list_tile_models_db(conn, "ne", 0.1)
+        assert models["hrrr"] == ["run_20240101_00"]
+        runs = list_tile_runs_db(conn, "ne", 0.1, "hrrr")
+        assert runs == ["run_20240101_00"]
+        variables = list_tile_variables_db(conn, "ne", 0.1, "hrrr", "run_20240101_00")
+        assert "refc" in variables
+        assert variables["refc"]["hours"] == [1, 2, 3, 4]
+    finally:
+        conn.close()

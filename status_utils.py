@@ -1,11 +1,11 @@
-import os
-import glob
 import json
-import numpy as np
-from datetime import datetime, timedelta, timezone
+import os
 from collections import deque
+from datetime import datetime, timedelta, timezone
+
+from cache_builder import get_valid_forecast_hours
 from config import repomap
-from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
+from tile_db import init_db, list_tile_models_db, list_tile_variables_db
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -28,69 +28,48 @@ def scan_cache_status(region="ne"):
             }
         }
     """
-    tiles_dir = repomap["TILES_DIR"]
     region_config = repomap["TILING_REGIONS"].get(region)
     if not region_config:
         return {}
         
     res = region_config.get("default_resolution_deg", 0.1)
-    # Directory structure: cache/tiles/{region}/{res}deg/{model}/{run}
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    base_dir = os.path.join(tiles_dir, region, res_dir)
-    
     status = {}
-    
-    if not os.path.exists(base_dir):
-        return status
-        
-    models = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-    
-    for model_id in models:
-        model_config = repomap["MODELS"].get(model_id, {})
-        status[model_id] = {
-            "name": model_config.get("name", model_id),
-            "runs": {}
-        }
-        
-        model_path = os.path.join(base_dir, model_id)
-        runs = [d for d in os.listdir(model_path) if d.startswith("run_")]
-        
-        for run_id in runs:
-            run_path = os.path.join(model_path, run_id)
-            
-            # Check for a proxy variable (t2m) to determine completeness
-            # This logic mirrors tiles_exist in build_tiles_scheduled.py
-            npz_path = os.path.join(run_path, "t2m.npz")
-            
-            hours_present = 0
-            expected_hours = model_config.get("max_forecast_hours", 24)
-            run_status = "partial"
-            last_modified = 0
-            
-            if os.path.exists(npz_path):
-                last_modified = os.path.getmtime(npz_path)
-                try:
-                    with np.load(npz_path) as data:
-                        if 'hours' in data:
-                            hours_present = len(data['hours'])
-                except Exception:
-                    pass
-            
-            # Status determination
-            # Allow some tolerance or specific logic? 
-            # For now: >= 90% is complete
-            if hours_present >= expected_hours * 0.9:
-                run_status = "complete"
-            elif hours_present == 0:
-                run_status = "empty" # Or just don't list it? Better to list.
-            
-            status[model_id]["runs"][run_id] = {
-                "status": run_status,
-                "hours_present": hours_present,
-                "expected_hours": expected_hours,
-                "last_modified": last_modified
+
+    conn = init_db(repomap.get("TILES_DB_PATH"))
+    try:
+        models_with_runs = list_tile_models_db(conn, region, res)
+
+        for model_id, runs in models_with_runs.items():
+            model_config = repomap["MODELS"].get(model_id, {})
+            status[model_id] = {
+                "name": model_config.get("name", model_id),
+                "runs": {}
             }
-            
+
+            for run_id in runs:
+                vars_info = list_tile_variables_db(conn, region, res, model_id, run_id)
+                t2m_info = vars_info.get("t2m")
+                hours_present = len(t2m_info["hours"]) if t2m_info else 0
+                expected_hours = model_config.get("max_forecast_hours", 24)
+                run_status = "partial"
+                last_modified = _parse_updated_at_to_timestamp(t2m_info["updated_at"]) if t2m_info else 0.0
+
+                # Status determination
+                # Allow some tolerance or specific logic? 
+                # For now: >= 90% is complete
+                if hours_present >= expected_hours * 0.9:
+                    run_status = "complete"
+                elif hours_present == 0:
+                    run_status = "empty" # Or just don't list it? Better to list.
+                
+                status[model_id]["runs"][run_id] = {
+                    "status": run_status,
+                    "hours_present": hours_present,
+                    "expected_hours": expected_hours,
+                    "last_modified": last_modified
+                }
+    finally:
+        conn.close()
     return status
 
 # Scheduler model configuration - mirrors build_tiles_scheduled.py
@@ -191,87 +170,88 @@ def get_scheduled_runs_status(region="ne"):
             }
         ]
     """
-    tiles_dir = repomap["TILES_DIR"]
     region_config = repomap["TILING_REGIONS"].get(region)
     if not region_config:
         return []
 
     res = region_config.get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    base_dir = os.path.join(tiles_dir, region, res_dir)
-
     results = []
 
-    for model_cfg in SCHEDULED_MODELS:
-        model_id = model_cfg["id"]
-        default_max_hours = model_cfg["max_hours"]
-        model_config = repomap["MODELS"].get(model_id, {})
-        model_name = model_config.get("name", model_id)
+    conn = init_db(repomap.get("TILES_DB_PATH"))
+    try:
+        for model_cfg in SCHEDULED_MODELS:
+            model_id = model_cfg["id"]
+            default_max_hours = model_cfg["max_hours"]
+            model_config = repomap["MODELS"].get(model_id, {})
+            model_name = model_config.get("name", model_id)
 
-        expected_runs = _get_expected_runs(model_id)
+            expected_runs = _get_expected_runs(model_id)
 
-        for run_id in expected_runs:
-            # Parse init time from run_id
-            parts = run_id.split("_")
-            try:
-                init_time = datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H")
-                init_time = init_time.replace(tzinfo=timezone.utc)
-            except (IndexError, ValueError):
-                continue
-
-            # Get expected forecast hours for this run (policy target; ignores per-run detection)
-            expected_hours = _target_expected_hours(model_id, run_id, default_max_hours)
-
-            if not expected_hours:
-                continue
-
-            # Calculate expected valid time range
-            expected_valid_start = init_time + timedelta(hours=expected_hours[0])
-            expected_valid_end = init_time + timedelta(hours=expected_hours[-1])
-
-            # Check what's actually in cache
-            npz_path = os.path.join(base_dir, model_id, run_id, "t2m.npz")
-            cached_hours = []
-            if os.path.exists(npz_path):
+            for run_id in expected_runs:
+                # Parse init time from run_id
+                parts = run_id.split("_")
                 try:
-                    with np.load(npz_path) as data:
-                        if 'hours' in data:
-                            cached_hours = data['hours'].tolist()
-                except Exception:
-                    pass
+                    init_time = datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H")
+                    init_time = init_time.replace(tzinfo=timezone.utc)
+                except (IndexError, ValueError):
+                    continue
 
-            # Calculate cached valid time range
-            cached_valid_start = None
-            cached_valid_end = None
-            if cached_hours:
-                cached_valid_start = (init_time + timedelta(hours=cached_hours[0])).isoformat()
-                cached_valid_end = (init_time + timedelta(hours=cached_hours[-1])).isoformat()
+                # Get expected forecast hours for this run (policy target; ignores per-run detection)
+                expected_hours = _target_expected_hours(model_id, run_id, default_max_hours)
 
-            # Determine status
-            if cached_hours == expected_hours:
-                status = "complete"
-            elif cached_hours:
-                status = "partial"
-            else:
-                status = "missing"
+                if not expected_hours:
+                    continue
 
-            results.append({
-                "model_id": model_id,
-                "model_name": model_name,
-                "run_id": run_id,
-                "init_time": init_time.isoformat(),
-                "expected_hours": expected_hours,
-                "expected_valid_start": expected_valid_start.isoformat(),
-                "expected_valid_end": expected_valid_end.isoformat(),
-                "cached_hours": cached_hours,
-                "cached_valid_start": cached_valid_start,
-                "cached_valid_end": cached_valid_end,
-                "status": status,
-            })
+                # Calculate expected valid time range
+                expected_valid_start = init_time + timedelta(hours=expected_hours[0])
+                expected_valid_end = init_time + timedelta(hours=expected_hours[-1])
+
+                vars_info = list_tile_variables_db(conn, region, res, model_id, run_id)
+                t2m_info = vars_info.get("t2m")
+                cached_hours = sorted([int(h) for h in (t2m_info["hours"] if t2m_info else [])])
+
+                # Calculate cached valid time range
+                cached_valid_start = None
+                cached_valid_end = None
+                if cached_hours:
+                    cached_valid_start = (init_time + timedelta(hours=cached_hours[0])).isoformat()
+                    cached_valid_end = (init_time + timedelta(hours=cached_hours[-1])).isoformat()
+
+                # Determine status
+                if cached_hours == expected_hours:
+                    status = "complete"
+                elif cached_hours:
+                    status = "partial"
+                else:
+                    status = "missing"
+
+                results.append({
+                    "model_id": model_id,
+                    "model_name": model_name,
+                    "run_id": run_id,
+                    "init_time": init_time.isoformat(),
+                    "expected_hours": expected_hours,
+                    "expected_valid_start": expected_valid_start.isoformat(),
+                    "expected_valid_end": expected_valid_end.isoformat(),
+                    "cached_hours": cached_hours,
+                    "cached_valid_start": cached_valid_start,
+                    "cached_valid_end": cached_valid_end,
+                    "status": status,
+                })
+    finally:
+        conn.close()
 
     # Sort by init_time descending (newest first)
     results.sort(key=lambda x: x["init_time"], reverse=True)
     return results
+
+
+def _parse_updated_at_to_timestamp(updated_at: str) -> float:
+    try:
+        dt = datetime.strptime(updated_at, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return 0.0
+    return dt.replace(tzinfo=timezone.utc).timestamp()
 
 
 def _get_dir_size(path):
