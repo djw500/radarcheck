@@ -35,6 +35,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import repomap
 from utils import format_forecast_hour
 from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
+from tiles_db import (
+    fetch_tile_models,
+    fetch_tile_variable_hours,
+    fetch_tile_variable_metadata,
+)
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -188,15 +193,8 @@ def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
 def tiles_exist_any(region_id: str, model_id: str) -> bool:
     """Check if any tiles exist for a model in a region."""
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    model_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id)
-    if not os.path.isdir(model_dir):
-        return False
-    # Check for any run directory
-    for item in os.listdir(model_dir):
-        if item.startswith("run_") and os.path.isdir(os.path.join(model_dir, item)):
-            return True
-    return False
+    models = fetch_tile_models(repomap["TILES_DB_PATH"], region_id, res)
+    return bool(models.get(model_id))
 
 
 def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: int = 24) -> bool:
@@ -206,44 +204,52 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
     to exactly match the model's schedule up to expected_max_hours.
     """
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    
-    # Check for t2m tiles as a proxy for the run
-    base_run_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_id)
-    npz_path = os.path.join(base_run_dir, "t2m.npz")
-    if not os.path.exists(npz_path):
+    hours = fetch_tile_variable_hours(
+        repomap["TILES_DB_PATH"],
+        region_id,
+        res,
+        model_id,
+        run_id,
+        "t2m",
+    )
+    if not hours:
         return False
-    # Verify region bounds match current config (backfill trigger after region expansion)
-    try:
-        meta_path = os.path.join(base_run_dir, "t2m.meta.json")
-        if os.path.exists(meta_path):
-            import json
-            with open(meta_path, "r") as f:
-                meta = json.load(f)
-            reg = repomap["TILING_REGIONS"][region_id]
-            tol = 1e-6
-            if (
-                abs(float(meta.get("lat_min")) - float(reg["lat_min"])) > tol or
-                abs(float(meta.get("lat_max")) - float(reg["lat_max"])) > tol or
-                abs(float(meta.get("lon_min")) - float(reg["lon_min"])) > tol or
-                abs(float(meta.get("lon_max")) - float(reg["lon_max"])) > tol or
-                abs(float(meta.get("resolution_deg")) - float(res)) > tol
-            ):
-                return False
-    except Exception:
-        # If meta can't be read, force rebuild
+    meta = fetch_tile_variable_metadata(
+        repomap["TILES_DB_PATH"],
+        region_id,
+        res,
+        model_id,
+        run_id,
+        "t2m",
+    )
+    if not meta:
+        return False
+    reg = repomap["TILING_REGIONS"][region_id]
+    tol = 1e-6
+    if (
+        meta.get("lat_min") is None
+        or meta.get("lat_max") is None
+        or meta.get("lon_min") is None
+        or meta.get("lon_max") is None
+        or meta.get("resolution_deg") is None
+    ):
+        return False
+    if (
+        abs(float(meta.get("lat_min")) - float(reg["lat_min"])) > tol
+        or abs(float(meta.get("lat_max")) - float(reg["lat_max"])) > tol
+        or abs(float(meta.get("lon_min")) - float(reg["lon_min"])) > tol
+        or abs(float(meta.get("lon_max")) - float(reg["lon_max"])) > tol
+        or abs(float(meta.get("resolution_deg")) - float(res)) > tol
+    ):
         return False
         
     # Strict completeness check against model schedule
+    parts = run_id.split('_')
     try:
-        import numpy as np
-        with np.load(npz_path) as d:
-            have = d.get('hours', np.array([], dtype=np.int32)).tolist()
-        parts = run_id.split('_')
         expected = get_run_forecast_hours(model_id, parts[1], parts[2], expected_max_hours)
-        return have == expected
-    except Exception:
+    except IndexError:
         return False
+    return hours == expected
 
 
 def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: int) -> bool:
