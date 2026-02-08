@@ -171,7 +171,7 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
 
     # Verify outputs
     # Match the writer's resolution directory (formatted with 3 decimals)
-    res_dir = f"{0.1:.3f}deg"
+    res_dir = "0.1deg"
     out_dir = tmp_path / "tiles" / "ne" / res_dir / "hrrr" / "run_20240101_00"
     npz_path = out_dir / "refc.npz"
     meta_path = out_dir / "refc.meta.json"

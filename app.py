@@ -1141,7 +1141,7 @@ def api_table_bylatlon():
                 "error": "No tile runs available",
                 "metadata": {"region": region_id, "model_id": model_id, "lat": lat, "lon": lon, "resolution_deg": res},
                 "diagnostics": {
-                    "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg"),
+                    "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}".rstrip("0").rstrip(".") + "deg"),
                     "models_with_runs": list_tile_models(repomap["TILES_DIR"], region_id, res),
                 }
             }), 404
@@ -1162,9 +1162,9 @@ def api_table_bylatlon():
             "metadata": {"region": region_id, "model_id": model_id, "lat": lat, "lon": lon, "resolution_deg": res},
             "candidate_runs": candidate_runs,
             "diagnostics": {
-                "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg"),
+                "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}".rstrip("0").rstrip(".") + "deg"),
                 "models_with_runs": list_tile_models(repomap["TILES_DIR"], region_id, res),
-                "model_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id),
+                "model_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}".rstrip("0").rstrip(".") + "deg", model_id),
             }
         }), 404
     run_id = chosen_run
@@ -1186,7 +1186,7 @@ def api_table_bylatlon():
         # Compute and record tile cell lat/lon center for first found variable
         if tile_cell_info is None:
             # read meta to compute cell center
-            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+            res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg".rstrip("0").rstrip(".")
             meta_path = os.path.join(
                 repomap["TILES_DIR"], region_id, res_dir, model_id, run_id, f"{var_id}.meta.json"
             )
@@ -1234,7 +1234,7 @@ def api_table_bylatlon():
                 "resolution_deg": res,
                 "lat": lat,
                 "lon": lon,
-                "tiles_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id, run_id),
+                "tiles_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}".rstrip("0").rstrip(".") + "deg", model_id, run_id),
             },
             "diagnostics": {
                 "candidate_runs": candidate_runs,
@@ -1245,7 +1245,7 @@ def api_table_bylatlon():
     hours_sorted = sorted(rows_by_hour.keys())
     rows = [rows_by_hour[h] for h in hours_sorted]
     missing_variables = [v for v in variables_considered if v not in variables_found]
-    tiles_dir = os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id, run_id) if run_id else None
+    tiles_dir = os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}".rstrip("0").rstrip(".") + "deg", model_id, run_id) if run_id else None
     return jsonify({
         "metadata": {
             "region": region_id,
@@ -1264,8 +1264,8 @@ def api_table_bylatlon():
             "hours_returned": hours_sorted,
             "variables_present_in_run": list(chosen_vars_info.keys()),
             "models_with_runs": list_tile_models(repomap["TILES_DIR"], region_id, res),
-            "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg"),
-            "model_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}deg", model_id),
+            "region_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}".rstrip("0").rstrip(".") + "deg"),
+            "model_dir": os.path.join(repomap["TILES_DIR"], region_id, f"{res:.3f}".rstrip("0").rstrip(".") + "deg", model_id),
             "tile_cell": tile_cell_info,
         },
         "rows": rows,

@@ -188,6 +188,8 @@ WEATHER_VARIABLES = {
         "model_exclusions": ["icon"],
     },
     "msl": {
+        "nomads_params": ["var_PRMSL"],
+        "level_params": ["lev_mean_sea_level=on"],
         "display_name": "MSL Pressure",
         "units": "mb",
         "short_name": "msl",

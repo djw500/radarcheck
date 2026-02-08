@@ -84,7 +84,7 @@ def build_region_tiles(
             continue
 
         # Audit Check: skip if tiles already exist and are valid
-        res_dir = f"{res_deg:.3f}deg".rstrip("0").rstrip(".")
+        res_dir = f"{res_deg:.3f}".rstrip("0").rstrip(".") + "deg".rstrip("0").rstrip(".")
         npz_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_info["run_id"], f"{variable_id}.npz")
         meta_path = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_info["run_id"], f"{variable_id}.meta.json")
         

@@ -6,8 +6,10 @@ from unittest.mock import patch, MagicMock
 @pytest.fixture
 def client():
     app.config['TESTING'] = True
-    with app.test_client() as client:
-        yield client
+    # Patch API_KEY to None to ensure auth is skipped during tests
+    with patch("app.API_KEY", None):
+        with app.test_client() as client:
+            yield client
 
 @patch('app.get_scheduled_runs_status')
 def test_api_status_scheduled(mock_get_status, client):

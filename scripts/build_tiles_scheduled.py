@@ -189,7 +189,7 @@ def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
 def tiles_exist_any(region_id: str, model_id: str) -> bool:
     """Check if any tiles exist for a model in a region."""
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg"
     model_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id)
     if not os.path.isdir(model_dir):
         return False
@@ -207,12 +207,13 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
     to exactly match the model's schedule up to expected_max_hours.
     """
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+    res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg"
     
     # Check for t2m tiles as a proxy for the run
     base_run_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_id)
     npz_path = os.path.join(base_run_dir, "t2m.npz")
     if not os.path.exists(npz_path):
+        # logger.debug(f"Missing NPZ: {npz_path}")
         return False
     # Verify region bounds match current config (backfill trigger after region expansion)
     try:
@@ -483,7 +484,7 @@ def cleanup_old_runs():
     """
     for region_id in REGIONS:
         res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-        res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+        res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg"
         region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
 
         if not os.path.isdir(region_dir):
@@ -548,7 +549,7 @@ def main():
         logger.warning("CLEARING TILE CACHE requested via --clear flag")
         for region_id in REGIONS:
             res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+            res_dir = f"{res:.3f}".rstrip("0").rstrip(".") + "deg"
             region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
             if os.path.exists(region_dir):
                 logger.info(f"Removing {region_dir}...")

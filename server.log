@@ -1,0 +1,22 @@
+INFO:__main__:Application startup
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/flask_limiter/_extension.py:364: UserWarning: Using the in-memory storage for tracking rate limits as no storage was explicitly specified. This is not recommended for production use. See: https://flask-limiter.readthedocs.io#configuring-a-storage-backend for documentation about configuring the storage backend.
+  warnings.warn(
+ * Serving Flask app 'app'
+ * Debug mode: on
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.2:5000
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug: * Restarting with stat
+INFO:__main__:Application startup
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/flask_limiter/_extension.py:364: UserWarning: Using the in-memory storage for tracking rate limits as no storage was explicitly specified. This is not recommended for production use. See: https://flask-limiter.readthedocs.io#configuring-a-storage-backend for documentation about configuring the storage backend.
+  warnings.warn(
+WARNING:werkzeug: * Debugger is active!
+INFO:werkzeug: * Debugger PIN: 410-907-091
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 19:43:14] "HEAD /status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 19:43:41] "GET /status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 19:43:41] "GET /static/js/statusView.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 19:43:42] "GET /api/status/scheduled HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 19:43:42] "GET /api/status/summary HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [08/Feb/2026 19:43:42] "GET /api/status/logs?lines=50 HTTP/1.1" 200 -

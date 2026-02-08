@@ -3,8 +3,8 @@
 This document tracks the implementation of the SQLite-backed job queue system.
 
 ## 1. Core Job Queue (`jobs.py`)
-- [ ] Create `tests/test_jobs.py` for unit testing the queue.
-- [ ] Create `jobs.py` with the following functions:
+- [x] Create `tests/test_jobs.py` for unit testing the queue.
+- [x] Create `jobs.py` with the following functions:
     - `init_db(db_path)`
     - `enqueue(conn, type, args, priority)`
     - `claim(conn, worker_id)`
@@ -14,44 +14,44 @@ This document tracks the implementation of the SQLite-backed job queue system.
     - `prune_completed(conn, max_age_hours)`
     - `count_by_status(conn)`
     - `get_jobs(conn, type, status, limit)`
-- [ ] Update `config.py` to include `JOBS_DB_PATH`.
-- [ ] Verify all tests pass.
+- [x] Update `config.py` to include `JOBS_DB_PATH`.
+- [x] Verify all tests pass.
 
 ## 2. Legacy Code Removal
-- [ ] Remove unused imports/functions in `cache_builder.py` (`generate_forecast_images`, `tiered_cleanup_runs`, `main`).
-- [ ] Remove shadow `audit_stats` in `build_tiles.py`.
-- [ ] Remove unused `once_mode` variable and fix bare `except:` clauses in `scripts/build_tiles_scheduled.py`.
-- [ ] Verify existing tests pass.
+- [x] Remove unused imports/functions in `cache_builder.py` (`generate_forecast_images`, `tiered_cleanup_runs`, `main`).
+- [x] Remove shadow `audit_stats` in `build_tiles.py`.
+- [x] Remove unused `once_mode` variable and fix bare `except:` clauses in `scripts/build_tiles_scheduled.py`.
+- [x] Verify existing tests pass.
 
 ## 3. Scheduler Refactor
-- [ ] Create `tests/test_scheduler_enqueue.py`.
-- [ ] Modify `scripts/build_tiles_scheduled.py`:
+- [x] Create `tests/test_scheduler_enqueue.py`.
+- [x] Modify `scripts/build_tiles_scheduled.py`:
     - Replace `subprocess.Popen` with `enqueue(ingest_grib)` and `enqueue(build_tile)`.
     - Remove post-pass normalization loop in `process_model`.
     - Enqueue `cleanup` jobs in `build_cycle`.
-- [ ] Verify new tests pass.
+- [x] Verify new tests pass.
 
 ## 4. Worker Implementation (`worker.py`)
-- [ ] Create `tests/test_worker.py`.
-- [ ] Create `worker.py`:
+- [x] Create `tests/test_worker.py`.
+- [x] Create `worker.py`:
     - Implement `run_worker` loop.
     - Implement `execute_ingest_grib` (wraps `fetch_grib`).
     - Implement `execute_build_tile` (wraps `build_tiles_for_variable`).
     - Implement `execute_cleanup`.
-- [ ] Verify worker tests pass.
+- [x] Verify worker tests pass.
 
 ## 5. Status Dashboard Refactor
-- [ ] Create `tests/test_status_db.py`.
-- [ ] Modify `status_utils.py`:
+- [x] Create `tests/test_status_db.py`.
+- [x] Modify `status_utils.py`:
     - Implement `get_scheduled_runs_status` using `jobs.db`.
     - Implement `scan_cache_status` using `jobs.db`.
-- [ ] Modify `app.py`:
+- [x] Modify `app.py`:
     - Update `/api/status/scheduled` and `/api/status/summary`.
     - Add queue stats to summary.
-- [ ] Update `templates/status.html`.
-- [ ] Verify status tests pass.
+- [x] Update `templates/status.html`.
+- [x] Verify status tests pass.
 
 ## 6. Cleanup & Hardening
-- [ ] Run `scripts/test_tiles_e2e.py`.
-- [ ] Run full `pytest` suite.
-- [ ] Add WAL checkpointing.
+- [x] Run `scripts/test_tiles_e2e.py`.
+- [x] Run full `pytest` suite.
+- [x] Add WAL checkpointing.

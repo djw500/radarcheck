@@ -6,6 +6,9 @@ from pathlib import Path
 import numpy as np
 
 import sys
+# Add parent directory to path for imports to allow running as script or collection by pytest
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import types
 
 # Stub heavy optional deps before importing project modules
@@ -161,7 +164,7 @@ def main() -> int:
     )
 
     # Validate
-    out_dir = out_base / "ne" / f"{0.1:.3f}deg" / "hrrr" / "run_20240101_00"
+    out_dir = out_base / "ne" / "0.1deg" / "hrrr" / "run_20240101_00"
     npz = out_dir / "t2m.npz"
     meta = out_dir / "t2m.meta.json"
     assert npz.exists(), f"Missing tiles: {npz}"
