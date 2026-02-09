@@ -399,6 +399,16 @@ def fetch_grib(
         audit_stats["grib_hits"] += 1
         return filename
 
+    if os.environ.get("RADARCHECK_FAKE_DATA"):
+        logger.info(f"Using fake data for {model_id} {variable_id} {forecast_hour}")
+        fake_source = os.path.abspath("debug_gfs.grib2")
+        if os.path.exists(fake_source):
+             with FileLock(f"{filename}.lock", timeout=repomap["FILELOCK_TIMEOUT_SECONDS"]):
+                shutil.copy(fake_source, filename)
+                return filename
+        else:
+            raise GribDownloadError(f"Fake data source {fake_source} not found")
+
     audit_stats["grib_misses"] += 1
     # Use CONUS region for all downloads to ensure full coverage and deduplication
     download_region = repomap["DOWNLOAD_REGIONS"]["conus"]
