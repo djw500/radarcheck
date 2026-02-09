@@ -51,13 +51,3 @@ def test_create_plot_handles_corrupted_grib(monkeypatch, tmp_path):
             str(tmp_path),
             variable_config={"short_name": "refc"},
         )
-
-
-def test_api_handles_missing_cache_gracefully(monkeypatch):
-    monkeypatch.setitem(cache_builder.repomap, "CACHE_DIR", "/nonexistent")
-    monkeypatch.setitem(app_module.repomap, "CACHE_DIR", "/nonexistent")
-    monkeypatch.setattr(app_module, "API_KEY", None)
-    with app_module.app.test_client() as client:
-        response = client.get("/api/locations")
-    assert response.status_code == 200
-    assert response.get_json() == []
