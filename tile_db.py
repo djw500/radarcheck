@@ -206,6 +206,65 @@ def record_tile_hour(
         complete_job(conn, job_id)
 
 
+def delete_tile_run(
+    conn: sqlite3.Connection,
+    region_id: str,
+    resolution_deg: float,
+    model_id: str,
+    run_id: str,
+) -> None:
+    """Delete all database records for a specific tile run."""
+    conn.execute(
+        """
+        DELETE FROM tile_hours
+        WHERE region_id=? AND resolution_deg=? AND model_id=? AND run_id=?
+        """,
+        (region_id, resolution_deg, model_id, run_id),
+    )
+    conn.execute(
+        """
+        DELETE FROM tile_variables
+        WHERE region_id=? AND resolution_deg=? AND model_id=? AND run_id=?
+        """,
+        (region_id, resolution_deg, model_id, run_id),
+    )
+    conn.execute(
+        """
+        DELETE FROM tile_runs
+        WHERE region_id=? AND resolution_deg=? AND model_id=? AND run_id=?
+        """,
+        (region_id, resolution_deg, model_id, run_id),
+    )
+
+
+def delete_region_tiles(
+    conn: sqlite3.Connection,
+    region_id: str,
+) -> None:
+    """Delete all database records for a specific region."""
+    conn.execute(
+        """
+        DELETE FROM tile_hours
+        WHERE region_id=?
+        """,
+        (region_id,),
+    )
+    conn.execute(
+        """
+        DELETE FROM tile_variables
+        WHERE region_id=?
+        """,
+        (region_id,),
+    )
+    conn.execute(
+        """
+        DELETE FROM tile_runs
+        WHERE region_id=?
+        """,
+        (region_id,),
+    )
+
+
 def list_tile_runs_db(
     conn: sqlite3.Connection,
     region_id: str,
