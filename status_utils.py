@@ -185,109 +185,119 @@ def get_scheduled_runs_status(region="ne"):
 
 
 def get_run_grid():
-    """Get per-model/run/hour job status grid from the jobs table.
+    """Get per-model/run/variable job status summary from the jobs table.
 
-    Returns a dict keyed by model_id, each containing runs with per-hour
-    aggregate job status.  Also includes available (not-yet-enqueued) runs
-    from the expected-runs list for the backfill UI.
+    Returns a dict keyed by model_id with per-run, per-variable counts.
+    Designed for a table view: rows=runs, columns=variables, cells=done/total.
 
     Structure:
     {
         "hrrr": {
             "name": "HRRR",
-            "runs": {
-                "run_20260215_12": {
-                    "init_time": "2026-02-15T12:00:00+00:00",
-                    "hours": {1: "completed", 2: "failed", 3: "pending", ...},
-                    "counts": {"completed": 40, "failed": 2, ...},
-                    "total_hours": 48
+            "variables": ["t2m", "refc", ...],  # ordered list of vars with jobs
+            "runs": [
+                {
+                    "run_id": "run_20260215_20",
+                    "display": "02/15 20Z",
+                    "variables": {
+                        "t2m":  {"completed": 18, "pending": 0, "failed": 0, "processing": 0, "total": 18},
+                        "refc": {"completed": 10, "pending": 5, "failed": 3, "processing": 0, "total": 18},
+                        ...
+                    },
+                    "totals": {"completed": 200, "pending": 10, "failed": 5, "processing": 2, "total": 217}
                 }
-            },
-            "available_runs": ["run_20260215_06", ...]  # for backfill dropdown
+            ],
+            "available_runs": ["run_20260215_18", ...]
         }
     }
     """
     conn = init_db(repomap.get("DB_PATH"))
     try:
-        # Query all build_tile_hour jobs, aggregate by model/run/hour
         rows = conn.execute(
             """
             SELECT
                 json_extract(args_json, '$.model_id') as model_id,
                 json_extract(args_json, '$.run_id') as run_id,
-                CAST(json_extract(args_json, '$.forecast_hour') AS INTEGER) as forecast_hour,
+                json_extract(args_json, '$.variable_id') as variable_id,
                 status,
-                COUNT(*) as var_count
+                COUNT(*) as cnt
             FROM jobs
             WHERE type = 'build_tile_hour'
             GROUP BY 1, 2, 3, 4
-            ORDER BY model_id, run_id DESC, forecast_hour, status
+            ORDER BY model_id, run_id DESC, variable_id, status
             """
         ).fetchall()
     finally:
         conn.close()
 
-    # Aggregate: for each (model, run, hour), pick display status
-    # Priority: processing > pending > failed > completed
-    STATUS_PRIORITY = {"processing": 0, "pending": 1, "failed": 2, "completed": 3}
-
-    grid = {}
+    # Build nested structure: model -> run -> variable -> {status: count}
+    raw = {}
     for row in rows:
         model_id = row["model_id"]
         run_id = row["run_id"]
-        hour = row["forecast_hour"]
+        var_id = row["variable_id"]
         status = row["status"]
+        cnt = row["cnt"]
 
-        if model_id not in grid:
-            model_config = repomap["MODELS"].get(model_id, {})
-            grid[model_id] = {
-                "name": model_config.get("name", model_id),
-                "runs": {},
-            }
+        raw.setdefault(model_id, {}).setdefault(run_id, {}).setdefault(var_id, {})
+        raw[model_id][run_id][var_id][status] = cnt
 
-        runs = grid[model_id]["runs"]
-        if run_id not in runs:
-            # Parse init time
-            parts = run_id.split("_")
-            try:
-                init_time = datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H")
-                init_time = init_time.replace(tzinfo=timezone.utc)
-                init_iso = init_time.isoformat()
-            except (IndexError, ValueError):
-                init_iso = None
-            runs[run_id] = {
-                "init_time": init_iso,
-                "hours": {},
-                "counts": {},
-            }
-
-        run_data = runs[run_id]
-        # Track count per status
-        run_data["counts"][status] = run_data["counts"].get(status, 0) + row["var_count"]
-
-        # Pick highest-priority status for this hour
-        current = run_data["hours"].get(hour)
-        if current is None or STATUS_PRIORITY.get(status, 99) < STATUS_PRIORITY.get(current, 99):
-            run_data["hours"][hour] = status
-
-    # Add expected hours count and available runs for backfill
+    # Format into the output structure
+    grid = {}
     for model_cfg in SCHEDULED_MODELS:
         model_id = model_cfg["id"]
-        if model_id not in grid:
-            model_config = repomap["MODELS"].get(model_id, {})
-            grid[model_id] = {
-                "name": model_config.get("name", model_id),
-                "runs": {},
-            }
+        model_config = repomap["MODELS"].get(model_id, {})
+        model_raw = raw.get(model_id, {})
 
-        # Compute total expected hours for each run
-        for run_id, run_data in grid[model_id]["runs"].items():
-            expected = _target_expected_hours(model_id, run_id, model_cfg["max_hours"])
-            run_data["total_hours"] = len(expected)
+        # Collect all variables seen across all runs for this model
+        all_vars = set()
+        for run_vars in model_raw.values():
+            all_vars.update(run_vars.keys())
+
+        # Order variables: use display order from config (t2m first, then alphabetical)
+        preferred_order = ["t2m", "refc", "wind_10m", "gust", "apcp", "asnow",
+                           "csnow", "snod", "prate", "dpt", "rh", "msl", "cape", "hlcy", "hail"]
+        ordered_vars = [v for v in preferred_order if v in all_vars]
+        ordered_vars += sorted(all_vars - set(ordered_vars))
+
+        # Build run list (newest first)
+        run_list = []
+        for run_id in sorted(model_raw.keys(), reverse=True):
+            parts = run_id.split("_")
+            display = f"{parts[1][4:6]}/{parts[1][6:8]} {parts[2]}Z" if len(parts) == 3 else run_id
+
+            var_summaries = {}
+            totals = {"completed": 0, "pending": 0, "failed": 0, "processing": 0, "total": 0}
+
+            for var_id in ordered_vars:
+                status_counts = model_raw[run_id].get(var_id, {})
+                summary = {
+                    "completed": status_counts.get("completed", 0),
+                    "pending": status_counts.get("pending", 0),
+                    "failed": status_counts.get("failed", 0),
+                    "processing": status_counts.get("processing", 0),
+                }
+                summary["total"] = sum(summary.values())
+                var_summaries[var_id] = summary
+                for k in totals:
+                    totals[k] += summary.get(k, 0)
+
+            run_list.append({
+                "run_id": run_id,
+                "display": display,
+                "variables": var_summaries,
+                "totals": totals,
+            })
 
         # Available runs for backfill dropdown (last 24h)
         expected_runs = _get_expected_runs(model_id, lookback_hours=24)
-        grid[model_id]["available_runs"] = expected_runs
+
+        grid[model_id] = {
+            "name": model_config.get("name", model_id),
+            "variables": ordered_vars,
+            "runs": run_list,
+            "available_runs": expected_runs,
+        }
 
     return grid
 
