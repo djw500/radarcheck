@@ -22,9 +22,8 @@ def setup_env():
 
     # Patch repomap to use test paths
     with patch.dict(repomap, {
-        "TILES_DB_PATH": DB_PATH,
+        "DB_PATH": DB_PATH,
         "TILES_DIR": TILES_DIR,
-        "JOBS_DB_PATH": DB_PATH,
         "TILING_REGIONS": {
             "test_region": {
                 "lat_min": 30.0,

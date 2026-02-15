@@ -5,7 +5,7 @@ from unittest.mock import mock_open, patch
 import numpy as np
 import pytest
 
-from status_utils import get_disk_usage, read_scheduler_logs, scan_cache_status
+from status_utils import get_disk_usage, read_scheduler_logs
 from status_utils import _parse_updated_at_to_timestamp
 from tile_db import init_db, record_tile_run, record_tile_variable
 
@@ -28,37 +28,37 @@ def mock_fs(tmp_path):
     # Structure: cache/tiles/region/res/model/run/var.npz
     tiles_dir = tmp_path / "tiles"
     tiles_dir.mkdir()
-    
+
     # Region: ne
     ne_dir = tiles_dir / "ne"
     ne_dir.mkdir()
-    
+
     # Resolution: 0.100deg
     res_dir = ne_dir / "0.100deg"
     res_dir.mkdir()
-    
+
     # Model: HRRR
     hrrr_dir = res_dir / "hrrr"
     hrrr_dir.mkdir()
-    
+
     # Run: Complete (run_20260124_12) - 18 hours (max)
     run1 = hrrr_dir / "run_20260124_12"
     run1.mkdir()
     # Create valid npz with some size
     npz1 = run1 / "t2m.npz"
     np.savez(npz1, hours=np.arange(18))
-    
+
     # Run: Partial (run_20260124_13) - 5 hours
     run2 = hrrr_dir / "run_20260124_13"
     run2.mkdir()
     npz2 = run2 / "t2m.npz"
     np.savez(npz2, hours=np.arange(5))
 
-    # Model: GFS (Empty/Missing runs handled by logic finding gaps, 
+    # Model: GFS (Empty/Missing runs handled by logic finding gaps,
     # but here we just test what is found)
     gfs_dir = res_dir / "gfs"
     gfs_dir.mkdir()
-    
+
     # Create GRIBs directory
     gribs_dir = tmp_path / "gribs"
     gribs_dir.mkdir()
@@ -66,76 +66,8 @@ def mock_fs(tmp_path):
     grib_hrrr.mkdir()
     # Create a dummy grib file
     (grib_hrrr / "test.grib2").write_bytes(b"0" * 1024) # 1KB
-    
+
     return tmp_path
-
-@patch("status_utils.repomap", MOCK_REPOMAP)
-@patch("status_utils.os.walk")
-def test_scan_cache_status_structure(mock_walk, mock_fs):
-    """Verify that scan_cache_status returns the expected data structure."""
-    pass
-
-@patch("status_utils.repomap")
-def test_scan_cache_status_integration(mock_repomap, tmp_path):
-    """Integration test using DB-backed tile metadata."""
-    db_path = tmp_path / "tiles.db"
-    mapping = {
-        "JOBS_DB_PATH": str(db_path),
-        "TILES_DB_PATH": str(db_path),
-        "MODELS": {
-            "hrrr": {"max_forecast_hours": 18, "name": "HRRR"},
-            "gfs": {"max_forecast_hours": 120, "name": "GFS"}
-        },
-        "TILING_REGIONS": {
-            "ne": {"default_resolution_deg": 0.1}
-        }
-    }
-    mock_repomap.get.side_effect = lambda k, default=None: mapping.get(k, default)
-    mock_repomap.__getitem__.side_effect = lambda k: mapping[k]
-
-    conn = init_db(str(db_path))
-    record_tile_run(conn, "ne", 0.1, "hrrr", "run_20260124_12", "2026-01-24T12:00:00Z")
-    record_tile_variable(
-        conn,
-        "ne",
-        0.1,
-        "hrrr",
-        "run_20260124_12",
-        "t2m",
-        "fake.npz",
-        "fake.meta.json",
-        list(range(18)),
-        123,
-    )
-    record_tile_run(conn, "ne", 0.1, "hrrr", "run_20260124_13", "2026-01-24T13:00:00Z")
-    record_tile_variable(
-        conn,
-        "ne",
-        0.1,
-        "hrrr",
-        "run_20260124_13",
-        "t2m",
-        "fake.npz",
-        "fake.meta.json",
-        list(range(5)),
-        123,
-    )
-    record_tile_run(conn, "ne", 0.1, "gfs", "run_20260124_12", "2026-01-24T12:00:00Z")
-    conn.commit()
-    conn.close()
-
-    status = scan_cache_status(region="ne")
-
-    assert "hrrr" in status
-    assert "gfs" in status
-
-    # HRRR should have runs
-    assert "run_20260124_12" in status["hrrr"]["runs"]
-    assert "run_20260124_13" in status["hrrr"]["runs"]
-
-    # Check status flags
-    assert status["hrrr"]["runs"]["run_20260124_12"]["status"] == "complete"
-    assert status["hrrr"]["runs"]["run_20260124_13"]["status"] == "partial"
 
 @patch("status_utils.repomap")
 def test_get_disk_usage(mock_repomap, mock_fs):
@@ -147,9 +79,9 @@ def test_get_disk_usage(mock_repomap, mock_fs):
             "hrrr": {}, "gfs": {}
         }
     }[k]
-    
+
     usage = get_disk_usage()
-    
+
     assert usage["total"] > 0
     assert usage["gribs"]["total"] == 1024
     assert usage["gribs"]["hrrr"] == 1024

@@ -23,10 +23,11 @@ The scheduler (`scripts/build_tiles_scheduled.py`) now uses an SQLite job queue 
 ### Remaining work from refactor
 
 - [ ] **P0** Test `python scripts/build_tiles_scheduled.py --once` end-to-end against live NOMADS
-- [ ] **P1** Fix pre-existing ECMWF test (`test_build_region_tiles_ecmwf`) — SQLite `database is locked` from concurrent tile_db access
-- [ ] **P1** Consider adding `--clean-gribs` behavior to `job_worker.py` (currently only `build_tiles.py` CLI does cleanup)
-- [ ] **P2** Replace `datetime.utcnow()` deprecation warnings in `jobs.py` with `datetime.now(UTC)`
-- [ ] **P2** Remove unused `tiles_exist_any()` from scheduler (never called)
+- [x] **P1** Fix pre-existing ECMWF test (`test_build_region_tiles_ecmwf`) — mocked tile_db functions
+- [x] **P1** `--clean-gribs` in `job_worker.py` — N/A, scheduler handles cleanup via `cleanup_old_gribs()`
+- [x] **P2** Replace `datetime.utcnow()` deprecation warnings in `jobs.py` and tests with `datetime.now(timezone.utc)`
+- [x] **P2** Remove unused `tiles_exist_any()` from scheduler
+- [x] **BUG** Fix `job_worker.py` `run_worker()` never calling `complete()` on successful jobs
 
 ---
 
@@ -86,7 +87,6 @@ The scheduler (`scripts/build_tiles_scheduled.py`) now uses an SQLite job queue 
 ## Known Issues
 
 - ECMWF model is disabled in scheduler config (was unstable)
-- `test_ecmwf_integration.py::test_build_region_tiles_ecmwf` fails with DB locked (concurrent SQLite access in test)
 - `PARALLEL_DOWNLOAD_WORKERS=1` is required for NOMADS reliability
 
 ---

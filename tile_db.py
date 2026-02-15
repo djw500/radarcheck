@@ -5,10 +5,9 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from config import repomap
-from jobs import complete as complete_job
 from jobs import init_db as init_jobs_db
 
-DEFAULT_DB_PATH = repomap.get("TILES_DB_PATH", repomap.get("JOBS_DB_PATH", "cache/jobs.db"))
+DEFAULT_DB_PATH = repomap.get("DB_PATH", "cache/jobs.db")
 
 
 def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:
@@ -163,8 +162,6 @@ def record_tile_variable(
             size_bytes,
         ),
     )
-    if job_id is not None:
-        complete_job(conn, job_id)
 
 
 def record_tile_hour(
@@ -202,8 +199,6 @@ def record_tile_hour(
             npz_path,
         ),
     )
-    if job_id is not None:
-        complete_job(conn, job_id)
 
 
 def delete_tile_run(

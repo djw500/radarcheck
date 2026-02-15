@@ -10,21 +10,15 @@ def client():
     with flask_app.test_client() as client:
         yield client
 
-@patch("app.scan_cache_status")
 @patch("app.get_disk_usage")
-def test_status_summary_endpoint(mock_disk, mock_scan, client):
-    # Setup mocks
-    mock_scan.return_value = {
-        "hrrr": {"runs": {"run_1": {"status": "complete"}}}
-    }
+def test_status_summary_endpoint(mock_disk, client):
     mock_disk.return_value = {"total": 1000}
-    
-    # Run request
+
     response = client.get("/api/status/summary")
-    
+
     assert response.status_code == 200
     data = response.get_json()
-    assert data["cache_status"]["hrrr"]["runs"]["run_1"]["status"] == "complete"
+    assert "cache_status" not in data
     assert data["disk_usage"]["total"] == 1000
 
 @patch("app.read_scheduler_logs")

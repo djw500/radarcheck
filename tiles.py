@@ -518,7 +518,7 @@ def load_grid_slice(
 
 
 def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:
-    conn = init_db(repomap.get("TILES_DB_PATH"))
+    conn = init_db(repomap.get("DB_PATH"))
     try:
         return list_tile_runs_db(conn, region_id, resolution_deg, model_id)
     finally:
@@ -533,7 +533,7 @@ def list_tile_variables(
     run_id: str,
 ) -> Dict[str, Dict[str, Any]]:
     """Return variables present for a tile run with basic info (hours, file size)."""
-    conn = init_db(repomap.get("TILES_DB_PATH"))
+    conn = init_db(repomap.get("DB_PATH"))
     try:
         return list_tile_variables_db(conn, region_id, resolution_deg, model_id, run_id)
     finally:
@@ -542,7 +542,7 @@ def list_tile_variables(
 
 def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:
     """Return models present under a region/resolution with their available runs."""
-    conn = init_db(repomap.get("TILES_DB_PATH"))
+    conn = init_db(repomap.get("DB_PATH"))
     try:
         return list_tile_models_db(conn, region_id, resolution_deg)
     finally:

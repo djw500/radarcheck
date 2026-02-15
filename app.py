@@ -56,9 +56,9 @@ from tiles import (
     list_tile_models,
 )
 from status_utils import (
-    scan_cache_status,
     get_disk_usage,
     get_job_queue_status,
+    get_run_grid,
     read_scheduler_logs,
     read_scheduler_status,
     get_scheduled_runs_status,
@@ -2278,19 +2278,23 @@ def api_status_scheduled():
     return jsonify({"runs": results})
 
 
+@app.route("/api/status/run-grid")
+@require_api_key
+def api_status_run_grid():
+    """Get per-model/run/hour job status grid from jobs table."""
+    grid = get_run_grid()
+    return jsonify(grid)
+
+
 @app.route("/api/status/summary")
 @require_api_key
 def api_status_summary():
     """Get system status summary (cache, disk, scheduler)."""
-    region_id = request.args.get("region", "ne")
-    
-    cache_status = scan_cache_status(region=region_id)
     disk_usage = get_disk_usage()
     scheduler_status = read_scheduler_status()
     job_queue = get_job_queue_status()
 
     return jsonify({
-        "cache_status": cache_status,
         "disk_usage": disk_usage,
         "scheduler_status": scheduler_status,
         "job_queue": job_queue,
@@ -2311,9 +2315,105 @@ def api_status_logs():
         lines = int(request.args.get("lines", 100))
     except ValueError:
         lines = 100
-        
+
     log_data = read_scheduler_logs(lines=lines)
     return jsonify({"lines": log_data})
+
+
+# --- Job management endpoints ---
+
+def _get_jobs_db():
+    """Get a DB connection with short busy_timeout for API reads."""
+    import sqlite3 as _sqlite3
+    from tile_db import init_db as _init_tile_db
+    conn = _init_tile_db(repomap.get("DB_PATH", "cache/jobs.db"))
+    conn.execute("PRAGMA busy_timeout = 2000")  # 2s max wait
+    return conn
+
+
+@app.route("/api/jobs/list")
+@require_api_key
+def api_jobs_list():
+    """Paginated job list with filters."""
+    from jobs import get_jobs, count_by_status
+    status_filter = request.args.get("status")
+    type_filter = request.args.get("type")
+    try:
+        limit = int(request.args.get("limit", 50))
+    except ValueError:
+        limit = 50
+    limit = min(limit, 200)
+
+    conn = _get_jobs_db()
+    try:
+        jobs = get_jobs(conn, job_type=type_filter, status=status_filter, limit=limit)
+        counts = count_by_status(conn)
+    finally:
+        conn.close()
+    return jsonify({"jobs": jobs, "counts": counts})
+
+
+@app.route("/api/jobs/retry-failed", methods=["POST"])
+@require_api_key
+def api_jobs_retry_failed():
+    """Reset failed jobs back to pending."""
+    from jobs import retry_all_failed
+    data = request.get_json(silent=True) or {}
+    job_id = data.get("job_id")
+
+    conn = _get_jobs_db()
+    try:
+        retried = retry_all_failed(conn, job_id=job_id)
+    finally:
+        conn.close()
+    return jsonify({"retried": retried})
+
+
+@app.route("/api/jobs/cancel", methods=["POST"])
+@require_api_key
+def api_jobs_cancel():
+    """Cancel pending/processing jobs."""
+    from jobs import cancel
+    data = request.get_json(silent=True) or {}
+    job_id = data.get("job_id")
+    status_filter = data.get("status")
+
+    conn = _get_jobs_db()
+    try:
+        cancelled = cancel(conn, job_id=job_id, status_filter=status_filter)
+    finally:
+        conn.close()
+    return jsonify({"cancelled": cancelled})
+
+
+@app.route("/api/jobs/enqueue-run", methods=["POST"])
+@require_api_key
+def api_jobs_enqueue_run():
+    """Enqueue all jobs for a specific model/run."""
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "scripts"))
+    from scripts.build_tiles_scheduled import enqueue_run_jobs, get_max_hours_for_run, MODELS_CONFIG
+
+    data = request.get_json(silent=True) or {}
+    model_id = data.get("model_id")
+    run_id = data.get("run_id")
+    region_id = data.get("region_id", "ne")
+
+    if not model_id or not run_id:
+        return jsonify({"error": "model_id and run_id are required"}), 400
+
+    # Look up max hours
+    model_cfg_entry = next((m for m in MODELS_CONFIG if m["id"] == model_id), None)
+    default_max = model_cfg_entry["max_hours"] if model_cfg_entry else repomap["MODELS"].get(model_id, {}).get("max_forecast_hours", 48)
+    max_hours = get_max_hours_for_run(model_id, run_id, default_max)
+
+    conn = _get_jobs_db()
+    try:
+        enqueued = enqueue_run_jobs(conn, region_id, model_id, run_id, max_hours)
+    finally:
+        conn.close()
+    return jsonify({"enqueued": enqueued})
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

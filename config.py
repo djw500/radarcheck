@@ -396,8 +396,7 @@ repomap = {
     "CACHE_DIR": "cache",
     "GRIB_CACHE_DIR": "cache/gribs",
     "TILES_DIR": "cache/tiles",
-    "JOBS_DB_PATH": "cache/jobs.db",
-    "TILES_DB_PATH": "cache/jobs.db",
+    "DB_PATH": "cache/jobs.db",
     "DEFAULT_MODEL": "hrrr",
     "DEFAULT_VARIABLE": "refc",
     "WEATHER_VARIABLES": WEATHER_VARIABLES,
@@ -412,7 +411,7 @@ repomap = {
     # Network settings
     "DOWNLOAD_TIMEOUT_SECONDS": 60,
     "HEAD_REQUEST_TIMEOUT_SECONDS": 10,
-    "MAX_DOWNLOAD_RETRIES": 3,
+    "MAX_DOWNLOAD_RETRIES": 1,
     "RETRY_DELAY_SECONDS": 2,
 
     # File validation

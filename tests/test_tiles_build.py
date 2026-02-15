@@ -11,8 +11,7 @@ def test_build_region_tiles_with_mocks(tmp_path, monkeypatch):
     # Configure TILES_DIR to temp
     from config import repomap
     monkeypatch.setitem(repomap, "TILES_DIR", str(tmp_path / "tiles"))
-    monkeypatch.setitem(repomap, "JOBS_DB_PATH", str(tmp_path / "jobs.db"))
-    monkeypatch.setitem(repomap, "TILES_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setitem(repomap, "DB_PATH", str(tmp_path / "jobs.db"))
 
     # Minimal region config to ensure inference is not needed
     monkeypatch.setitem(

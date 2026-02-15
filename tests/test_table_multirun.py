@@ -44,8 +44,7 @@ def _write_tile_run(base_dir, region_id, res, model_id, run_id, var_id, hours, v
 def _configure_tiles(tmp_path, monkeypatch):
     from config import repomap
     monkeypatch.setitem(repomap, "TILES_DIR", str(tmp_path / "tiles"))
-    monkeypatch.setitem(repomap, "JOBS_DB_PATH", str(tmp_path / "jobs.db"))
-    monkeypatch.setitem(repomap, "TILES_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setitem(repomap, "DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.setitem(
         repomap,
         "TILING_REGIONS",

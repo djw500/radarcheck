@@ -10,69 +10,6 @@ from tile_db import init_db, list_tile_models_db, list_tile_variables_db
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
-def scan_cache_status(region="ne"):
-    """
-    Scans the tile cache for the given region and returns the status of model runs.
-    
-    Returns:
-        dict: {
-            "model_id": {
-                "name": "Model Name",
-                "runs": {
-                    "run_id": {
-                        "status": "complete" | "partial",
-                        "hours_present": int,
-                        "expected_hours": int,
-                        "last_modified": float (timestamp)
-                    }
-                }
-            }
-        }
-    """
-    region_config = repomap["TILING_REGIONS"].get(region)
-    if not region_config:
-        return {}
-        
-    res = region_config.get("default_resolution_deg", 0.1)
-    status = {}
-
-    conn = init_db(repomap.get("TILES_DB_PATH"))
-    try:
-        models_with_runs = list_tile_models_db(conn, region, res)
-
-        for model_id, runs in models_with_runs.items():
-            model_config = repomap["MODELS"].get(model_id, {})
-            status[model_id] = {
-                "name": model_config.get("name", model_id),
-                "runs": {}
-            }
-
-            for run_id in runs:
-                vars_info = list_tile_variables_db(conn, region, res, model_id, run_id)
-                t2m_info = vars_info.get("t2m")
-                hours_present = len(t2m_info["hours"]) if t2m_info else 0
-                expected_hours = model_config.get("max_forecast_hours", 24)
-                run_status = "partial"
-                last_modified = _parse_updated_at_to_timestamp(t2m_info["updated_at"]) if t2m_info else 0.0
-
-                # Status determination
-                # Allow some tolerance or specific logic? 
-                # For now: >= 90% is complete
-                if hours_present >= expected_hours * 0.9:
-                    run_status = "complete"
-                elif hours_present == 0:
-                    run_status = "empty" # Or just don't list it? Better to list.
-                
-                status[model_id]["runs"][run_id] = {
-                    "status": run_status,
-                    "hours_present": hours_present,
-                    "expected_hours": expected_hours,
-                    "last_modified": last_modified
-                }
-    finally:
-        conn.close()
-    return status
-
 # Scheduler model configuration - mirrors build_tiles_scheduled.py
 SCHEDULED_MODELS = [
     {"id": "hrrr", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "48"))},
@@ -178,7 +115,7 @@ def get_scheduled_runs_status(region="ne"):
     res = region_config.get("default_resolution_deg", 0.1)
     results = []
 
-    conn = init_db(repomap.get("TILES_DB_PATH"))
+    conn = init_db(repomap.get("DB_PATH"))
     try:
         for model_cfg in SCHEDULED_MODELS:
             model_id = model_cfg["id"]
@@ -245,6 +182,114 @@ def get_scheduled_runs_status(region="ne"):
     # Sort by init_time descending (newest first)
     results.sort(key=lambda x: x["init_time"], reverse=True)
     return results
+
+
+def get_run_grid():
+    """Get per-model/run/hour job status grid from the jobs table.
+
+    Returns a dict keyed by model_id, each containing runs with per-hour
+    aggregate job status.  Also includes available (not-yet-enqueued) runs
+    from the expected-runs list for the backfill UI.
+
+    Structure:
+    {
+        "hrrr": {
+            "name": "HRRR",
+            "runs": {
+                "run_20260215_12": {
+                    "init_time": "2026-02-15T12:00:00+00:00",
+                    "hours": {1: "completed", 2: "failed", 3: "pending", ...},
+                    "counts": {"completed": 40, "failed": 2, ...},
+                    "total_hours": 48
+                }
+            },
+            "available_runs": ["run_20260215_06", ...]  # for backfill dropdown
+        }
+    }
+    """
+    conn = init_db(repomap.get("DB_PATH"))
+    try:
+        # Query all build_tile_hour jobs, aggregate by model/run/hour
+        rows = conn.execute(
+            """
+            SELECT
+                json_extract(args_json, '$.model_id') as model_id,
+                json_extract(args_json, '$.run_id') as run_id,
+                CAST(json_extract(args_json, '$.forecast_hour') AS INTEGER) as forecast_hour,
+                status,
+                COUNT(*) as var_count
+            FROM jobs
+            WHERE type = 'build_tile_hour'
+            GROUP BY 1, 2, 3, 4
+            ORDER BY model_id, run_id DESC, forecast_hour, status
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # Aggregate: for each (model, run, hour), pick display status
+    # Priority: processing > pending > failed > completed
+    STATUS_PRIORITY = {"processing": 0, "pending": 1, "failed": 2, "completed": 3}
+
+    grid = {}
+    for row in rows:
+        model_id = row["model_id"]
+        run_id = row["run_id"]
+        hour = row["forecast_hour"]
+        status = row["status"]
+
+        if model_id not in grid:
+            model_config = repomap["MODELS"].get(model_id, {})
+            grid[model_id] = {
+                "name": model_config.get("name", model_id),
+                "runs": {},
+            }
+
+        runs = grid[model_id]["runs"]
+        if run_id not in runs:
+            # Parse init time
+            parts = run_id.split("_")
+            try:
+                init_time = datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H")
+                init_time = init_time.replace(tzinfo=timezone.utc)
+                init_iso = init_time.isoformat()
+            except (IndexError, ValueError):
+                init_iso = None
+            runs[run_id] = {
+                "init_time": init_iso,
+                "hours": {},
+                "counts": {},
+            }
+
+        run_data = runs[run_id]
+        # Track count per status
+        run_data["counts"][status] = run_data["counts"].get(status, 0) + row["var_count"]
+
+        # Pick highest-priority status for this hour
+        current = run_data["hours"].get(hour)
+        if current is None or STATUS_PRIORITY.get(status, 99) < STATUS_PRIORITY.get(current, 99):
+            run_data["hours"][hour] = status
+
+    # Add expected hours count and available runs for backfill
+    for model_cfg in SCHEDULED_MODELS:
+        model_id = model_cfg["id"]
+        if model_id not in grid:
+            model_config = repomap["MODELS"].get(model_id, {})
+            grid[model_id] = {
+                "name": model_config.get("name", model_id),
+                "runs": {},
+            }
+
+        # Compute total expected hours for each run
+        for run_id, run_data in grid[model_id]["runs"].items():
+            expected = _target_expected_hours(model_id, run_id, model_cfg["max_hours"])
+            run_data["total_hours"] = len(expected)
+
+        # Available runs for backfill dropdown (last 24h)
+        expected_runs = _get_expected_runs(model_id, lookback_hours=24)
+        grid[model_id]["available_runs"] = expected_runs
+
+    return grid
 
 
 def _parse_updated_at_to_timestamp(updated_at: str) -> float:
@@ -352,7 +397,7 @@ def get_job_queue_status():
         dict: {"pending": int, "processing": int, "completed": int, "failed": int}
     """
     try:
-        conn = init_jobs_db(repomap.get("JOBS_DB_PATH", "cache/jobs.db"))
+        conn = init_jobs_db(repomap.get("DB_PATH", "cache/jobs.db"))
         try:
             return count_by_status(conn)
         finally:

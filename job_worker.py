@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 from cache_builder import fetch_grib
 from config import repomap
-from jobs import claim, fail, init_db
+from jobs import cancel_siblings, claim, complete, fail, init_db
 from tile_db import init_db as init_tile_db
 from tile_db import record_tile_hour, record_tile_run, record_tile_variable
 from tiles import build_tiles_for_variable, upsert_tiles_npz
@@ -137,7 +137,7 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
 
 
 def run_worker(poll_interval_s: float = 5.0, once: bool = False) -> None:
-    conn = init_tile_db(repomap["JOBS_DB_PATH"])
+    conn = init_tile_db(repomap["DB_PATH"])
     try:
         while True:
             job = claim(conn, "tile-worker")
@@ -150,11 +150,17 @@ def run_worker(poll_interval_s: float = 5.0, once: bool = False) -> None:
             try:
                 if job["type"] == "build_tile_hour":
                     process_build_tile_hour(conn, job)
-                    conn.commit()
+                    complete(conn, job["id"])
                 else:
                     fail(conn, job["id"], f"Unsupported job type: {job['type']}")
             except Exception as exc:
                 fail(conn, job["id"], str(exc))
+                cancelled = cancel_siblings(conn, job)
+                if cancelled:
+                    import logging
+                    logging.getLogger(__name__).info(
+                        f"Cancelled {cancelled} sibling jobs for {job['type']}"
+                    )
             if once:
                 break
     finally:

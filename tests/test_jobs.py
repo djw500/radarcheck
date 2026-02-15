@@ -1,6 +1,6 @@
 import sqlite3
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from jobs import (
     claim,
@@ -131,7 +131,7 @@ def test_claim_skips_processing_jobs(tmp_path):
 def test_claim_skips_jobs_before_retry_after(tmp_path):
     conn = init_db(str(tmp_path / "jobs.db"))
     job_id = enqueue(conn, "ingest_grib", {"a": 1})
-    future = (datetime.utcnow() + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     conn.execute("UPDATE jobs SET retry_after = ? WHERE id = ?", (future, job_id))
     conn.commit()
     assert claim(conn, "worker-1") is None
@@ -140,7 +140,7 @@ def test_claim_skips_jobs_before_retry_after(tmp_path):
 def test_claim_returns_jobs_past_retry_after(tmp_path):
     conn = init_db(str(tmp_path / "jobs.db"))
     job_id = enqueue(conn, "ingest_grib", {"a": 1})
-    past = (datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    past = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     conn.execute("UPDATE jobs SET retry_after = ? WHERE id = ?", (past, job_id))
     conn.commit()
     job = claim(conn, "worker-1")
@@ -254,7 +254,7 @@ def test_prune_completed_deletes_old_jobs(tmp_path):
     job_id = enqueue(conn, "ingest_grib", {"a": 1})
     conn.execute(
         "UPDATE jobs SET status = 'completed', completed_at = ? WHERE id = ?",
-        ((datetime.utcnow() - timedelta(hours=100)).strftime("%Y-%m-%dT%H:%M:%SZ"), job_id),
+        ((datetime.now(timezone.utc) - timedelta(hours=100)).strftime("%Y-%m-%dT%H:%M:%SZ"), job_id),
     )
     conn.commit()
     pruned = prune_completed(conn, older_than_hours=72)
@@ -268,7 +268,7 @@ def test_prune_completed_keeps_recent_jobs(tmp_path):
     job_id = enqueue(conn, "ingest_grib", {"a": 1})
     conn.execute(
         "UPDATE jobs SET status = 'completed', completed_at = ? WHERE id = ?",
-        (datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), job_id),
+        (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), job_id),
     )
     conn.commit()
     pruned = prune_completed(conn, older_than_hours=72)

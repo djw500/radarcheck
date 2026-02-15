@@ -43,7 +43,7 @@ def build_region_tiles(
     clean_gribs: bool = False,
     audit_only: bool = False,
 ) -> None:
-    conn = init_db(repomap.get("TILES_DB_PATH"))
+    conn = init_db(repomap.get("DB_PATH"))
     try:
         _build_region_tiles(conn, region_id, model_id, run_id, variables, resolution_deg, max_hours, clean_gribs, audit_only)
     finally:

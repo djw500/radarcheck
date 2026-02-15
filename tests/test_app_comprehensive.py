@@ -196,15 +196,9 @@ class TestAppComprehensive:
         assert resp.mimetype == "image/png"
 
     # --- Status API ---
-    @patch("app.scan_cache_status", return_value={})
     @patch("app.get_disk_usage", return_value={})
     @patch("app.read_scheduler_status", return_value={})
-    def test_api_status_summary(self, mock_read, mock_du, mock_scan, client):
-        # *mocks expands to (mock_scan, mock_du, mock_read, client) but client is fixture so it comes last?
-        # No, pytests injects fixtures into arguments by name.
-        # unittest.mock.patch as decorator appends mock args.
-        # So signature is (self, mock_read, mock_du, mock_scan, client).
-        # Order is reverse of decoration.
+    def test_api_status_summary(self, mock_read, mock_du, client):
         resp = client.get("/api/status/summary")
         assert resp.status_code == 200
 

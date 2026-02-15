@@ -39,6 +39,7 @@ from ecmwf import herbie_run_available
 from jobs import (
     init_db as init_jobs_db,
     enqueue,
+    cancel_siblings,
     claim,
     complete,
     fail,
@@ -227,20 +228,6 @@ def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
     return required_runs
 
 
-def tiles_exist_any(region_id: str, model_id: str) -> bool:
-    """Check if any tiles exist for a model in a region."""
-    res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-    res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    model_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id)
-    if not os.path.isdir(model_dir):
-        return False
-    # Check for any run directory
-    for item in os.listdir(model_dir):
-        if item.startswith("run_") and os.path.isdir(os.path.join(model_dir, item)):
-            return True
-    return False
-
-
 def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: int = 24) -> bool:
     """Check if tiles already exist and match the exact expected forecast steps.
 
@@ -346,7 +333,10 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
 
 
 def process_model(model_cfg: dict, conn) -> tuple[int, list]:
-    """Process a single model - find required runs and enqueue missing tile jobs.
+    """Process a single model - find the latest available run and enqueue it.
+
+    Only enqueues the single most recent available run per model.
+    Use the status page "Enqueue" button for manual backfills.
 
     Returns (jobs_enqueued, targets).
     """
@@ -355,36 +345,41 @@ def process_model(model_cfg: dict, conn) -> tuple[int, list]:
     jobs_enqueued = 0
     targets = []
 
-    # Get all runs we SHOULD have according to tiered policy (last 72h)
-    runs_to_process = get_required_runs(model_id, lookback_hours=72)
+    # Only look at recent runs (last 12h) — find the latest available one
+    runs_to_process = get_required_runs(model_id, lookback_hours=12)
 
     if not runs_to_process:
-        logger.warning(f"No available runs found for {model_id}")
+        logger.info(f"No available runs found for {model_id}")
         return 0, []
 
-    for r in runs_to_process:
-        targets.append(f"{model_id}/{r}")
-
-    num_runs = len(runs_to_process)
-    print(f"[{model_id}] Checking {num_runs} required runs...")
-
+    # Take only the latest (first, since newest-first) incomplete run
     for run_id in runs_to_process:
-        # Skip if run is too new
         if not run_is_ready(run_id):
             continue
 
-        # Get run-specific max hours (e.g., HRRR synoptic vs non-synoptic)
         run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
 
+        needs_work = False
         for region_id in REGIONS:
-            # Skip if tiles already exist and are complete
+            if not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
+                needs_work = True
+                break
+
+        if not needs_work:
+            continue
+
+        # Found the latest incomplete run — enqueue it
+        targets.append(f"{model_id}/{run_id}")
+        print(f"[{model_id}] Enqueuing latest run: {run_id}")
+
+        for region_id in REGIONS:
             if tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
                 continue
-
             n = enqueue_run_jobs(conn, region_id, model_id, run_id, run_max_hours)
             if n > 0:
                 print(f"[{model_id}] Enqueued {n} jobs for {run_id} ({region_id})")
                 jobs_enqueued += n
+        break  # Only process the single latest run
 
     return jobs_enqueued, targets
 
@@ -416,6 +411,9 @@ def drain_queue(conn) -> tuple[int, int]:
         except Exception as exc:
             logger.error(f"Job {job['id']} failed: {exc}")
             fail(conn, job["id"], str(exc))
+            cancelled = cancel_siblings(conn, job)
+            if cancelled:
+                logger.info(f"Cancelled {cancelled} sibling jobs for same run")
             failed += 1
 
     return processed, failed
@@ -426,7 +424,7 @@ def build_cycle():
     logger.info("Starting build cycle")
     write_scheduler_status(state="running")
 
-    conn = init_jobs_db(repomap["JOBS_DB_PATH"])
+    conn = init_jobs_db(repomap["DB_PATH"])
     try:
         # Recover any stale processing jobs from a previous crash
         recovered = recover_stale(conn)
@@ -504,7 +502,7 @@ def cleanup_old_runs():
     - Keep up to MAX_HOURLY_RUNS recent hourly runs (for HRRR etc)
     """
     # Open DB connection once
-    conn = init_db(repomap.get("TILES_DB_PATH"))
+    conn = init_db(repomap.get("DB_PATH"))
     try:
         for region_id in REGIONS:
             res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
@@ -575,7 +573,7 @@ def main():
 
     if clear_cache:
         logger.warning("CLEARING TILE CACHE requested via --clear flag")
-        conn = init_db(repomap.get("TILES_DB_PATH"))
+        conn = init_db(repomap.get("DB_PATH"))
         try:
             for region_id in REGIONS:
                 res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)

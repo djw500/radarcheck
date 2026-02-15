@@ -120,7 +120,7 @@ class TestGetJobQueueStatus:
     def test_get_job_queue_status_returns_dict(self, tmp_path, monkeypatch):
         """get_job_queue_status should return a dict of status counts."""
         db_path = str(tmp_path / "status_jobs.db")
-        monkeypatch.setitem(repomap, "JOBS_DB_PATH", db_path)
+        monkeypatch.setitem(repomap, "DB_PATH", db_path)
 
         from status_utils import get_job_queue_status
 
@@ -131,7 +131,7 @@ class TestGetJobQueueStatus:
     def test_get_job_queue_status_with_jobs(self, tmp_path, monkeypatch):
         """get_job_queue_status should count jobs by status."""
         db_path = str(tmp_path / "status_jobs2.db")
-        monkeypatch.setitem(repomap, "JOBS_DB_PATH", db_path)
+        monkeypatch.setitem(repomap, "DB_PATH", db_path)
 
         from jobs import enqueue, init_db as init_jobs_db
         conn = init_jobs_db(db_path)

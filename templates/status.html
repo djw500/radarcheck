@@ -15,9 +15,9 @@
             theme: {
                 extend: {
                     colors: {
-                        primary: "#0ea5e9", // Sky 500
-                        "background-light": "#f8fafc", // Slate 50
-                        "background-dark": "#0B1120", // Custom deep dark
+                        primary: "#0ea5e9",
+                        "background-light": "#f8fafc",
+                        "background-dark": "#0B1120",
                         "card-dark": "#1e293b",
                         "card-light": "#ffffff",
                     },
@@ -42,8 +42,12 @@
                 <span class="material-icons-outlined text-primary text-2xl">dns</span>
                 <span class="font-bold text-lg tracking-tight">System Status</span>
             </div>
-            
-            <div class="flex items-center gap-2">
+
+            <div class="flex items-center gap-3">
+                <span id="refreshCountdown" class="text-xs text-slate-400 font-mono"></span>
+                <button id="refreshBtn" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1">
+                    <span class="material-icons-outlined text-sm">refresh</span> Refresh
+                </button>
                 <a href="/" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="Back to Forecast">
                     <span class="material-icons-outlined">arrow_back</span>
                 </a>
@@ -54,23 +58,63 @@
 
 <main class="flex-grow p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
 
-    <!-- Scheduler Status (New) -->
-    <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
-        <h2 class="text-lg font-semibold mb-4 text-slate-900 dark:text-white flex items-center gap-2">
-            <span class="material-icons-outlined text-primary">schedule</span> Scheduler Status
-        </h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="schedulerStats">
-            <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                <div class="text-xs text-slate-500 uppercase font-semibold">Last Run</div>
-                <div class="text-lg font-medium" id="schedLastRun">-</div>
+    <!-- Top row: Job Queue + Scheduler -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Job Queue -->
+        <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-4 text-slate-900 dark:text-white flex items-center gap-2">
+                <span class="material-icons-outlined text-primary">queue</span> Job Queue
+            </h2>
+            <div class="grid grid-cols-2 gap-3 mb-4" id="jobQueueStats">
+                <div class="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                    <div class="text-xs text-amber-600 dark:text-amber-400 uppercase font-semibold">Pending</div>
+                    <div class="text-2xl font-bold text-amber-700 dark:text-amber-300" id="qPending">-</div>
+                </div>
+                <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <div class="text-xs text-blue-600 dark:text-blue-400 uppercase font-semibold">Processing</div>
+                    <div class="text-2xl font-bold text-blue-700 dark:text-blue-300" id="qProcessing">-</div>
+                </div>
+                <div class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <div class="text-xs text-red-600 dark:text-red-400 uppercase font-semibold">Failed</div>
+                    <div class="text-2xl font-bold text-red-700 dark:text-red-300" id="qFailed">-</div>
+                </div>
+                <div class="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
+                    <div class="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold">Completed</div>
+                    <div class="text-2xl font-bold text-emerald-700 dark:text-emerald-300" id="qCompleted">-</div>
+                </div>
             </div>
-            <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                <div class="text-xs text-slate-500 uppercase font-semibold">Next Run</div>
-                <div class="text-lg font-medium" id="schedNextRun">-</div>
+            <div class="flex gap-2">
+                <button id="retryFailedBtn" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50 transition-colors">
+                    Retry Failed
+                </button>
+                <button id="cancelPendingBtn" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50 transition-colors">
+                    Cancel Pending
+                </button>
             </div>
-            <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg col-span-2">
-                <div class="text-xs text-slate-500 uppercase font-semibold">Targets</div>
-                <div class="text-sm font-mono mt-1 text-slate-600 dark:text-slate-300" id="schedTargets">-</div>
+        </div>
+
+        <!-- Scheduler Status -->
+        <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-4 text-slate-900 dark:text-white flex items-center gap-2">
+                <span class="material-icons-outlined text-primary">schedule</span> Scheduler
+            </h2>
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                    <div class="text-xs text-slate-500 uppercase font-semibold">State</div>
+                    <div class="text-lg font-medium" id="schedState">-</div>
+                </div>
+                <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                    <div class="text-xs text-slate-500 uppercase font-semibold">Last Run</div>
+                    <div class="text-lg font-medium" id="schedLastRun">-</div>
+                </div>
+                <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                    <div class="text-xs text-slate-500 uppercase font-semibold">Next Run</div>
+                    <div class="text-lg font-medium" id="schedNextRun">-</div>
+                </div>
+                <div class="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                    <div class="text-xs text-slate-500 uppercase font-semibold">Targets</div>
+                    <div class="text-xs font-mono mt-1 text-slate-600 dark:text-slate-300 truncate" id="schedTargets">-</div>
+                </div>
             </div>
         </div>
     </div>
@@ -111,6 +155,43 @@
         </div>
     </div>
 
+    <!-- Recent Jobs Table -->
+    <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <span class="material-icons-outlined text-primary">list_alt</span> Recent Jobs
+            </h2>
+            <div class="flex gap-2">
+                <button id="showFailedBtn" class="px-3 py-1 rounded text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">
+                    Failed Only
+                </button>
+                <button id="showAllBtn" class="px-3 py-1 rounded text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                    Show All
+                </button>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-xs text-left text-slate-500 dark:text-slate-400">
+                <thead class="text-[10px] uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-300">
+                    <tr>
+                        <th class="px-3 py-2">ID</th>
+                        <th class="px-3 py-2">Type</th>
+                        <th class="px-3 py-2">Model</th>
+                        <th class="px-3 py-2">Run</th>
+                        <th class="px-3 py-2">Variable</th>
+                        <th class="px-3 py-2">Hour</th>
+                        <th class="px-3 py-2">Status</th>
+                        <th class="px-3 py-2">Time</th>
+                        <th class="px-3 py-2">Error</th>
+                    </tr>
+                </thead>
+                <tbody id="jobsTableBody">
+                    <tr><td colspan="9" class="px-3 py-4 text-center text-slate-400">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- Logs -->
     <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
         <div class="flex justify-between items-center mb-4">
@@ -122,7 +203,6 @@
             </button>
         </div>
         <div class="bg-slate-900 text-slate-300 p-4 rounded-lg font-mono text-xs h-96 overflow-y-auto leading-relaxed" id="logsContainer">
-            <!-- Logs here -->
         </div>
         <div class="mt-2 text-right">
             <a href="/api/status/logs?lines=1000" target="_blank" class="text-xs text-slate-500 hover:text-primary hover:underline">View Raw Log</a>

@@ -2,14 +2,10 @@ import hashlib
 import json
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Optional
 
 DEFAULT_DB_PATH = "cache/jobs.db"
-
-
-def _utc_now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _args_json(args: Dict[str, Any]) -> str:
@@ -131,7 +127,7 @@ def complete(conn: sqlite3.Connection, job_id: int) -> None:
 
 def _retry_after_timestamp(retry_count: int) -> str:
     delay_seconds = 60 * (2**retry_count)
-    return (datetime.utcnow() + timedelta(seconds=delay_seconds)).strftime(
+    return (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 
@@ -140,7 +136,7 @@ def fail(
     conn: sqlite3.Connection,
     job_id: int,
     error: str,
-    max_retries: int = 3,
+    max_retries: int = 0,
 ) -> None:
     row = conn.execute(
         "SELECT retry_count FROM jobs WHERE id = ?;",
@@ -246,3 +242,113 @@ def get_jobs(
     params.append(limit)
     rows = conn.execute(query, params).fetchall()
     return [_dict_from_row(row) for row in rows]
+
+
+def cancel_siblings(conn: sqlite3.Connection, failed_job: Dict[str, Any]) -> int:
+    """Cancel all pending jobs that share the same model_id and run_id as a failed job.
+
+    When a GRIB download fails (e.g. 404), there's no point trying other
+    hours/variables for the same run — the data isn't available yet.
+    Returns the number of cancelled sibling jobs.
+    """
+    try:
+        args = json.loads(failed_job["args_json"])
+        model_id = args.get("model_id")
+        run_id = args.get("run_id")
+    except (json.JSONDecodeError, KeyError):
+        return 0
+    if not model_id or not run_id:
+        return 0
+
+    # Match pending jobs whose args_json contains the same model_id and run_id.
+    # Since args_json is canonical (sorted keys, no spaces), substring match is safe.
+    cursor = conn.execute(
+        """
+        UPDATE jobs
+        SET status = 'failed',
+            error_message = 'cancelled: sibling job failed',
+            completed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+        WHERE status = 'pending'
+          AND type = ?
+          AND args_json LIKE ?
+          AND args_json LIKE ?;
+        """,
+        (
+            failed_job["type"],
+            f'%"model_id":"{model_id}"%',
+            f'%"run_id":"{run_id}"%',
+        ),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
+def cancel(conn: sqlite3.Connection, job_id: Optional[int] = None, status_filter: Optional[str] = None) -> int:
+    """Cancel jobs by marking them as failed with 'cancelled by user'.
+
+    If job_id is given, cancel that single job.
+    If status_filter is given (e.g. 'pending'), cancel all jobs with that status.
+    Returns the number of cancelled jobs.
+    """
+    if job_id is not None:
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'failed',
+                error_message = 'cancelled by user',
+                completed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+            WHERE id = ? AND status IN ('pending', 'processing');
+            """,
+            (job_id,),
+        )
+    elif status_filter is not None:
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'failed',
+                error_message = 'cancelled by user',
+                completed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+            WHERE status = ? AND status IN ('pending', 'processing');
+            """,
+            (status_filter,),
+        )
+    else:
+        return 0
+    conn.commit()
+    return cursor.rowcount
+
+
+def retry_all_failed(conn: sqlite3.Connection, job_id: Optional[int] = None) -> int:
+    """Reset failed jobs back to pending for retry.
+
+    If job_id is given, retry that single job.
+    Otherwise, retry all failed jobs.
+    Returns the number of retried jobs.
+    """
+    if job_id is not None:
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'pending',
+                error_message = NULL,
+                retry_after = NULL,
+                worker_id = NULL,
+                started_at = NULL
+            WHERE id = ? AND status = 'failed';
+            """,
+            (job_id,),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'pending',
+                error_message = NULL,
+                retry_after = NULL,
+                worker_id = NULL,
+                started_at = NULL
+            WHERE status = 'failed';
+            """
+        )
+    conn.commit()
+    return cursor.rowcount

@@ -43,8 +43,9 @@ def test_tile_db_records_and_lists(tmp_path):
         assert variables["t2m"]["hours"] == [0, 1, 2]
         assert variables["t2m"]["file"] == "tiles/path/t2m.npz"
 
+        # record_tile_variable no longer auto-completes jobs (worker owns that)
         job_status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        assert job_status["status"] == "completed"
+        assert job_status["status"] == "pending"
     finally:
         conn.close()
 
