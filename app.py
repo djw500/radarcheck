@@ -58,6 +58,7 @@ from tiles import (
 from status_utils import (
     scan_cache_status,
     get_disk_usage,
+    get_job_queue_status,
     read_scheduler_logs,
     read_scheduler_status,
     get_scheduled_runs_status,
@@ -2286,11 +2287,13 @@ def api_status_summary():
     cache_status = scan_cache_status(region=region_id)
     disk_usage = get_disk_usage()
     scheduler_status = read_scheduler_status()
-    
+    job_queue = get_job_queue_status()
+
     return jsonify({
         "cache_status": cache_status,
         "disk_usage": disk_usage,
         "scheduler_status": scheduler_status,
+        "job_queue": job_queue,
         "timestamp": datetime.now(pytz.UTC).isoformat()
     })
 

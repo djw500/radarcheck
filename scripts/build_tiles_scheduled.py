@@ -4,28 +4,27 @@
 This script runs as a background process that periodically builds tiles
 for all configured models and regions. It's designed to:
 
-1. Build tiles based on model update frequencies
-2. Clean up GRIB files to save disk space
-3. Log progress and errors
+1. Enqueue tile-building jobs for each model/run/variable/hour
+2. Drain the job queue inline (no separate worker process needed)
+3. Clean up GRIB files and old tile runs to save disk space
 4. Run continuously with appropriate sleep intervals
 
 Usage:
     python scripts/build_tiles_scheduled.py
+    python scripts/build_tiles_scheduled.py --once
 
 Environment variables:
     TILE_BUILD_INTERVAL_MINUTES: How often to check for new runs (default: 15)
-    TILE_BUILD_MAX_HOURS_HRRR: Max forecast hours for HRRR (default: 24)
+    TILE_BUILD_MAX_HOURS_HRRR: Max forecast hours for HRRR (default: 48)
     TILE_BUILD_MAX_HOURS_GFS: Max forecast hours for GFS (default: 168)
 """
 
 import datetime
 import logging
 import os
-import subprocess
 import sys
 import time
 import json
-from typing import Optional
 
 import requests
 
@@ -37,6 +36,16 @@ from utils import format_forecast_hour
 from cache_builder import get_valid_forecast_hours, get_run_forecast_hours
 from tile_db import init_db, delete_tile_run, delete_region_tiles
 from ecmwf import herbie_run_available
+from jobs import (
+    init_db as init_jobs_db,
+    enqueue,
+    claim,
+    complete,
+    fail,
+    recover_stale,
+    prune_completed,
+)
+from job_worker import process_build_tile_hour
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -168,7 +177,10 @@ def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
 
 
 def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
-    """Find all runs in the lookback period that WE WANT to have according to policy."""
+    """Find all runs in the lookback period that WE WANT to have according to policy.
+
+    Short-circuits NOMADS HEAD requests when tiles already exist for all regions.
+    """
     model_config = repomap["MODELS"].get(model_id)
     if not model_config:
         return []
@@ -176,6 +188,10 @@ def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
     now = datetime.datetime.now(datetime.timezone.utc)
     update_freq = model_config.get("update_frequency_hours", 1)
     required_runs = []
+
+    # Precompute default max hours for the model from MODELS_CONFIG
+    model_cfg_entry = next((m for m in MODELS_CONFIG if m["id"] == model_id), None)
+    default_max = model_cfg_entry["max_hours"] if model_cfg_entry else 24
 
     for hours_ago in range(lookback_hours):
         check_time = now - datetime.timedelta(hours=hours_ago)
@@ -185,16 +201,28 @@ def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
         # Skip non-synoptic hours for models with 6-hourly updates
         if update_freq >= 6 and int(init_hour) % 6 != 0:
             continue
-            
+
         # Policy Tier 1: All runs in last 12 hours
         # Policy Tier 2: Synoptic runs (00, 06, 12, 18) in last 72 hours
         is_recent = hours_ago <= 12
         is_synoptic = int(init_hour) % 6 == 0
-        
+
         if is_recent or is_synoptic:
+            run_id = f"run_{date_str}_{init_hour}"
+            run_max_hours = get_max_hours_for_run(model_id, run_id, default_max)
+
+            # Short-circuit: skip NOMADS HEAD request if tiles exist for all regions
+            all_complete = all(
+                tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours)
+                for region_id in REGIONS
+            )
+            if all_complete:
+                required_runs.append(run_id)
+                continue
+
             # Check if available on NOMADS
             if check_run_available(model_id, date_str, init_hour):
-                required_runs.append(f"run_{date_str}_{init_hour}")
+                required_runs.append(run_id)
 
     return required_runs
 
@@ -221,7 +249,7 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
     """
     res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
     res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-    
+
     # Check for t2m tiles as a proxy for the run
     base_run_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir, model_id, run_id)
     npz_path = os.path.join(base_run_dir, "t2m.npz")
@@ -247,7 +275,7 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
     except Exception:
         # If meta can't be read, force rebuild
         return False
-        
+
     # Strict completeness check against model schedule
     try:
         import numpy as np
@@ -257,69 +285,6 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
         expected = get_run_forecast_hours(model_id, parts[1], parts[2], expected_max_hours)
         return have == expected
     except Exception:
-        return False
-
-
-def build_tiles_for_run(region_id: str, model_id: str, run_id: str, max_hours: int) -> bool:
-    """Build tiles for a specific run. Returns True on success."""
-    logger.info(f"Building tiles for {model_id}/{run_id} in region {region_id}")
-
-    cmd = [
-        sys.executable,
-        "-u", # Unbuffered output
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build_tiles.py"),
-        "--region", region_id,
-        "--model", model_id,
-        "--run", run_id,
-        "--max-hours", str(max_hours),
-        "--clean-gribs",
-    ]
-
-    # Restrict variables if configured (comma-separated list)
-    if BUILD_VARIABLES_ENV:
-        vars_list = [v.strip() for v in BUILD_VARIABLES_ENV.split(',') if v.strip()]
-        if vars_list:
-            cmd += ["--variables", *vars_list]
-
-    try:
-        # Stream output character by character to show real-time dots
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-        
-        if process.stdout:
-            last_was_newline = True
-            while True:
-                line = process.stdout.readline()
-                if not line:
-                    break
-                
-                line = line.strip()
-                if line:
-                    # Only print if it doesn't look like a standard library log line
-                    # (which should have been redirected to file anyway)
-                    if not any(x in line for x in ["[INFO]", "[WARNING]", "[ERROR]", "[DEBUG]"]):
-                        print(f"    [{model_id}] {line}")
-                    
-                    # Still log everything to detailed file
-                    logger.debug(f"[{model_id}] {line}")
-        
-        returncode = process.wait(timeout=3600)
-        if returncode == 0:
-            logger.info(f"Successfully built tiles for {model_id}/{run_id}")
-            return True
-        else:
-            logger.error(f"Failed to build tiles for {model_id}/{run_id} (exit code: {returncode})")
-            return False
-    except subprocess.TimeoutExpired:
-        logger.error(f"Timeout building tiles for {model_id}/{run_id}")
-        return False
-    except Exception as e:
-        logger.error(f"Error building tiles for {model_id}/{run_id}: {e}")
         return False
 
 
@@ -333,19 +298,61 @@ def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
         now = datetime.datetime.now(datetime.timezone.utc)
         age_mins = (now - run_dt).total_seconds() / 60
         return age_mins >= min_age_minutes
-    except:
+    except Exception:
         return True
 
 
-def process_model(model_cfg: dict) -> tuple[int, int, list]:
-    """Process a single model - find and build missing runs.
+def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours: int) -> int:
+    """Enqueue build_tile_hour jobs for every variable × forecast_hour.
 
-    Returns (builds_attempted, builds_succeeded, targets).
+    Idempotent: duplicate jobs are ignored via UNIQUE(type, args_hash) in jobs table.
+    Returns the number of newly enqueued jobs.
+    """
+    parts = run_id.split("_")
+    date_str, init_hour = parts[1], parts[2]
+    forecast_hours = get_run_forecast_hours(model_id, date_str, init_hour, max_hours)
+
+    # Determine variables to build
+    if BUILD_VARIABLES_ENV:
+        var_ids = [v.strip() for v in BUILD_VARIABLES_ENV.split(",") if v.strip()]
+    else:
+        var_ids = list(repomap["WEATHER_VARIABLES"].keys())
+
+    resolution_deg = repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1)
+    enqueued = 0
+
+    for variable_id in var_ids:
+        variable_config = repomap["WEATHER_VARIABLES"].get(variable_id)
+        if not variable_config:
+            continue
+        # Check for model-specific exclusions
+        if model_id in variable_config.get("model_exclusions", []):
+            continue
+
+        for hour in forecast_hours:
+            job_args = {
+                "region_id": region_id,
+                "model_id": model_id,
+                "run_id": run_id,
+                "variable_id": variable_id,
+                "forecast_hour": hour,
+                "resolution_deg": resolution_deg,
+            }
+            job_id = enqueue(conn, "build_tile_hour", job_args)
+            if job_id is not None:
+                enqueued += 1
+
+    return enqueued
+
+
+def process_model(model_cfg: dict, conn) -> tuple[int, list]:
+    """Process a single model - find required runs and enqueue missing tile jobs.
+
+    Returns (jobs_enqueued, targets).
     """
     model_id = model_cfg["id"]
     max_hours = model_cfg["max_hours"]
-    builds_attempted = 0
-    builds_succeeded = 0
+    jobs_enqueued = 0
     targets = []
 
     # Get all runs we SHOULD have according to tiered policy (last 72h)
@@ -353,7 +360,7 @@ def process_model(model_cfg: dict) -> tuple[int, int, list]:
 
     if not runs_to_process:
         logger.warning(f"No available runs found for {model_id}")
-        return 0, 0, []
+        return 0, []
 
     for r in runs_to_process:
         targets.append(f"{model_id}/{r}")
@@ -361,7 +368,7 @@ def process_model(model_cfg: dict) -> tuple[int, int, list]:
     num_runs = len(runs_to_process)
     print(f"[{model_id}] Checking {num_runs} required runs...")
 
-    for i, run_id in enumerate(runs_to_process):
+    for run_id in runs_to_process:
         # Skip if run is too new
         if not run_is_ready(run_id):
             continue
@@ -374,60 +381,88 @@ def process_model(model_cfg: dict) -> tuple[int, int, list]:
             if tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
                 continue
 
-            print(f"[{model_id}] Building {run_id}...")
-            builds_attempted += 1
-            if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
-                builds_succeeded += 1
-                print(f"[{model_id}] Completed {run_id}")
+            n = enqueue_run_jobs(conn, region_id, model_id, run_id, run_max_hours)
+            if n > 0:
+                print(f"[{model_id}] Enqueued {n} jobs for {run_id} ({region_id})")
+                jobs_enqueued += n
 
-    # Post-pass normalization: ensure older runs (excluding newest) are fully synced
-    if runs_to_process:
-        newest = runs_to_process[0]
-        for run_id in runs_to_process[1:]:
-            # Only consider runs that are ready
-            if not run_is_ready(run_id):
-                continue
-            run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
-            for region_id in REGIONS:
-                if not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
-                    print(f"[{model_id}] Normalizing {run_id} (rebuild to match schedule)")
-                    builds_attempted += 1
-                    if build_tiles_for_run(region_id, model_id, run_id, run_max_hours):
-                        builds_succeeded += 1
+    return jobs_enqueued, targets
 
-    return builds_attempted, builds_succeeded, targets
+
+def drain_queue(conn) -> tuple[int, int]:
+    """Claim and process jobs until the queue is empty.
+
+    Returns (processed, failed).
+    """
+    processed = 0
+    failed = 0
+    worker_id = f"scheduler-{os.getpid()}"
+
+    while True:
+        job = claim(conn, worker_id)
+        if job is None:
+            break
+
+        try:
+            if job["type"] == "build_tile_hour":
+                process_build_tile_hour(conn, job)
+                complete(conn, job["id"])
+                processed += 1
+                if processed % 10 == 0:
+                    print(f"  ... processed {processed} jobs", flush=True)
+            else:
+                fail(conn, job["id"], f"Unsupported job type: {job['type']}")
+                failed += 1
+        except Exception as exc:
+            logger.error(f"Job {job['id']} failed: {exc}")
+            fail(conn, job["id"], str(exc))
+            failed += 1
+
+    return processed, failed
 
 
 def build_cycle():
-    """Run one build cycle for all models in parallel."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
+    """Run one build cycle: enqueue jobs for all models, then drain the queue."""
     logger.info("Starting build cycle")
     write_scheduler_status(state="running")
 
-    total_attempted = 0
-    total_succeeded = 0
-    all_targets = []
+    conn = init_jobs_db(repomap["JOBS_DB_PATH"])
+    try:
+        # Recover any stale processing jobs from a previous crash
+        recovered = recover_stale(conn)
+        if recovered:
+            logger.info(f"Recovered {recovered} stale jobs")
 
-    # Process all models in parallel
-    with ThreadPoolExecutor(max_workers=len(MODELS_CONFIG)) as executor:
-        futures = {executor.submit(process_model, cfg): cfg["id"] for cfg in MODELS_CONFIG}
+        total_enqueued = 0
+        all_targets = []
 
-        for future in as_completed(futures):
-            model_id = futures[future]
+        # Enqueue phase: sequential per model (fast, no I/O besides HEAD requests)
+        for model_cfg in MODELS_CONFIG:
             try:
-                attempted, succeeded, targets = future.result()
-                total_attempted += attempted
-                total_succeeded += succeeded
+                enqueued, targets = process_model(model_cfg, conn)
+                total_enqueued += enqueued
                 all_targets.extend(targets)
-                if attempted > 0:
-                    print(f"[{model_id}] Done: {succeeded}/{attempted} builds succeeded")
+                if enqueued > 0:
+                    print(f"[{model_cfg['id']}] Enqueued {enqueued} jobs")
             except Exception as e:
-                logger.error(f"Error processing {model_id}: {e}")
+                logger.error(f"Error processing {model_cfg['id']}: {e}")
 
-    write_scheduler_status(state="running", targets=all_targets)
-    print(f"Build cycle complete: {total_succeeded}/{total_attempted} succeeded")
-    return total_attempted, total_succeeded, all_targets
+        write_scheduler_status(state="running", targets=all_targets)
+
+        # Drain phase: process all queued jobs inline
+        if total_enqueued > 0:
+            print(f"Draining queue ({total_enqueued} new jobs enqueued)...")
+        processed, failed = drain_queue(conn)
+
+        # Prune old completed jobs
+        pruned = prune_completed(conn)
+        if pruned:
+            logger.info(f"Pruned {pruned} old completed jobs")
+
+        print(f"Build cycle complete: {processed} processed, {failed} failed")
+        return processed, failed, all_targets
+    finally:
+        conn.close()
 
 
 def cleanup_old_gribs(max_runs_per_model: int = None):
@@ -534,11 +569,10 @@ def main():
     """Main entry point for scheduled tile building."""
     logger.info("=" * 60)
     logger.info("Scheduled Tile Builder Starting")
-    
+
     # Handle command line args
     clear_cache = "--clear" in sys.argv
-    once_mode = "--once" in sys.argv
-    
+
     if clear_cache:
         logger.warning("CLEARING TILE CACHE requested via --clear flag")
         conn = init_db(repomap.get("TILES_DB_PATH"))
@@ -557,7 +591,7 @@ def main():
                         logger.error(f"Failed to clear cache: {e}")
         finally:
             conn.close()
-    
+
     logger.info(f"Build interval: {BUILD_INTERVAL_MINUTES} minutes")
     logger.info(f"Models: {[m['id'] for m in MODELS_CONFIG]}")
     logger.info(f"Regions: {REGIONS}")
@@ -571,14 +605,14 @@ def main():
             # Cleanup old runs and GRIBs periodically
             cleanup_old_runs()
             cleanup_old_gribs()
-            
+
             # Record success and sleep state
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             next_run = (now_utc + datetime.timedelta(minutes=BUILD_INTERVAL_MINUTES)).isoformat()
             write_scheduler_status(
-                state="sleeping", 
-                last_run=now_utc.isoformat(), 
-                next_run=next_run, 
+                state="sleeping",
+                last_run=now_utc.isoformat(),
+                next_run=next_run,
                 targets=targets
             )
 

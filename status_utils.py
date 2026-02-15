@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from cache_builder import get_valid_forecast_hours
 from config import repomap
+from jobs import init_db as init_jobs_db, count_by_status
 from tile_db import init_db, list_tile_models_db, list_tile_variables_db
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
@@ -340,5 +341,21 @@ def read_scheduler_status():
     try:
         with open(STATUS_FILE, "r") as f:
             return json.load(f)
+    except Exception:
+        return {}
+
+
+def get_job_queue_status():
+    """Get job queue status counts (pending, processing, completed, failed).
+
+    Returns:
+        dict: {"pending": int, "processing": int, "completed": int, "failed": int}
+    """
+    try:
+        conn = init_jobs_db(repomap.get("JOBS_DB_PATH", "cache/jobs.db"))
+        try:
+            return count_by_status(conn)
+        finally:
+            conn.close()
     except Exception:
         return {}

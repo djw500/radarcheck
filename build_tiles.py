@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from config import repomap
 from tiles import build_tiles_for_variable, save_tiles_npz, open_dataset_robust, is_tile_valid
 from tile_db import init_db, record_tile_run, record_tile_variable, record_tile_hour
-from utils import download_file, format_forecast_hour, time_function
+from utils import audit_stats, download_file, format_forecast_hour, time_function
 from cache_builder import get_available_model_runs, download_all_hours_parallel, get_run_forecast_hours
 import requests
 import xarray as xr
@@ -31,9 +31,6 @@ logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("cfgrib").setLevel(logging.WARNING)
 
-
-# Audit stats
-audit_stats = {"tiles_skipped": 0, "tiles_processed": 0, "grib_hits": 0, "grib_misses": 0}
 
 @time_function
 def build_region_tiles(
