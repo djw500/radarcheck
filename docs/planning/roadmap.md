@@ -1,5 +1,7 @@
 # Radarcheck Roadmap
 
+**Last updated**: 2026-02-15
+
 > Consolidated from STRATEGIC_PLAN.md, IMPROVEMENT_PLAN.md, WEATHER_FEATURES_PLAN.md, PLAN.md
 
 ## Vision
@@ -10,16 +12,18 @@ Transform Radarcheck from a location-based PNG image viewer into a **tile-based 
 
 ---
 
-## Current State (January 2026)
+## Current State (February 2026)
 
 ### Working
 - **Tile system**: `build_tiles.py` generates 0.1° statistical grids (min/max/mean)
 - **Tabular UI**: `/table/geo` displays forecast data by lat/lon
-- **Models with tiles**: HRRR (24h), NAM Nest (60h) for NE region
+- **Models with tiles**: HRRR (48h), NAM Nest (60h), GFS (168h), NBM (168h) for NE region
 - **Centralized GRIB cache**: No per-location duplication
+- **Job queue scheduler**: `scripts/build_tiles_scheduled.py` enqueues + drains via SQLite `jobs.py`
+- **Status API**: `/api/status/summary` includes job queue counts
 
 ### Broken/Deprecated
-- **Old cache_builder**: PNG generation fails for many variables
+- **Old cache_builder**: PNG generation code removed (commit c39c6e3)
 - **Location routes**: `/location/<id>` mostly non-functional
 
 ---
@@ -28,8 +32,8 @@ Transform Radarcheck from a location-based PNG image viewer into a **tile-based 
 
 ### Backend
 - [ ] `/api/table/multimodel` - Merge HRRR + NAM + GFS data by valid time
-- [ ] Build GFS tiles for NE region (7-day forecast)
 - [ ] Add more tiling regions (SE, MW, SW, NW)
+- [ ] Region inference for all US coordinates
 
 ### Frontend
 - [ ] Multi-column table: [Local Time | Precip | Snow | Temp] × [HRRR, NAM, GFS]
@@ -47,36 +51,23 @@ Transform Radarcheck from a location-based PNG image viewer into a **tile-based 
 
 ---
 
-## Phase 3: Fly.io Automation
+## Phase 3: Fly.io Automation — DONE
 
-- [ ] Scheduled tile building (HRRR hourly, NAM/GFS every 6h)
-- [ ] `--clean-gribs` for disk space management
+- [x] Scheduled tile building via SQLite job queue
+- [x] `--clean-gribs` for disk space management
+- [x] Tile/GRIB retention policies (tiered synoptic + hourly)
+- [x] Job queue visibility in `/api/status/summary`
 - [ ] Tile freshness check in `/health` endpoint
 
 ---
 
-## Phase 4: Deprecate Legacy System
+## Phase 4: Legacy Cleanup
 
-### Remove Old Endpoints
+- [x] Remove dead code from `cache_builder.py`
 - [ ] Redirect `/location/<id>` to `/forecast?lat=...&lon=...`
-- [ ] Remove `/frame/` PNG serving routes
-- [ ] Remove `cache_builder.py` image generation code
-- [ ] Remove `plotting.py` (or keep minimal for future use)
-- [ ] Delete `templates/location.html`, `templates/index.html` (old location picker)
-
-### Cleanup
-- [ ] Remove legacy cache structure: `cache/<location>/<model>/<run>/<var>/frame_*.png`
-- [ ] Keep only: `cache/gribs/` and `cache/tiles/`
-- [ ] Update `supervisord.conf` to remove cache_builder loop
-- [ ] Update Dockerfile to remove matplotlib/cartopy (optional, saves image size)
-
-### New Primary Routes
-| Old Route | New Route | Notes |
-|-----------|-----------|-------|
-| `/` | `/forecast` | Main entry point |
-| `/location/<id>` | `/forecast?lat=...&lon=...` | Redirect with geocoded coords |
-| `/table/geo` | `/forecast` | Rename for clarity |
-| `/api/table/bylatlon` | `/api/forecast` | Cleaner API name |
+- [ ] Remove `plotting.py` (only `select_variable_from_dataset` still used)
+- [ ] Remove old templates
+- [ ] Clean up legacy cache dirs on disk
 
 ---
 
@@ -93,12 +84,11 @@ Transform Radarcheck from a location-based PNG image viewer into a **tile-based 
 
 | Model | Forecast | Update | Resolution | Status |
 |-------|----------|--------|------------|--------|
-| HRRR | 24h | Hourly | 3km | Active |
+| HRRR | 48h | Hourly | 3km | Active |
 | NAM 3km | 60h | 6-hourly | 3km | Active |
-| NAM 12km | 84h | 6-hourly | 12km | Configured |
-| GFS | 384h | 6-hourly | 25km | Configured |
-| RAP | 21h | Hourly | 13km | Configured |
-| ECMWF | 240h | 12-hourly | 9km | Scaffolded (needs CDS credentials) |
+| GFS | 168h | 6-hourly | 25km | Active |
+| NBM | 168h | 6-hourly | 2.5km | Active |
+| ECMWF | 240h | 12-hourly | 9km | Disabled (unstable) |
 
 ---
 
@@ -120,6 +110,9 @@ python build_tiles.py --region ne --model hrrr --max-hours 24
 # Build GFS tiles (7 days)
 python build_tiles.py --region ne --model gfs --max-hours 168 --variables t2m apcp snod
 
+# Run scheduler once (enqueue + drain)
+python scripts/build_tiles_scheduled.py --once
+
 # Run local server
 python app.py -p 5001
 
@@ -129,9 +122,22 @@ pytest tests/
 
 ---
 
+## Key Architecture
+
+```
+NOMADS → scheduler enqueues jobs → jobs.py (SQLite) → drain_queue() → job_worker → tiles.npz
+                                                                        ↓
+                                                                    tile_db.py (SQLite)
+                                                                        ↓
+                                                                    Flask API → /forecast UI
+```
+
+**DBs**: `cache/jobs.db` (job queue), `cache/tiles.db` (tile metadata)
+
+---
+
 ## Related Documents
 
 - `docs/planning/todos.md` - Detailed implementation checklist
-- `docs/architecture/tile-system.md` - How tiles work
-- `docs/ux-ideas.md` - UX improvement brainstorm
+- `docs/architecture/overview.md` - System design
 - `docs/operations/flyio-guide.md` - Deployment guide
