@@ -122,6 +122,10 @@ def _prep_cell_index(
 
 
 def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarray, starts: np.ndarray, unique_ids: np.ndarray, n_cells: int, ny: int, nx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if starts.size == 0:
+        nan_grid = np.full((ny, nx), np.nan, dtype=np.float32)
+        return nan_grid, nan_grid.copy(), nan_grid.copy()
+
     v = values2d.ravel()
     v = v[valid_mask]  # Filter to valid points first
     v = v[order]  # reorder to cell-grouped
@@ -161,19 +165,16 @@ def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.D
         return xr.open_dataset(path, engine="cfgrib")
     except Exception as e:
         if "multiple values for unique key" in str(e):
-            # Try to resolve ambiguity by filtering stepType
-            try:
-                # Prefer accumulations for accumulated variables when ambiguous
-                # Fallback cascade: accum -> avg -> instant -> typeOfLevel surface
-                if preferred_filter:
-                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': preferred_filter})
-                return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepType': 'accum'}})
-            except Exception:
+            # Try to resolve ambiguity by filtering stepType.
+            # Don't retry with preferred_filter if we already tried it above.
+            # Fallback cascade: accum -> avg -> typeOfLevel surface
+            for filt in [{'stepType': 'accum'}, {'stepType': 'avg'}, {'typeOfLevel': 'surface'}]:
+                if filt == preferred_filter:
+                    continue  # already tried, skip to avoid infinite loop
                 try:
-                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepType': 'avg'}})
+                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': filt})
                 except Exception:
-                    # If that fails, try typeOfLevel surface (common for weasd/csnow)
-                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface'}})
+                    continue
         raise e
 
 
@@ -423,51 +424,48 @@ def load_timeseries_for_point(
     # Use indexing lon_min if present (handles 0-360 indexing)
     lon_min_index = meta.get("index_lon_min", meta.get("lon_min"))
     lon_0_360 = bool(meta.get("lon_0_360", False))
-    d = np.load(npz_path)
-    hours = d["hours"]
-    # Fallback to means when requested stat is not available
-    key = "means"
-    if stat == "min" and "mins" in d.files:
-        key = "mins"
-    elif stat == "max" and "maxs" in d.files:
-        key = "maxs"
-    arr = d[key]
+    with np.load(npz_path) as d:
+        hours = d["hours"]
+        # Fallback to means when requested stat is not available
+        key = "means"
+        if stat == "min" and "mins" in d.files:
+            key = "mins"
+        elif stat == "max" and "maxs" in d.files:
+            key = "maxs"
+        arr = d[key]
 
-    ny, nx = arr.shape[1], arr.shape[2]
-    iy = int(np.floor((lat - lat_min) / meta["resolution_deg"]))
-    # Normalize longitude if tiles were indexed on 0-360
-    target_lon = lon + 360.0 if (lon_0_360 and lon < 0) else lon
-    ix = int(np.floor((target_lon - lon_min_index) / meta["resolution_deg"]))
-    iy = max(0, min(ny - 1, iy))
-    ix = max(0, min(nx - 1, ix))
-    values = arr[:, iy, ix]
+        ny, nx = arr.shape[1], arr.shape[2]
+        iy = int(np.floor((lat - lat_min) / meta["resolution_deg"]))
+        # Normalize longitude if tiles were indexed on 0-360
+        target_lon = lon + 360.0 if (lon_0_360 and lon < 0) else lon
+        ix = int(np.floor((target_lon - lon_min_index) / meta["resolution_deg"]))
+        iy = max(0, min(ny - 1, iy))
+        ix = max(0, min(nx - 1, ix))
+        values = arr[:, iy, ix]
 
-    # If the exact point is missing (NaN) due to sparse grid vs tile resolution mismatch,
-    # search for the nearest valid neighbor within a small radius.
-    # This handles cases like GFS (0.25 deg) on 0.1 deg tiles where many cells are empty.
-    if np.all(np.isnan(values)):
-        search_radius = 3
-        best_dist_sq = float('inf')
-        
-        # Search a box around the point
-        y_min = max(0, iy - search_radius)
-        y_max = min(ny - 1, iy + search_radius)
-        x_min = max(0, ix - search_radius)
-        x_max = min(nx - 1, ix + search_radius)
+        # If the exact point is missing (NaN) due to sparse grid vs tile resolution mismatch,
+        # search for the nearest valid neighbor within a small radius.
+        # This handles cases like GFS (0.25 deg) on 0.1 deg tiles where many cells are empty.
+        if np.all(np.isnan(values)):
+            search_radius = 3
+            best_dist_sq = float('inf')
 
-        for cy in range(y_min, y_max + 1):
-            for cx in range(x_min, x_max + 1):
-                if cy == iy and cx == ix:
-                    continue
-                
-                # Check if this candidate cell has any valid data
-                cand_vals = arr[:, cy, cx]
-                if not np.all(np.isnan(cand_vals)):
-                    dist_sq = (cy - iy)**2 + (cx - ix)**2
-                    if dist_sq < best_dist_sq:
-                        best_dist_sq = dist_sq
-                        values = cand_vals
-                        
+            y_min = max(0, iy - search_radius)
+            y_max = min(ny - 1, iy + search_radius)
+            x_min = max(0, ix - search_radius)
+            x_max = min(nx - 1, ix + search_radius)
+
+            for cy in range(y_min, y_max + 1):
+                for cx in range(x_min, x_max + 1):
+                    if cy == iy and cx == ix:
+                        continue
+                    cand_vals = arr[:, cy, cx]
+                    if not np.all(np.isnan(cand_vals)):
+                        dist_sq = (cy - iy)**2 + (cx - ix)**2
+                        if dist_sq < best_dist_sq:
+                            best_dist_sq = dist_sq
+                            values = cand_vals
+
     return hours, values
 
 
@@ -492,21 +490,21 @@ def load_grid_slice(
         raise FileNotFoundError(f"Tiles not found for {variable_id} at {npz_path}")
     with open(meta_path, "r") as f:
         meta = json.load(f)
-    d = np.load(npz_path)
-    hours = d["hours"]
-    # Map requested hour to index
-    try:
-        idx = int(np.where(hours == hour)[0][0])
-    except Exception:
-        raise IndexError(f"Hour {hour} not found in tiles; available: {hours.tolist()}")
-    # Fallback to means when requested stat is not available
-    key = "means"
-    if stat == "min" and "mins" in d.files:
-        key = "mins"
-    elif stat == "max" and "maxs" in d.files:
-        key = "maxs"
-    arr3d = d[key]
-    slice2d = arr3d[idx]
+    with np.load(npz_path) as d:
+        hours = d["hours"]
+        # Map requested hour to index
+        try:
+            idx = int(np.where(hours == hour)[0][0])
+        except Exception:
+            raise IndexError(f"Hour {hour} not found in tiles; available: {hours.tolist()}")
+        # Fallback to means when requested stat is not available
+        key = "means"
+        if stat == "min" and "mins" in d.files:
+            key = "mins"
+        elif stat == "max" and "maxs" in d.files:
+            key = "maxs"
+        arr3d = d[key]
+        slice2d = arr3d[idx].copy()
     bounds = {
         "lat_min": meta["lat_min"],
         "lat_max": meta["lat_max"],

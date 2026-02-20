@@ -175,15 +175,22 @@ def fail(
     conn.commit()
 
 
-def recover_stale(conn: sqlite3.Connection) -> int:
+def recover_stale(conn: sqlite3.Connection, stale_minutes: int = 10) -> int:
+    """Reset jobs stuck in 'processing' for longer than stale_minutes.
+
+    Only resets jobs whose started_at is old enough to be truly stuck,
+    avoiding a race with currently-running workers.
+    """
     cursor = conn.execute(
         """
         UPDATE jobs
         SET status = 'pending',
             worker_id = NULL,
             started_at = NULL
-        WHERE status = 'processing';
-        """
+        WHERE status = 'processing'
+          AND started_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?);
+        """,
+        (f"-{stale_minutes} minutes",),
     )
     conn.commit()
     return cursor.rowcount
@@ -308,7 +315,7 @@ def cancel(conn: sqlite3.Connection, job_id: Optional[int] = None, status_filter
             SET status = 'failed',
                 error_message = 'cancelled by user',
                 completed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-            WHERE status = ? AND status IN ('pending', 'processing');
+            WHERE status = ?;
             """,
             (status_filter,),
         )
