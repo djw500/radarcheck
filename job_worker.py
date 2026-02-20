@@ -190,11 +190,18 @@ def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once:
                     wlog.warning(f"Job {job['id']} unsupported type: {job['type']}")
             except Exception as exc:
                 elapsed = time.monotonic() - t0
-                wlog.error(f"Job {job['id']} FAILED after {elapsed:.1f}s ({job_label}): {exc}")
-                fail(conn, job["id"], str(exc))
-                cancelled = cancel_siblings(conn, job)
-                if cancelled:
-                    wlog.info(f"Cancelled {cancelled} sibling jobs for same run")
+                error_str = str(exc)
+                wlog.error(f"Job {job['id']} FAILED after {elapsed:.1f}s ({job_label}): {error_str}")
+                fail(conn, job["id"], error_str)
+                # Only cancel siblings when the whole model run is unavailable on NOMADS
+                # (e.g. run published but hours not yet posted). Per-variable failures
+                # like empty GRIBs (variable has no data at that hour) should not
+                # cascade and kill unrelated variables for the same run.
+                run_unavailable = "not available (404)" in error_str or "Could not find" in error_str
+                if run_unavailable:
+                    cancelled = cancel_siblings(conn, job)
+                    if cancelled:
+                        wlog.info(f"Cancelled {cancelled} sibling jobs — run not yet on NOMADS")
 
             if once:
                 break

@@ -15,6 +15,7 @@
 
 # Virtual environment
 **/venv
+**/.venv
 
 # Fly.io
 **/.fly
