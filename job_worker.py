@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 logger = logging.getLogger("job_worker")
 
-from cache_builder import fetch_grib
+from cache_builder import detect_hourly_support, fetch_grib
 from config import repomap
 from jobs import cancel_siblings, claim, complete, fail, init_db
 from tile_db import init_db as init_tile_db
@@ -46,7 +46,20 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
 
     date_str, init_hour = _parse_run_id(run_id)
     forecast_hour_str = format_forecast_hour(forecast_hour, model_id)
-    logger.debug(f"  fetching GRIB: {model_id}/{run_id}/{variable_id} f{forecast_hour}")
+
+    # Determine if the hourly (pgrb2b) pattern should be used for this hour.
+    # Mirrors the logic in download_all_hours_parallel: only use it when
+    # the model has an hourly window configured AND the run is confirmed to
+    # support it (via a cached HEAD probe).
+    model_cfg = repomap["MODELS"].get(model_id, {})
+    hourly_first = int(model_cfg.get("hourly_override_first_hours", 0) or 0)
+    use_hourly = (
+        hourly_first > 0
+        and forecast_hour <= hourly_first
+        and detect_hourly_support(model_id, date_str, init_hour)
+    )
+
+    logger.debug(f"  fetching GRIB: {model_id}/{run_id}/{variable_id} f{forecast_hour} (use_hourly={use_hourly})")
     grib_path = fetch_grib(
         model_id,
         variable_id,
@@ -54,7 +67,7 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
         init_hour,
         forecast_hour_str,
         run_id,
-        use_hourly=True,
+        use_hourly=use_hourly,
     )
 
     variable_config = repomap["WEATHER_VARIABLES"][variable_id]
