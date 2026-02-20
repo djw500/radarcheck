@@ -409,7 +409,7 @@ repomap = {
     # Network settings
     "DOWNLOAD_TIMEOUT_SECONDS": 60,
     "HEAD_REQUEST_TIMEOUT_SECONDS": 10,
-    "MAX_DOWNLOAD_RETRIES": 1,
+    "MAX_DOWNLOAD_RETRIES": 3,
     "RETRY_DELAY_SECONDS": 2,
 
     # File validation

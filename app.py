@@ -1062,17 +1062,17 @@ def api_table_multimodel():
                     if (t2m is not None and t2m >= 34.0) or csnow <= 0.5:
                         r[asnow_key] = 0.0
                     else:
-                        # Piecewise SLR similar to _temp_to_slr
+                        # Use same thresholds as _temp_to_slr
                         if t2m is None:
                             slr = 10.0
                         elif t2m >= 31.0:
-                            slr = 8.0
+                            slr = 6.0
                         elif t2m >= 28.0:
+                            slr = 8.0
+                        elif t2m >= 22.0:
                             slr = 10.0
-                        elif t2m >= 20.0:
-                            slr = 12.0
                         else:
-                            slr = 14.0
+                            slr = 12.0
                         r[asnow_key] = apcp * slr
 
     # Sort times and build rows
@@ -1912,11 +1912,14 @@ def table_view(location_id: str, model_id: Optional[str] = None, run_id: Optiona
     # Determine output format
     output_format = request.args.get("format", "html")
     if output_format == "json":
+        meta_out = data.get("metadata", {}) if data else {}
+        cols_out = (
+            [v for v in get_variable_display_order() if v in data.get("variables", {})]
+            if data else variables_present
+        )
         return jsonify({
-            "metadata": data.get("metadata", {}),
-            "columns": ["hour", "valid_time"] + [
-                v for v in get_variable_display_order() if v in data.get("variables", {})
-            ],
+            "metadata": meta_out,
+            "columns": ["hour", "valid_time"] + cols_out,
             "rows": rows,
         })
 
