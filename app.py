@@ -2419,5 +2419,8 @@ def api_jobs_enqueue_run():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--port", type=int, default=int(os.environ.get("PORT", 5001)))
+    args = parser.parse_args()
+    app.run(host="0.0.0.0", port=args.port, debug=True)
