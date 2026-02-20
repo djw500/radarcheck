@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from typing import Any, Dict
+
+logger = logging.getLogger("job_worker")
 
 from cache_builder import fetch_grib
 from config import repomap
@@ -43,6 +46,7 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
 
     date_str, init_hour = _parse_run_id(run_id)
     forecast_hour_str = format_forecast_hour(forecast_hour, model_id)
+    logger.debug(f"  fetching GRIB: {model_id}/{run_id}/{variable_id} f{forecast_hour}")
     grib_path = fetch_grib(
         model_id,
         variable_id,
@@ -136,35 +140,67 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
     )
 
 
-def run_worker(poll_interval_s: float = 5.0, once: bool = False) -> None:
+def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False) -> None:
+    """Poll the job queue and process jobs until empty (or forever if not once)."""
+    if worker_id is None:
+        worker_id = f"worker-{os.getpid()}"
+
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        level=logging.INFO,
+        handlers=[logging.StreamHandler()],
+    )
+    # Suppress noisy libs
+    for _noisy in ["urllib3", "requests", "matplotlib", "cfgrib", "fiona", "rasterio", "herbie"]:
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
+    logging.getLogger("cfgrib").setLevel(logging.ERROR)
+
+    wlog = logging.getLogger(f"worker.{worker_id}")
+    wlog.info(f"Worker {worker_id} starting (poll_interval={poll_interval_s}s)")
+
     conn = init_tile_db(repomap["DB_PATH"])
+    processed = 0
     try:
         while True:
-            job = claim(conn, "tile-worker")
+            job = claim(conn, worker_id)
             if job is None:
                 if once:
+                    wlog.info(f"No jobs available, exiting (--once). Processed {processed} total.")
                     break
                 time.sleep(poll_interval_s)
                 continue
 
+            args = json.loads(job["args_json"]) if isinstance(job.get("args_json"), str) else job.get("args_json", {})
+            job_label = (
+                f"{args.get('model_id')}/{args.get('run_id')}/{args.get('variable_id')} f{args.get('forecast_hour')}"
+                if args else job["type"]
+            )
+
+            t0 = time.monotonic()
             try:
                 if job["type"] == "build_tile_hour":
+                    wlog.info(f"Job {job['id']}: {job_label}")
                     process_build_tile_hour(conn, job)
                     complete(conn, job["id"])
+                    processed += 1
+                    elapsed = time.monotonic() - t0
+                    wlog.info(f"Job {job['id']} done in {elapsed:.1f}s ({processed} total)")
                 else:
                     fail(conn, job["id"], f"Unsupported job type: {job['type']}")
+                    wlog.warning(f"Job {job['id']} unsupported type: {job['type']}")
             except Exception as exc:
+                elapsed = time.monotonic() - t0
+                wlog.error(f"Job {job['id']} FAILED after {elapsed:.1f}s ({job_label}): {exc}")
                 fail(conn, job["id"], str(exc))
                 cancelled = cancel_siblings(conn, job)
                 if cancelled:
-                    import logging
-                    logging.getLogger(__name__).info(
-                        f"Cancelled {cancelled} sibling jobs for {job['type']}"
-                    )
+                    wlog.info(f"Cancelled {cancelled} sibling jobs for same run")
+
             if once:
                 break
     finally:
         conn.close()
+        wlog.info(f"Worker {worker_id} shut down. Processed {processed} jobs.")
 
 
 if __name__ == "__main__":
@@ -173,5 +209,35 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Tile job worker")
     parser.add_argument("--once", action="store_true", help="Process a single job and exit")
     parser.add_argument("--poll-interval", type=float, default=5.0)
+    parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes")
+    parser.add_argument("--log-file", type=str, help="Log file path (default: stdout only)")
     args = parser.parse_args()
-    run_worker(poll_interval_s=args.poll_interval, once=args.once)
+
+    if args.log_file:
+        import logging as _logging
+        fh = _logging.FileHandler(args.log_file)
+        fh.setFormatter(_logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        _logging.getLogger().addHandler(fh)
+
+    if args.workers > 1 and not args.once:
+        import multiprocessing
+        procs = []
+        for i in range(args.workers):
+            wid = f"worker-{os.getpid()}-{i}"
+            p = multiprocessing.Process(
+                target=run_worker,
+                kwargs={"worker_id": wid, "poll_interval_s": args.poll_interval},
+                name=wid,
+                daemon=True,
+            )
+            p.start()
+            procs.append(p)
+        print(f"Started {args.workers} worker processes: {[p.pid for p in procs]}")
+        try:
+            for p in procs:
+                p.join()
+        except KeyboardInterrupt:
+            for p in procs:
+                p.terminate()
+    else:
+        run_worker(poll_interval_s=args.poll_interval, once=args.once)

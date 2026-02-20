@@ -39,42 +39,37 @@ from ecmwf import herbie_run_available
 from jobs import (
     init_db as init_jobs_db,
     enqueue,
-    cancel_siblings,
-    claim,
-    complete,
-    fail,
     recover_stale,
     prune_completed,
 )
-from job_worker import process_build_tile_hour
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
 detailed_log_path = 'logs/scheduler_detailed.log'
 
-# Root logger gets everything and sends to file
+_log_fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+
+# Root logger captures everything
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 
+# File handler — persistent record
 file_handler = logging.FileHandler(detailed_log_path)
-file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+file_handler.setFormatter(_log_fmt)
 root_logger.addHandler(file_handler)
 
-# Explicitly suppress noisy external libraries in ALL handlers
-for logger_name in ["urllib3", "requests", "matplotlib", "cfgrib", "fiona", "rasterio"]:
-    logging.getLogger(logger_name).setLevel(logging.WARNING)
-logging.getLogger("cfgrib").setLevel(logging.ERROR) # Extra quiet for cfgrib
+# Stdout handler — so nohup/pipe captures timestamped output too
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setFormatter(_log_fmt)
+root_logger.addHandler(stdout_handler)
 
-# Main logger for scheduler (only to file)
+# Suppress noisy external libraries
+for _noisy in ["urllib3", "requests", "matplotlib", "cfgrib", "fiona", "rasterio", "herbie"]:
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+logging.getLogger("cfgrib").setLevel(logging.ERROR)
+
 logger = logging.getLogger("scheduler")
 logger.setLevel(logging.INFO)
-# No console handler added here
-
-# Suppress noisy external libraries in console (but they'll still be in file if we lowered root level)
-logging.getLogger("urllib3").setLevel(logging.WARNING)
-logging.getLogger("requests").setLevel(logging.WARNING)
-logging.getLogger("matplotlib").setLevel(logging.WARNING)
-logging.getLogger("cfgrib").setLevel(logging.ERROR)
 
 # Configuration from environment with defaults
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
@@ -82,7 +77,6 @@ MAX_HOURS_HRRR = int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "48"))
 MAX_HOURS_NAM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))
 MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
 MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
-KEEP_RUNS = int(os.environ.get("TILE_BUILD_KEEP_RUNS", "5"))
 BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
 # Max builds per model per cycle - ensures all models get attention
 MAX_BUILDS_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PER_MODEL", "3"))
@@ -349,79 +343,48 @@ def process_model(model_cfg: dict, conn) -> tuple[int, list]:
     runs_to_process = get_required_runs(model_id, lookback_hours=12)
 
     if not runs_to_process:
-        logger.info(f"No available runs found for {model_id}")
+        logger.info(f"[{model_id}] No available runs found in last 12h")
         return 0, []
+
+    logger.info(f"[{model_id}] Found {len(runs_to_process)} candidate run(s): {runs_to_process}")
 
     # Take only the latest (first, since newest-first) incomplete run
     for run_id in runs_to_process:
         if not run_is_ready(run_id):
+            logger.info(f"[{model_id}] {run_id} not ready yet (< 45 min old), skipping")
             continue
 
         run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
 
-        needs_work = False
-        for region_id in REGIONS:
-            if not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
-                needs_work = True
-                break
+        missing_regions = [
+            r for r in REGIONS
+            if not tiles_exist(r, model_id, run_id, expected_max_hours=run_max_hours)
+        ]
 
-        if not needs_work:
+        if not missing_regions:
+            logger.info(f"[{model_id}] {run_id} already complete for all regions, skipping")
             continue
 
         # Found the latest incomplete run — enqueue it
         targets.append(f"{model_id}/{run_id}")
-        print(f"[{model_id}] Enqueuing latest run: {run_id}")
+        logger.info(f"[{model_id}] Enqueuing {run_id} (missing regions: {missing_regions}, max_hours={run_max_hours})")
 
-        for region_id in REGIONS:
-            if tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours):
-                continue
+        for region_id in missing_regions:
             n = enqueue_run_jobs(conn, region_id, model_id, run_id, run_max_hours)
-            if n > 0:
-                print(f"[{model_id}] Enqueued {n} jobs for {run_id} ({region_id})")
-                jobs_enqueued += n
+            logger.info(f"[{model_id}] Enqueued {n} jobs for {run_id} / {region_id}")
+            jobs_enqueued += n
         break  # Only process the single latest run
 
     return jobs_enqueued, targets
 
 
-def drain_queue(conn) -> tuple[int, int]:
-    """Claim and process jobs until the queue is empty.
-
-    Returns (processed, failed).
-    """
-    processed = 0
-    failed = 0
-    worker_id = f"scheduler-{os.getpid()}"
-
-    while True:
-        job = claim(conn, worker_id)
-        if job is None:
-            break
-
-        try:
-            if job["type"] == "build_tile_hour":
-                process_build_tile_hour(conn, job)
-                complete(conn, job["id"])
-                processed += 1
-                if processed % 10 == 0:
-                    print(f"  ... processed {processed} jobs", flush=True)
-            else:
-                fail(conn, job["id"], f"Unsupported job type: {job['type']}")
-                failed += 1
-        except Exception as exc:
-            logger.error(f"Job {job['id']} failed: {exc}")
-            fail(conn, job["id"], str(exc))
-            cancelled = cancel_siblings(conn, job)
-            if cancelled:
-                logger.info(f"Cancelled {cancelled} sibling jobs for same run")
-            failed += 1
-
-    return processed, failed
-
 
 def build_cycle():
     """Run one build cycle: enqueue jobs for all models, then drain the queue."""
-    logger.info("Starting build cycle")
+    cycle_start = time.monotonic()
+    now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    logger.info("=" * 60)
+    logger.info(f"Build cycle starting at {now_str}")
     write_scheduler_status(state="running")
 
     conn = init_jobs_db(repomap["DB_PATH"])
@@ -429,36 +392,32 @@ def build_cycle():
         # Recover any stale processing jobs from a previous crash
         recovered = recover_stale(conn)
         if recovered:
-            logger.info(f"Recovered {recovered} stale jobs")
+            logger.info(f"Recovered {recovered} stale jobs from previous crash")
 
         total_enqueued = 0
         all_targets = []
 
         # Enqueue phase: sequential per model (fast, no I/O besides HEAD requests)
+        logger.info(f"--- Enqueue phase ({len(MODELS_CONFIG)} models) ---")
         for model_cfg in MODELS_CONFIG:
             try:
                 enqueued, targets = process_model(model_cfg, conn)
                 total_enqueued += enqueued
                 all_targets.extend(targets)
-                if enqueued > 0:
-                    print(f"[{model_cfg['id']}] Enqueued {enqueued} jobs")
             except Exception as e:
-                logger.error(f"Error processing {model_cfg['id']}: {e}")
+                logger.error(f"Error processing {model_cfg['id']}: {e}", exc_info=True)
 
         write_scheduler_status(state="running", targets=all_targets)
-
-        # Drain phase: process all queued jobs inline
-        if total_enqueued > 0:
-            print(f"Draining queue ({total_enqueued} new jobs enqueued)...")
-        processed, failed = drain_queue(conn)
 
         # Prune old completed jobs
         pruned = prune_completed(conn)
         if pruned:
-            logger.info(f"Pruned {pruned} old completed jobs")
+            logger.info(f"Pruned {pruned} old completed jobs from DB")
 
-        print(f"Build cycle complete: {processed} processed, {failed} failed")
-        return processed, failed, all_targets
+        elapsed = time.monotonic() - cycle_start
+        logger.info(f"Enqueue cycle complete in {elapsed:.0f}s: {total_enqueued} new jobs queued for workers")
+        logger.info("=" * 60)
+        return total_enqueued, all_targets
     finally:
         conn.close()
 
@@ -466,8 +425,12 @@ def build_cycle():
 def cleanup_old_gribs(max_runs_per_model: int = None):
     """Clean up old GRIB files to save disk space.
 
-    GRIBs are only needed during tile building, so we keep minimal runs cached.
+    GRIBs are only needed during tile building. A run's GRIBs are preserved
+    while its tiles are still incomplete (workers may still be building them).
+    Once tiles are complete, GRIBs are eligible for deletion based on retention policy.
     """
+    import shutil
+
     if max_runs_per_model is None:
         max_runs_per_model = MAX_GRIB_RUNS_TO_KEEP
 
@@ -485,12 +448,25 @@ def cleanup_old_gribs(max_runs_per_model: int = None):
             reverse=True
         )
 
-        # Keep only the most recent runs
-        for old_run in runs[max_runs_per_model:]:
-            old_run_dir = os.path.join(model_dir, old_run)
-            logger.info(f"GRIB cleanup: Removing {model_id}/{old_run}")
+        # Determine which runs to delete (oldest beyond retention limit)
+        candidates_for_deletion = runs[max_runs_per_model:]
+        for run_id in candidates_for_deletion:
+            # Never delete GRIBs for a run that still has incomplete tiles —
+            # workers may still be fetching and processing them.
+            model_cfg = next((m for m in MODELS_CONFIG if m["id"] == model_id), None)
+            default_max = model_cfg["max_hours"] if model_cfg else 24
+            run_max_hours = get_max_hours_for_run(model_id, run_id, default_max)
+            still_building = any(
+                not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours)
+                for region_id in REGIONS
+            )
+            if still_building:
+                logger.info(f"GRIB cleanup: skipping {model_id}/{run_id} (tiles still incomplete)")
+                continue
+
+            old_run_dir = os.path.join(model_dir, run_id)
+            logger.info(f"GRIB cleanup: removing {model_id}/{run_id}")
             try:
-                import shutil
                 shutil.rmtree(old_run_dir)
             except Exception as e:
                 logger.error(f"Failed to remove {old_run_dir}: {e}")
@@ -598,7 +574,7 @@ def main():
     while True:
         try:
             # Run build cycle
-            _, _, targets = build_cycle()
+            _, targets = build_cycle()
 
             # Cleanup old runs and GRIBs periodically
             cleanup_old_runs()
@@ -619,14 +595,15 @@ def main():
             write_scheduler_status(state="error", error=e)
 
         # Sleep until next cycle
-        print(f"Sleeping {BUILD_INTERVAL_MINUTES} minutes until next cycle...")
+        wake_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=BUILD_INTERVAL_MINUTES)
+        logger.info(f"Sleeping {BUILD_INTERVAL_MINUTES}m — next cycle at {wake_at.strftime('%H:%M:%S UTC')}")
         time.sleep(BUILD_INTERVAL_MINUTES * 60)
 
 
 if __name__ == "__main__":
     # Support single-run mode via command line arg
     if len(sys.argv) > 1 and sys.argv[1] == "--once":
-        logger.info("Running single build cycle (--once mode)")
+        logger.info("Running single enqueue cycle (--once mode)")
         build_cycle()
         cleanup_old_runs()
         cleanup_old_gribs()
