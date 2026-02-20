@@ -1,7 +1,7 @@
 // --- Eager timeout fetch ---
 async function fetchJSON(url) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     try {
         const res = await fetch(url, { signal: ctrl.signal });
         if (!res.ok) throw new Error(await res.text());

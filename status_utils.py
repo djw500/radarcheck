@@ -257,10 +257,11 @@ def get_run_grid():
         model_config = repomap["MODELS"].get(model_id, {})
         model_raw = raw.get(model_id, {})
 
-        # Collect all variables seen across all runs for this model
+        # Only show variables that are valid for this model (not in model_exclusions)
         all_vars = set()
-        for run_vars in model_raw.values():
-            all_vars.update(run_vars.keys())
+        for var_id, var_config in repomap["WEATHER_VARIABLES"].items():
+            if model_id not in var_config.get("model_exclusions", []):
+                all_vars.add(var_id)
 
         # Order variables: use display order from config (t2m first, then alphabetical)
         preferred_order = ["t2m", "apcp", "prate", "asnow", "csnow", "snod",
