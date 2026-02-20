@@ -42,6 +42,7 @@ from jobs import (
     recover_stale,
     prune_completed,
 )
+from status_utils import _get_max_hours_for_run as get_max_hours_for_run
 
 # Configure logging
 os.makedirs('logs', exist_ok=True)
@@ -104,26 +105,6 @@ def write_scheduler_status(state="idle", last_run=None, next_run=None, targets=N
     except Exception as e:
         logger.error(f"Failed to write status file: {e}")
 
-
-def get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
-    """Get max forecast hours for a specific run, accounting for init-hour variations.
-
-    Some models (like HRRR) have different forecast lengths depending on init hour:
-    - HRRR synoptic runs (00, 06, 12, 18z): 48 hours
-    - HRRR non-synoptic runs: 18 hours
-    """
-    model_config = repomap["MODELS"].get(model_id, {})
-    max_hours_by_init = model_config.get("max_hours_by_init")
-
-    if not max_hours_by_init:
-        return default_max
-
-    # Extract init hour from run_id (format: run_YYYYMMDD_HH)
-    try:
-        init_hour = run_id.split("_")[2]
-        return max_hours_by_init.get(init_hour, max_hours_by_init.get("default", default_max))
-    except (IndexError, KeyError):
-        return default_max
 
 # Models to build tiles for (in priority order)
 MODELS_CONFIG = [
@@ -193,8 +174,8 @@ def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
         date_str = check_time.strftime("%Y%m%d")
         init_hour = check_time.strftime("%H")
 
-        # Skip non-synoptic hours for models with 6-hourly updates
-        if update_freq >= 6 and int(init_hour) % 6 != 0:
+        # Skip off-cycle hours for models that don't run every hour
+        if update_freq > 1 and int(init_hour) % update_freq != 0:
             continue
 
         # Policy Tier 1: All runs in last 12 hours

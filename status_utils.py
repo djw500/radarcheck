@@ -55,11 +55,11 @@ def _get_expected_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
         date_str = check_time.strftime("%Y%m%d")
         init_hour = check_time.strftime("%H")
 
-        # Skip non-synoptic hours for models with 6-hourly updates
-        if update_freq >= 6 and int(init_hour) % 6 != 0:
+        # Skip off-cycle hours for models that don't run every hour
+        if update_freq > 1 and int(init_hour) % update_freq != 0:
             continue
 
-        # Policy: keep recent (12h) + synoptic runs
+        # Policy: keep recent (12h) + synoptic runs (00/06/12/18Z)
         is_recent = hours_ago <= 12
         is_synoptic = int(init_hour) % 6 == 0
 

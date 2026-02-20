@@ -357,11 +357,16 @@ MODELS = {
     "ecmwf_eps": {
         "name": "ECMWF EPS",
         "max_forecast_hours": 360,
-        "update_frequency_hours": 6,
+        "update_frequency_hours": 12,
         "source": "herbie",
         "dataset": "ecmwf-ensemble-forecast",
         "forecast_hour_digits": 3,
         "availability_check_var": "t2m",
+        # EPS: 6-hourly out to 144h, then 12-hourly to 360h
+        "forecast_hour_schedule": [
+            {"start": 6, "end": 144, "step": 6},
+            {"start": 156, "end": 360, "step": 12},
+        ],
         # Placeholders
         "nomads_url": "",
         "dir_pattern": "",

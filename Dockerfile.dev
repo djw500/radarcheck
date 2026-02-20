@@ -1,0 +1,42 @@
+FROM python:3.11-slim
+
+# System deps (matches production Dockerfile + git for Claude Code)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libeccodes0 \
+    libgeos-dev \
+    libproj-dev \
+    proj-data \
+    proj-bin \
+    curl \
+    git \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 for Claude Code
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+WORKDIR /app
+
+# Pre-install Python deps (layer-cached separately from source)
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+
+# Run as non-root (UID 501 matches macOS default) so:
+# 1. --dangerously-skip-permissions is allowed
+# 2. Mounted ~/.claude files are readable without permission issues
+RUN useradd -m -u 501 dev
+
+# Pre-create volume mount points with correct ownership BEFORE switching user.
+# Docker initializes new named/anonymous volumes from image permissions.
+RUN mkdir -p /app/cache /app/logs && chown dev:dev /app/cache /app/logs
+
+COPY docker-entrypoint.sh /usr/local/bin/
+USER dev
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["claude", "--dangerously-skip-permissions"]
