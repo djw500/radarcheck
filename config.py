@@ -406,8 +406,6 @@ repomap = {
     "COUNTY_ZIP_NAME": "cb_2018_us_county_20m.zip",
     "COUNTY_DIR_NAME": "county_shapefile",
     "COUNTY_SHP_NAME": "cb_2018_us_county_20m.shp",
-    "MAX_RUNS_TO_KEEP": 24,  # Number of model runs to keep in cache (24 = last 24 hours)
-
     # Network settings
     "DOWNLOAD_TIMEOUT_SECONDS": 60,
     "HEAD_REQUEST_TIMEOUT_SECONDS": 10,
