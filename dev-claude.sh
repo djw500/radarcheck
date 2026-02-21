@@ -4,7 +4,7 @@
 # The container can read/write source files normally, but:
 #   - cache/ uses a named Docker volume (persistent, shared across containers)
 #   - venv/ and .venv/ are shadowed (macOS binaries won't run on Linux)
-#   - logs/ is an anonymous volume (ephemeral, per-container)
+#   - logs/ uses a named Docker volume (persistent, shared across containers)
 #   - Nothing else on your host is accessible
 #
 # Auth: ~/.claude is mounted so your OAuth session is shared.
@@ -45,9 +45,10 @@ if [[ -f "${HOME}/.claude.json" ]]; then
     cp "${HOME}/.claude.json" "${HOME}/.claude/.claude.json.host"
 fi
 
-# Shared named volume for cache — persists across container restarts,
+# Named volumes — persist across container restarts,
 # isolated from the host's local ./cache (which has macOS GRIBs/tiles).
 docker volume create radarcheck-cache &>/dev/null
+docker volume create radarcheck-logs &>/dev/null
 
 # Default command: claude in yolo mode. Override with e.g. ./dev-claude.sh bash
 if [[ $# -eq 0 ]]; then
@@ -62,6 +63,6 @@ exec docker run -it --rm \
     -v "radarcheck-cache:/app/cache" \
     -v "/app/.venv" \
     -v "/app/venv" \
-    -v "/app/logs" \
+    -v "radarcheck-logs:/app/logs" \
     "$IMAGE" \
     "$@"
