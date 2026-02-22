@@ -101,7 +101,7 @@ app.register_blueprint(status_bp)
 # Apply auth globally (skip /health and /metrics which are unauthenticated)
 @app.before_request
 def check_api_key():
-    if request.path in ("/health", "/metrics"):
+    if request.path in ("/health", "/metrics") or request.path.startswith("/static/"):
         return None
     if API_KEY is None:
         return None
