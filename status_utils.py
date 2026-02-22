@@ -300,11 +300,14 @@ def get_job_queue_status():
 def get_rebuild_eta():
     """Estimate time to drain the job queue.
 
+    Derives active worker count from DB: distinct worker_ids that completed
+    a job in the last 5 minutes (proven alive). Falls back to workers that
+    started a job in the last 2 minutes, then to env var default.
+
     Returns:
         dict with pending_total, avg_job_seconds, workers, eta_seconds
     """
-    # Worker count from env (matches supervisord numprocs), not from DB
-    workers = int(os.environ.get("TILE_BUILD_WORKERS", "2"))
+    default_workers = int(os.environ.get("TILE_BUILD_WORKERS", "2"))
 
     try:
         conn = init_jobs_db(repomap.get("DB_PATH", "cache/jobs.db"))
@@ -319,6 +322,25 @@ def get_rebuild_eta():
                    AND started_at IS NOT NULL AND completed_at IS NOT NULL"""
             ).fetchone()
             avg_duration = row[0] if row[0] else None
+
+            # Best signal: workers that completed a job in the last 5 min
+            workers = conn.execute(
+                """SELECT COUNT(DISTINCT worker_id) FROM jobs
+                   WHERE status='completed'
+                   AND completed_at > strftime('%Y-%m-%dT%H:%M:%SZ','now','-5 minutes')"""
+            ).fetchone()[0]
+
+            # Fallback: workers that claimed a job in the last 2 min (fresh start)
+            if not workers:
+                workers = conn.execute(
+                    """SELECT COUNT(DISTINCT worker_id) FROM jobs
+                       WHERE status='processing'
+                       AND started_at > strftime('%Y-%m-%dT%H:%M:%SZ','now','-2 minutes')"""
+                ).fetchone()[0]
+
+            # Final fallback: configured default
+            if not workers:
+                workers = default_workers
 
             eta_seconds = None
             if avg_duration and pending > 0:
