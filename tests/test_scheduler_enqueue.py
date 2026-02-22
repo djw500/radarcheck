@@ -27,7 +27,7 @@ class TestEnqueueRunJobs:
 
     def test_enqueue_creates_jobs(self, jobs_conn):
         """enqueue_run_jobs should create pending jobs for each variable × hour."""
-        from scripts.build_tiles_scheduled import enqueue_run_jobs
+        from scripts.scheduler import enqueue_run_jobs
 
         # Use a small max_hours so we get a manageable number of jobs
         region_id = list(repomap["TILING_REGIONS"].keys())[0]
@@ -42,7 +42,7 @@ class TestEnqueueRunJobs:
 
     def test_enqueue_is_idempotent(self, jobs_conn):
         """Calling enqueue_run_jobs twice should not create duplicates."""
-        from scripts.build_tiles_scheduled import enqueue_run_jobs
+        from scripts.scheduler import enqueue_run_jobs
 
         region_id = list(repomap["TILING_REGIONS"].keys())[0]
         model_id = "hrrr"
@@ -58,7 +58,7 @@ class TestEnqueueRunJobs:
 
     def test_enqueue_respects_model_exclusions(self, jobs_conn):
         """Jobs should not be created for variables excluded from the model."""
-        from scripts.build_tiles_scheduled import enqueue_run_jobs
+        from scripts.scheduler import enqueue_run_jobs
 
         region_id = list(repomap["TILING_REGIONS"].keys())[0]
         model_id = "hrrr"
@@ -81,7 +81,7 @@ class TestEnqueueRunJobs:
 
         # Need to reload the module to pick up the env var change
         import importlib
-        import scripts.build_tiles_scheduled as sched_mod
+        import scripts.scheduler as sched_mod
         importlib.reload(sched_mod)
 
         region_id = list(repomap["TILING_REGIONS"].keys())[0]
@@ -101,17 +101,6 @@ class TestEnqueueRunJobs:
         monkeypatch.delenv("TILE_BUILD_VARIABLES", raising=False)
         importlib.reload(sched_mod)
 
-
-class TestDrainQueue:
-    """Test the drain_queue function."""
-
-    def test_drain_empty_queue(self, jobs_conn):
-        """drain_queue on empty DB should return (0, 0)."""
-        from scripts.build_tiles_scheduled import drain_queue
-
-        processed, failed = drain_queue(jobs_conn)
-        assert processed == 0
-        assert failed == 0
 
 
 class TestGetJobQueueStatus:

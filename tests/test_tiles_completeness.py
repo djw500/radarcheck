@@ -2,7 +2,7 @@ import json
 import os
 import numpy as np
 
-from cache_builder import get_valid_forecast_hours
+from grib_fetcher import get_valid_forecast_hours
 
 
 def write_npz(path, hours):
@@ -32,7 +32,7 @@ def test_strict_tiles_exist_check(tmp_path, monkeypatch):
     write_npz(npz_path, expected_hours)
 
     # Verify exact match considered complete
-    from scripts.build_tiles_scheduled import tiles_exist
+    from scripts.scheduler import tiles_exist
     # monkeypatch the config to look at our tmp path
     from config import repomap
     monkeypatch.setitem(

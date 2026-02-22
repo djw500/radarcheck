@@ -37,9 +37,11 @@ NOMADS (HRRR, NAM Nest, GFS, NBM)
 | File | Purpose |
 |------|---------|
 | `tiles.py` | Tile generation logic, point queries |
+| `grib_fetcher.py` | GRIB downloading, validation, URL building |
 | `config.py` | Model definitions, variable configs, regions |
 | `jobs.py` | SQLite job queue |
 | `job_worker.py` | Background worker that processes queued jobs |
+| `scripts/scheduler.py` | Job enqueueing, NOMADS availability checks, cleanup |
 
 ### Web Layer
 

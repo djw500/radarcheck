@@ -8,21 +8,21 @@ from typing import Any, Dict, Iterable, Optional
 DEFAULT_DB_PATH = "cache/jobs.db"
 
 
-def _args_json(args: Dict[str, Any]) -> str:  # USED
+def _args_json(args: Dict[str, Any]) -> str:
     return json.dumps(args, sort_keys=True, separators=(",", ":"))
 
 
-def _args_hash(job_type: str, args_json: str) -> str:  # USED
+def _args_hash(job_type: str, args_json: str) -> str:
     digest = hashlib.sha256()
     digest.update(f"{job_type}:{args_json}".encode("utf-8"))
     return digest.hexdigest()
 
 
-def _dict_from_row(row: sqlite3.Row) -> Dict[str, Any]:  # USED
+def _dict_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
-def init_db(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:  # USED
+def init_db(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -66,8 +66,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:  # USED
     return conn
 
 
-def enqueue(  # USED
-    conn: sqlite3.Connection,
+def enqueue(    conn: sqlite3.Connection,
     job_type: str,
     args: Dict[str, Any],
     priority: int = 0,
@@ -110,7 +109,7 @@ def enqueue(  # USED
     return None
 
 
-def claim(conn: sqlite3.Connection, worker_id: str, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:  # USED
+def claim(conn: sqlite3.Connection, worker_id: str, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     if model_id is not None:
         cursor = conn.execute(
             """
@@ -155,7 +154,7 @@ def claim(conn: sqlite3.Connection, worker_id: str, model_id: Optional[str] = No
     return _dict_from_row(row)
 
 
-def complete(conn: sqlite3.Connection, job_id: int) -> None:  # USED
+def complete(conn: sqlite3.Connection, job_id: int) -> None:
     conn.execute(
         """
         UPDATE jobs
@@ -168,15 +167,14 @@ def complete(conn: sqlite3.Connection, job_id: int) -> None:  # USED
     conn.commit()
 
 
-def _retry_after_timestamp(retry_count: int) -> str:  # USED
+def _retry_after_timestamp(retry_count: int) -> str:
     delay_seconds = 60 * (2**retry_count)
     return (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 
 
-def fail(  # USED
-    conn: sqlite3.Connection,
+def fail(    conn: sqlite3.Connection,
     job_id: int,
     error: str,
     max_retries: int = 0,
@@ -218,7 +216,7 @@ def fail(  # USED
     conn.commit()
 
 
-def recover_stale(conn: sqlite3.Connection, stale_minutes: int = 10) -> int:  # USED
+def recover_stale(conn: sqlite3.Connection, stale_minutes: int = 10) -> int:
     """Reset jobs stuck in 'processing' for longer than stale_minutes.
 
     Only resets jobs whose started_at is old enough to be truly stuck,
@@ -239,7 +237,7 @@ def recover_stale(conn: sqlite3.Connection, stale_minutes: int = 10) -> int:  # 
     return cursor.rowcount
 
 
-def prune_completed(conn: sqlite3.Connection, older_than_hours: int = 72) -> int:  # USED
+def prune_completed(conn: sqlite3.Connection, older_than_hours: int = 72) -> int:
     cursor = conn.execute(
         """
         DELETE FROM jobs
@@ -252,7 +250,7 @@ def prune_completed(conn: sqlite3.Connection, older_than_hours: int = 72) -> int
     return cursor.rowcount
 
 
-def count_by_status(conn: sqlite3.Connection) -> Dict[str, int]:  # USED
+def count_by_status(conn: sqlite3.Connection) -> Dict[str, int]:
     rows = conn.execute(
         "SELECT status, COUNT(*) as count FROM jobs GROUP BY status;"
     ).fetchall()
@@ -261,8 +259,7 @@ def count_by_status(conn: sqlite3.Connection) -> Dict[str, int]:  # USED
 
 
 
-def get_jobs(  # USED
-    conn: sqlite3.Connection,
+def get_jobs(    conn: sqlite3.Connection,
     job_type: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
@@ -282,7 +279,7 @@ def get_jobs(  # USED
     return [_dict_from_row(row) for row in rows]
 
 
-def cancel_siblings(conn: sqlite3.Connection, failed_job: Dict[str, Any]) -> int:  # USED
+def cancel_siblings(conn: sqlite3.Connection, failed_job: Dict[str, Any]) -> int:
     """Cancel all pending jobs that share the same model_id and run_id as a failed job.
 
     When a GRIB download fails (e.g. 404), there's no point trying other
@@ -321,7 +318,7 @@ def cancel_siblings(conn: sqlite3.Connection, failed_job: Dict[str, Any]) -> int
     return cursor.rowcount
 
 
-def cancel(conn: sqlite3.Connection, job_id: Optional[int] = None, status_filter: Optional[str] = None) -> int:  # USED
+def cancel(conn: sqlite3.Connection, job_id: Optional[int] = None, status_filter: Optional[str] = None) -> int:
     """Cancel jobs by marking them as failed with 'cancelled by user'.
 
     If job_id is given, cancel that single job.
@@ -356,7 +353,7 @@ def cancel(conn: sqlite3.Connection, job_id: Optional[int] = None, status_filter
     return cursor.rowcount
 
 
-def retry_all_failed(conn: sqlite3.Connection, job_id: Optional[int] = None) -> int:  # USED
+def retry_all_failed(conn: sqlite3.Connection, job_id: Optional[int] = None) -> int:
     """Reset failed jobs back to pending for retry.
 
     If job_id is given, retry that single job.

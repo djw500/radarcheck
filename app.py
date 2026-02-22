@@ -46,7 +46,7 @@ API_KEY = os.environ.get("RADARCHECK_API_KEY")
 
 # --- Prometheus metrics ---
 
-def _get_or_create_counter(name, description, labels):  # USED
+def _get_or_create_counter(name, description, labels):
     try:
         return Counter(name, description, labels)
     except ValueError:
@@ -56,7 +56,7 @@ def _get_or_create_counter(name, description, labels):  # USED
         raise
 
 
-def _get_or_create_histogram(name, description, labels):  # USED
+def _get_or_create_histogram(name, description, labels):
     try:
         return Histogram(name, description, labels)
     except ValueError:
@@ -75,12 +75,12 @@ REQUEST_LATENCY = _get_or_create_histogram(
 
 
 @app.before_request
-def start_timer():  # USED
+def start_timer():
     request.start_time = time.perf_counter()
 
 
 @app.after_request
-def track_metrics(response):  # USED
+def track_metrics(response):
     if hasattr(request, "start_time"):
         latency = time.perf_counter() - request.start_time
         endpoint = request.path
@@ -100,7 +100,7 @@ app.register_blueprint(status_bp)
 
 # Apply auth globally (skip /health and /metrics which are unauthenticated)
 @app.before_request
-def check_api_key():  # USED
+def check_api_key():
     if request.path in ("/health", "/metrics"):
         return None
     if API_KEY is None:
@@ -114,12 +114,12 @@ def check_api_key():  # USED
 # --- Core routes ---
 
 @app.route("/")
-def index():  # USED
+def index():
     return render_template('index.html')
 
 
 @app.route("/health")
-def health_check():  # USED
+def health_check():
     regions = repomap.get("TILING_REGIONS", {})
     default_region = next(iter(regions)) if regions else None
     tile_runs = []
@@ -134,7 +134,7 @@ def health_check():  # USED
 
 
 @app.route("/metrics")
-def metrics():  # USED
+def metrics():
     return generate_latest(), 200, {'Content-Type': 'text/plain'}
 
 

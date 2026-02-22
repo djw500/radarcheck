@@ -10,7 +10,7 @@ from jobs import init_db as init_jobs_db
 DEFAULT_DB_PATH = repomap.get("DB_PATH", "cache/jobs.db")
 
 
-def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:  # USED
+def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = db_path or DEFAULT_DB_PATH
     conn = init_jobs_db(path)
     conn.execute("PRAGMA synchronous=NORMAL;")
@@ -93,7 +93,7 @@ def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:  # USED
     return conn
 
 
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:  # USED
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
     try:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
     except sqlite3.OperationalError as exc:
@@ -101,8 +101,7 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: s
             raise
 
 
-def record_tile_run(  # USED
-    conn: sqlite3.Connection,
+def record_tile_run(    conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
     model_id: str,
@@ -120,8 +119,7 @@ def record_tile_run(  # USED
     )
 
 
-def record_tile_variable(  # USED
-    conn: sqlite3.Connection,
+def record_tile_variable(    conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
     model_id: str,
@@ -164,8 +162,7 @@ def record_tile_variable(  # USED
     )
 
 
-def record_tile_hour(  # USED
-    conn: sqlite3.Connection,
+def record_tile_hour(    conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
     model_id: str,
@@ -201,8 +198,7 @@ def record_tile_hour(  # USED
     )
 
 
-def delete_tile_run(  # USED
-    conn: sqlite3.Connection,
+def delete_tile_run(    conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
     model_id: str,
@@ -232,8 +228,7 @@ def delete_tile_run(  # USED
     )
 
 
-def delete_region_tiles(  # USED
-    conn: sqlite3.Connection,
+def delete_region_tiles(    conn: sqlite3.Connection,
     region_id: str,
 ) -> None:
     """Delete all database records for a specific region."""
@@ -260,8 +255,7 @@ def delete_region_tiles(  # USED
     )
 
 
-def list_tile_runs_db(  # USED
-    conn: sqlite3.Connection,
+def list_tile_runs_db(    conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
     model_id: str,
@@ -278,8 +272,7 @@ def list_tile_runs_db(  # USED
     return [row["run_id"] for row in rows]
 
 
-def list_tile_models_db(  # USED
-    conn: sqlite3.Connection,
+def list_tile_models_db(    conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
 ) -> Dict[str, List[str]]:
@@ -295,32 +288,4 @@ def list_tile_models_db(  # USED
     result: Dict[str, List[str]] = {}
     for row in rows:
         result.setdefault(row["model_id"], []).append(row["run_id"])
-    return result
-
-
-def list_tile_variables_db(
-    conn: sqlite3.Connection,
-    region_id: str,
-    resolution_deg: float,
-    model_id: str,
-    run_id: str,
-) -> Dict[str, Dict[str, Any]]:
-    rows = conn.execute(
-        """
-        SELECT variable_id, hours_json, npz_path, meta_path, size_bytes, updated_at
-        FROM tile_variables
-        WHERE region_id=? AND resolution_deg=? AND model_id=? AND run_id=?
-        """,
-        (region_id, resolution_deg, model_id, run_id),
-    ).fetchall()
-    result: Dict[str, Dict[str, Any]] = {}
-    for row in rows:
-        hours = json.loads(row["hours_json"]) if row["hours_json"] else []
-        result[row["variable_id"]] = {
-            "hours": hours,
-            "file": row["npz_path"],
-            "size_bytes": row["size_bytes"],
-            "meta": row["meta_path"],
-            "updated_at": row["updated_at"],
-        }
     return result

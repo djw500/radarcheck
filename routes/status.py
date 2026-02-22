@@ -18,7 +18,7 @@ from status_utils import (
 status_bp = Blueprint("status", __name__)
 
 
-def _get_jobs_db():  # USED
+def _get_jobs_db():
     """Get a DB connection with short busy_timeout for API reads."""
     import sqlite3 as _sqlite3
     from tile_db import init_db as _init_tile_db
@@ -30,20 +30,20 @@ def _get_jobs_db():  # USED
 # --- Status routes ---
 
 @status_bp.route("/status")
-def status_page():  # USED
+def status_page():
     """Render system status dashboard."""
     return render_template("status.html")
 
 
 @status_bp.route("/api/status/run-grid")
-def api_status_run_grid():  # USED
+def api_status_run_grid():
     """Get per-model/run/hour job status grid from jobs table."""
     grid = get_run_grid()
     return jsonify(grid)
 
 
 @status_bp.route("/api/status/summary")
-def api_status_summary():  # USED
+def api_status_summary():
     """Get system status summary (cache, disk, scheduler)."""
     disk_usage = get_disk_usage()
     scheduler_status = read_scheduler_status()
@@ -58,7 +58,7 @@ def api_status_summary():  # USED
 
 
 @status_bp.route("/api/status/logs")
-def api_status_logs():  # USED
+def api_status_logs():
     """Get recent scheduler logs."""
     try:
         lines = int(request.args.get("lines", 100))
@@ -72,7 +72,7 @@ def api_status_logs():  # USED
 # --- Job management routes ---
 
 @status_bp.route("/api/jobs/list")
-def api_jobs_list():  # USED
+def api_jobs_list():
     """Paginated job list with filters."""
     from jobs import get_jobs, count_by_status
     status_filter = request.args.get("status")
@@ -93,7 +93,7 @@ def api_jobs_list():  # USED
 
 
 @status_bp.route("/api/jobs/retry-failed", methods=["POST"])
-def api_jobs_retry_failed():  # USED
+def api_jobs_retry_failed():
     """Reset failed jobs back to pending."""
     from jobs import retry_all_failed
     data = request.get_json(silent=True) or {}
@@ -108,7 +108,7 @@ def api_jobs_retry_failed():  # USED
 
 
 @status_bp.route("/api/jobs/cancel", methods=["POST"])
-def api_jobs_cancel():  # USED
+def api_jobs_cancel():
     """Cancel pending/processing jobs."""
     from jobs import cancel
     data = request.get_json(silent=True) or {}
@@ -124,9 +124,10 @@ def api_jobs_cancel():  # USED
 
 
 @status_bp.route("/api/jobs/enqueue-run", methods=["POST"])
-def api_jobs_enqueue_run():  # USED
+def api_jobs_enqueue_run():
     """Enqueue all jobs for a specific model/run."""
-    from scripts.build_tiles_scheduled import enqueue_run_jobs, get_max_hours_for_run, MODELS_CONFIG
+    from scripts.scheduler import enqueue_run_jobs, MODELS_CONFIG
+    from status_utils import _get_max_hours_for_run as get_max_hours_for_run
 
     data = request.get_json(silent=True) or {}
     model_id = data.get("model_id")

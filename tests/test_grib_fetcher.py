@@ -1,4 +1,4 @@
-from cache_builder import build_variable_query
+from grib_fetcher import build_variable_query
 
 
 def test_build_variable_query_single_param():

@@ -3,7 +3,6 @@ from tile_db import (
     init_db,
     list_tile_models_db,
     list_tile_runs_db,
-    list_tile_variables_db,
     record_tile_run,
     record_tile_variable,
     record_tile_hour,
@@ -38,10 +37,6 @@ def test_tile_db_records_and_lists(tmp_path):
 
         runs = list_tile_runs_db(conn, "ne", 0.1, "hrrr")
         assert runs == ["run_20240101_00"]
-
-        variables = list_tile_variables_db(conn, "ne", 0.1, "hrrr", "run_20240101_00")
-        assert variables["t2m"]["hours"] == [0, 1, 2]
-        assert variables["t2m"]["file"] == "tiles/path/t2m.npz"
 
         # record_tile_variable no longer auto-completes jobs (worker owns that)
         job_status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()

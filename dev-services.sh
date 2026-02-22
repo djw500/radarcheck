@@ -31,7 +31,7 @@ start_scheduler() {
         echo "Scheduler already running (pid $(cat "$SCHED_PID"))"
         return
     fi
-    nohup python3 scripts/build_tiles_scheduled.py > "$SCHED_LOG" 2>&1 &
+    nohup python3 scripts/scheduler.py > "$SCHED_LOG" 2>&1 &
     echo $! > "$SCHED_PID"
     echo "Started scheduler (pid $!), log: $SCHED_LOG"
 }

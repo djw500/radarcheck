@@ -19,11 +19,11 @@ NOMADS → scheduler → job_worker.py → tiles.py → NPZ tiles
 - `routes/forecast.py` - `/api/timeseries/multirun` endpoint + snow derivation
 - `routes/status.py` - `/status` dashboard + `/api/status/*` + `/api/jobs/*`
 - `tiles.py` - Tile generation, statistics, and point queries
-- `cache_builder.py` - GRIB fetching and validation
+- `grib_fetcher.py` - GRIB downloading, validation, URL building
 - `config.py` - Models, variables, regions configuration
 - `jobs.py` - SQLite job queue
 - `job_worker.py` - Background worker that processes jobs
-- `scripts/build_tiles_scheduled.py` - Scheduler that enqueues jobs
+- `scripts/scheduler.py` - Scheduler that enqueues jobs + cleanup
 
 **Cache structure**:
 ```

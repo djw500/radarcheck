@@ -13,7 +13,7 @@ from tile_db import init_db, list_tile_models_db, list_tile_runs_db
 from utils import convert_units, time_function
 
 
-def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any]) -> xr.DataArray:  # USED
+def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any]) -> xr.DataArray:
     """Minimal variable selection without importing plotting heavy deps."""
     vector_components = variable_config.get("vector_components")
     if vector_components:
@@ -53,14 +53,13 @@ def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any
     raise ValueError("No variables found in GRIB dataset.")
 
 
-def _grid_shape(lat_min: float, lat_max: float, lon_min: float, lon_max: float, res_deg: float) -> Tuple[int, int]:  # USED
+def _grid_shape(lat_min: float, lat_max: float, lon_min: float, lon_max: float, res_deg: float) -> Tuple[int, int]:
     ny = int(np.ceil((lat_max - lat_min) / res_deg))
     nx = int(np.ceil((lon_max - lon_min) / res_deg))
     return ny, nx
 
 
-def _prep_cell_index(  # USED
-    lat2d: np.ndarray,
+def _prep_cell_index(    lat2d: np.ndarray,
     lon2d: np.ndarray,
     lat_min: float,
     lat_max: float,
@@ -121,7 +120,7 @@ def _prep_cell_index(  # USED
     return order, starts, unique_ids, valid, ny * nx, ny, nx
 
 
-def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarray, starts: np.ndarray, unique_ids: np.ndarray, n_cells: int, ny: int, nx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # USED
+def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarray, starts: np.ndarray, unique_ids: np.ndarray, n_cells: int, ny: int, nx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     if starts.size == 0:
         nan_grid = np.full((ny, nx), np.nan, dtype=np.float32)
         return nan_grid, nan_grid.copy(), nan_grid.copy()
@@ -155,7 +154,7 @@ def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarra
     return min_grid.reshape(ny, nx), max_grid.reshape(ny, nx), mean_grid.reshape(ny, nx)
 
 
-def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.Dataset:  # USED
+def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.Dataset:
     """
     Open a GRIB file with xarray/cfgrib, handling common index ambiguity errors.
     """
@@ -179,8 +178,7 @@ def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.D
 
 
 @time_function
-def build_tiles_for_variable(  # USED
-    grib_paths_by_hour: Dict[int, str],
+def build_tiles_for_variable(    grib_paths_by_hour: Dict[int, str],
     variable_config: Dict[str, Any],
     lat_min: float,
     lat_max: float,
@@ -265,8 +263,7 @@ def build_tiles_for_variable(  # USED
     return mins, maxs, means, hours_sorted, index_meta
 
 
-def _save_tiles_npz_internal(  # USED
-    npz_path: str,
+def _save_tiles_npz_internal(    npz_path: str,
     meta_path: str,
     region_id: str,
     variable_id: str,
@@ -293,8 +290,7 @@ def _save_tiles_npz_internal(  # USED
         json.dump(meta, f, indent=2)
 
 
-def upsert_tiles_npz(  # USED
-    base_dir: str,
+def upsert_tiles_npz(    base_dir: str,
     region_id: str,
     resolution_deg: float,
     model_id: str,
@@ -382,8 +378,7 @@ def upsert_tiles_npz(  # USED
 
     return npz_path, merged_hours
 
-def load_timeseries_for_point(  # USED
-    base_dir: str,
+def load_timeseries_for_point(    base_dir: str,
     region_id: str,
     resolution_deg: float,
     model_id: str,
@@ -456,7 +451,7 @@ def load_timeseries_for_point(  # USED
     return hours, values
 
 
-def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:  # USED
+def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:
     conn = init_db(repomap.get("DB_PATH"))
     try:
         return list_tile_runs_db(conn, region_id, resolution_deg, model_id)
@@ -464,35 +459,10 @@ def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_i
         conn.close()
 
 
-def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:  # USED
+def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:
     """Return models present under a region/resolution with their available runs."""
     conn = init_db(repomap.get("DB_PATH"))
     try:
         return list_tile_models_db(conn, region_id, resolution_deg)
     finally:
         conn.close()
-
-
-def is_tile_valid(meta_path: str, region_config: Dict[str, Any], expected_res: float) -> bool:
-    """
-    Check if a tile is valid by comparing its metadata with the current configuration.
-    """
-    if not os.path.exists(meta_path):
-        return False
-    try:
-        with open(meta_path, "r") as f:
-            meta = json.load(f)
-        
-        tol = 1e-6
-        # Compare bounds
-        if abs(float(meta.get("lat_min", 0)) - float(region_config["lat_min"])) > tol: return False
-        if abs(float(meta.get("lat_max", 0)) - float(region_config["lat_max"])) > tol: return False
-        if abs(float(meta.get("lon_min", 0)) - float(region_config["lon_min"])) > tol: return False
-        if abs(float(meta.get("lon_max", 0)) - float(region_config["lon_max"])) > tol: return False
-        
-        # Compare resolution
-        if abs(float(meta.get("resolution_deg", 0)) - expected_res) > tol: return False
-        
-        return True
-    except Exception:
-        return False

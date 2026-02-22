@@ -1,4 +1,4 @@
-from cache_builder import get_valid_forecast_hours
+from grib_fetcher import get_valid_forecast_hours
 
 
 def test_gfs_forecast_hour_schedule_basic():
