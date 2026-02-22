@@ -11,7 +11,14 @@ The TTS audio feature has been wired up end-to-end:
 
 ## What to Test
 
-TTS generation itself requires Apple Silicon + MLX (can't run in sandbox). But a pre-generated test MP3 exists at `cache/audio/forecast_test000000.mp3` so you can test the **serving** side:
+TTS generation itself requires Apple Silicon + MLX (can't run in sandbox). A test MP3 fixture is checked in at `tests/fixtures/sample_forecast.mp3`. Seed the audio cache before testing:
+
+```bash
+mkdir -p cache/audio
+cp tests/fixtures/sample_forecast.mp3 cache/audio/forecast_test000000.mp3
+```
+
+Then:
 
 1. Start the dev server: `python app.py -p 5001`
 2. Create a writeup:
