@@ -126,8 +126,8 @@ def api_jobs_cancel():
 @status_bp.route("/api/jobs/enqueue-run", methods=["POST"])
 def api_jobs_enqueue_run():
     """Enqueue all jobs for a specific model/run."""
-    from scripts.scheduler import enqueue_run_jobs, MODELS_CONFIG
-    from status_utils import _get_max_hours_for_run as get_max_hours_for_run
+    from scripts.scheduler import enqueue_run_jobs
+    from status_utils import SCHEDULED_MODELS, _get_max_hours_for_run as get_max_hours_for_run
 
     data = request.get_json(silent=True) or {}
     model_id = data.get("model_id")
@@ -137,7 +137,7 @@ def api_jobs_enqueue_run():
     if not model_id or not run_id:
         return jsonify({"error": "model_id and run_id are required"}), 400
 
-    model_cfg_entry = next((m for m in MODELS_CONFIG if m["id"] == model_id), None)
+    model_cfg_entry = next((m for m in SCHEDULED_MODELS if m["id"] == model_id), None)
     default_max = model_cfg_entry["max_hours"] if model_cfg_entry else repomap["MODELS"].get(model_id, {}).get("max_forecast_hours", 48)
     max_hours = get_max_hours_for_run(model_id, run_id, default_max)
 

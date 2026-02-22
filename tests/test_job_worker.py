@@ -28,8 +28,9 @@ def _setup_worker_test(tmp_path, monkeypatch):
         },
     )
 
-    def fake_fetch_grib(*args, **kwargs):
-        return str(tmp_path / "fake.grib2")
+    def fake_open_as_xarray(*args, **kwargs):
+        import xarray as xr
+        return xr.Dataset({"t2m": (["latitude", "longitude"], np.array([[1.0]]))})
 
     def fake_build_tiles_for_variable(*args, **kwargs):
         mins = np.array([[[1.0]]], dtype=np.float32)
@@ -37,7 +38,7 @@ def _setup_worker_test(tmp_path, monkeypatch):
         means = np.array([[[1.5]]], dtype=np.float32)
         return mins, maxs, means, [1], {}
 
-    monkeypatch.setattr("job_worker.fetch_grib", fake_fetch_grib)
+    monkeypatch.setattr("job_worker.open_as_xarray", fake_open_as_xarray)
     monkeypatch.setattr("job_worker.build_tiles_for_variable", fake_build_tiles_for_variable)
 
     conn = init_db(str(db_path))

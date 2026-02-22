@@ -8,13 +8,12 @@ from typing import Any, Dict
 
 logger = logging.getLogger("job_worker")
 
-from grib_fetcher import detect_hourly_support, fetch_grib
+from grib_fetcher import open_as_xarray
 from config import repomap
 from jobs import cancel_siblings, claim, complete, fail, init_db
 from tile_db import init_db as init_tile_db
 from tile_db import record_tile_hour, record_tile_run, record_tile_variable
 from tiles import build_tiles_for_variable, upsert_tiles_npz
-from utils import format_forecast_hour
 
 
 def _parse_run_id(run_id: str) -> tuple[str, str]:
@@ -45,34 +44,13 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
     lon_max = float(region["lon_max"])
 
     date_str, init_hour = _parse_run_id(run_id)
-    forecast_hour_str = format_forecast_hour(forecast_hour, model_id)
 
-    # Determine if the hourly (pgrb2b) pattern should be used for this hour.
-    # Mirrors the logic in download_all_hours_parallel: only use it when
-    # the model has an hourly window configured AND the run is confirmed to
-    # support it (via a cached HEAD probe).
-    model_cfg = repomap["MODELS"].get(model_id, {})
-    hourly_first = int(model_cfg.get("hourly_override_first_hours", 0) or 0)
-    use_hourly = (
-        hourly_first > 0
-        and forecast_hour <= hourly_first
-        and detect_hourly_support(model_id, date_str, init_hour)
-    )
-
-    logger.debug(f"  fetching GRIB: {model_id}/{run_id}/{variable_id} f{forecast_hour} (use_hourly={use_hourly})")
-    grib_path = fetch_grib(
-        model_id,
-        variable_id,
-        date_str,
-        init_hour,
-        forecast_hour_str,
-        run_id,
-        use_hourly=use_hourly,
-    )
+    logger.debug(f"  fetching via Herbie: {model_id}/{run_id}/{variable_id} f{forecast_hour}")
+    ds = open_as_xarray(model_id, variable_id, date_str, init_hour, forecast_hour)
 
     variable_config = repomap["WEATHER_VARIABLES"][variable_id]
     mins, maxs, means, hours, index_meta = build_tiles_for_variable(
-        {forecast_hour: grib_path},
+        {forecast_hour: ds},
         variable_config,
         lat_min,
         lat_max,
@@ -207,15 +185,13 @@ def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once:
                 error_str = str(exc)
                 wlog.error(f"Job {job['id']} FAILED after {elapsed:.1f}s ({job_label}): {error_str}")
                 fail(conn, job["id"], error_str)
-                # Only cancel siblings when the whole model run is unavailable on NOMADS
-                # (e.g. run published but hours not yet posted). Per-variable failures
-                # like empty GRIBs (variable has no data at that hour) should not
-                # cascade and kill unrelated variables for the same run.
-                run_unavailable = "not available (404)" in error_str or "Could not find" in error_str
+                # Cancel siblings when the whole model run is unavailable
+                # (e.g. run published but hours not yet posted).
+                run_unavailable = "GRIB2 file not found" in error_str or "not found" in error_str.lower()
                 if run_unavailable:
                     cancelled = cancel_siblings(conn, job)
                     if cancelled:
-                        wlog.info(f"Cancelled {cancelled} sibling jobs — run not yet on NOMADS")
+                        wlog.info(f"Cancelled {cancelled} sibling jobs — run data not available")
 
             if once:
                 break

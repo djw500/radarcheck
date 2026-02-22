@@ -11,7 +11,7 @@ from tile_db import init_db, record_tile_run, record_tile_variable
 # Mock configuration
 MOCK_REPOMAP = {
     "TILES_DIR": "/fake/cache/tiles",
-    "GRIB_CACHE_DIR": "/fake/cache/gribs",
+    "HERBIE_SAVE_DIR": "/fake/cache/gribs",
     "MODELS": {
         "hrrr": {"max_forecast_hours": 18},
         "gfs": {"max_forecast_hours": 120}
@@ -70,14 +70,15 @@ def mock_fs(tmp_path):
 
 @patch("status_utils.repomap")
 def test_get_disk_usage(mock_repomap, mock_fs):
-    mock_repomap.get.return_value = {}
-    mock_repomap.__getitem__.side_effect = lambda k: {
+    data = {
         "TILES_DIR": str(mock_fs / "tiles"),
-        "GRIB_CACHE_DIR": str(mock_fs / "gribs"),
+        "HERBIE_SAVE_DIR": str(mock_fs / "gribs"),
         "MODELS": {
             "hrrr": {}, "gfs": {}
         }
-    }[k]
+    }
+    mock_repomap.get.side_effect = lambda k, *args: data.get(k, args[0] if args else None)
+    mock_repomap.__getitem__.side_effect = lambda k: data[k]
 
     usage = get_disk_usage()
 

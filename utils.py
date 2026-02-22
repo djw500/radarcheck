@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 import logging
-import os
+import time
+from functools import wraps
 from typing import Any, Optional
 
 import numpy as np
-import requests
-
-from config import repomap
-
-import time
-from functools import wraps
 
 logger = logging.getLogger(__name__)
+
 
 def time_function(f):
     @wraps(f)
@@ -24,71 +20,13 @@ def time_function(f):
         return result
     return wrapper
 
+
 class GribDownloadError(Exception):
-    """Failed to download GRIB file from NOMADS."""
+    """Failed to fetch GRIB data."""
 
 
 class GribValidationError(Exception):
     """GRIB file is corrupted or invalid."""
-
-
-def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> None:
-    """Download a file if it doesn't exist in cache.
-
-    Args:
-        url: The URL to download from
-        local_path: The local path to save the file
-        timeout: Request timeout in seconds (default from config)
-    """
-    timeout = timeout or repomap["DOWNLOAD_TIMEOUT_SECONDS"]
-    if not os.path.exists(local_path):
-        response = requests.get(url, stream=True, timeout=timeout)
-        # Raise for obvious HTTP errors early
-        try:
-            response.raise_for_status()
-        except requests.HTTPError:
-            # Silence body preview logging to reduce noise
-            raise
-
-        ctype = response.headers.get("Content-Type", "")
-        clen = response.headers.get("Content-Length")
-
-        # Heuristic guard: reject textual/error responses
-        if "text/html" in ctype or ctype.startswith("text/"):
-            try:
-                preview = next(response.iter_content(chunk_size=512))
-            except Exception:
-                preview = b""
-            logger.error("Unexpected textual response for GRIB request; rejecting download.")
-            if preview:
-                logger.error(f"Body preview: {preview[:200]!r}")
-            raise ValueError(f"Unexpected content-type '{ctype}' from server")
-
-        # Do not rely on Content-Length for streaming endpoints (e.g., NOMADS filter CGI),
-        # which may report 0 while still returning a valid GRIB body. Validate by streamed size.
-
-        # Create directory if it doesn't exist
-        dir_path = os.path.dirname(local_path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
-        total = 0
-        with open(local_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if not chunk:
-                    continue
-                total += len(chunk)
-                f.write(chunk)
-
-        # Post-download size validation
-        if total < repomap["MIN_GRIB_FILE_SIZE_BYTES"]:
-            os.remove(local_path)
-            raise ValueError(
-                f"Downloaded file too small ({total} < {repomap['MIN_GRIB_FILE_SIZE_BYTES']} bytes); rejecting"
-            )
-    else:
-        # logger.info(f"Using cached file: {local_path}")
-        pass
 
 
 def convert_units(data: Any, conversion: Optional[str]) -> Any:
@@ -109,6 +47,8 @@ def convert_units(data: Any, conversion: Optional[str]) -> Any:
         return data * 393.701
     if conversion == "m_to_mi":
         return data * 0.000621371
+    if conversion == "m_to_ft":
+        return data * 3.28084
     if conversion == "c_to_f":
         return data * 9 / 5 + 32
     if conversion == "pa_to_mb":
@@ -118,6 +58,7 @@ def convert_units(data: Any, conversion: Optional[str]) -> Any:
 
 def format_forecast_hour(hour: int, model_id: Optional[str] = None) -> str:
     """Format forecast hour string based on model requirements."""
+    from config import repomap
     digits = 2
     if model_id:
         digits = repomap["MODELS"].get(model_id, {}).get("forecast_hour_digits", 2)

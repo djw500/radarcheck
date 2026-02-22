@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Dict, List, Tuple
 
@@ -12,45 +13,23 @@ from config import repomap
 from tile_db import init_db, list_tile_models_db, list_tile_runs_db
 from utils import convert_units, time_function
 
+logger = logging.getLogger(__name__)
 
-def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any]) -> xr.DataArray:
-    """Minimal variable selection without importing plotting heavy deps."""
-    vector_components = variable_config.get("vector_components")
-    if vector_components:
-        u_name, v_name = vector_components
-        if u_name in ds.data_vars and v_name in ds.data_vars:
-            u = ds[u_name]
-            v = ds[v_name]
-            # wind speed magnitude
-            return np.hypot(u, v)
-        candidates = variable_config.get("vector_component_candidates")
-        if candidates and len(candidates) == 2:
-            u_alts, v_alts = candidates
-            found_u = next((name for name in u_alts if name in ds.data_vars), None)
-            found_v = next((name for name in v_alts if name in ds.data_vars), None)
-            if found_u and found_v:
-                return np.hypot(ds[found_u], ds[found_v])
-        # Fallback: some sources provide magnitude directly (e.g., NBM WIND)
-        for mag_name in variable_config.get("magnitude_short_names", []):
-            if mag_name in ds.data_vars:
-                return ds[mag_name]
-        # As a last resort, try generic source_short_names for magnitude
-        for alt_name in variable_config.get("source_short_names", []):
-            if alt_name in ds.data_vars:
-                return ds[alt_name]
-        raise ValueError(f"Missing wind components/magnitude for vector variable")
 
-    preferred_name = variable_config.get("short_name")
-    if preferred_name in ds.data_vars:
-        return ds[preferred_name]
+def _extract_data_var(ds: xr.Dataset) -> xr.DataArray:
+    """Extract the primary data variable from a Herbie xarray Dataset.
 
-    for alt_name in variable_config.get("source_short_names", []):
-        if alt_name in ds.data_vars:
-            return ds[alt_name]
-
-    if ds.data_vars:
-        return ds[list(ds.data_vars.keys())[0]]
-    raise ValueError("No variables found in GRIB dataset.")
+    Handles:
+    - Wind speed: prefers si10 (computed by Herbie with_wind) over raw components
+    - Unknown var names: NBM ASNOW/SNOWLR decode as 'unknown', just take first var
+    """
+    if "si10" in ds.data_vars:
+        return ds["si10"]
+    if "ws" in ds.data_vars:
+        return ds["ws"]
+    if not ds.data_vars:
+        raise ValueError("No variables found in dataset")
+    return ds[list(ds.data_vars)[0]]
 
 
 def _grid_shape(lat_min: float, lat_max: float, lon_min: float, lon_max: float, res_deg: float) -> Tuple[int, int]:
@@ -154,31 +133,9 @@ def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarra
     return min_grid.reshape(ny, nx), max_grid.reshape(ny, nx), mean_grid.reshape(ny, nx)
 
 
-def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.Dataset:
-    """
-    Open a GRIB file with xarray/cfgrib, handling common index ambiguity errors.
-    """
-    try:
-        if preferred_filter:
-            return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': preferred_filter})
-        return xr.open_dataset(path, engine="cfgrib")
-    except Exception as e:
-        if "multiple values for unique key" in str(e):
-            # Try to resolve ambiguity by filtering stepType.
-            # Don't retry with preferred_filter if we already tried it above.
-            # Fallback cascade: accum -> avg -> typeOfLevel surface
-            for filt in [{'stepType': 'accum'}, {'stepType': 'avg'}, {'typeOfLevel': 'surface'}]:
-                if filt == preferred_filter:
-                    continue  # already tried, skip to avoid infinite loop
-                try:
-                    return xr.open_dataset(path, engine="cfgrib", backend_kwargs={'filter_by_keys': filt})
-                except Exception:
-                    continue
-        raise e
-
-
 @time_function
-def build_tiles_for_variable(    grib_paths_by_hour: Dict[int, str],
+def build_tiles_for_variable(
+    datasets_by_hour: Dict[int, xr.Dataset],
     variable_config: Dict[str, Any],
     lat_min: float,
     lat_max: float,
@@ -186,32 +143,18 @@ def build_tiles_for_variable(    grib_paths_by_hour: Dict[int, str],
     lon_max: float,
     res_deg: float,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[int], Dict[str, Any]]:
-    """
-    Build (min, max, mean) tiles for all hours for a single variable.
+    """Build (min, max, mean) tiles for all hours for a single variable.
 
+    Accepts pre-opened xarray Datasets (from Herbie) keyed by forecast hour.
     Returns arrays shaped (time, ny, nx) and the sorted hours list.
     """
-    hours_sorted = sorted(grib_paths_by_hour.keys())
+    hours_sorted = sorted(datasets_by_hour.keys())
     if not hours_sorted:
-        raise ValueError("No GRIB paths provided")
+        raise ValueError("No datasets provided")
 
-    # Open first hour to get grid and precompute mapping
-    first_path = grib_paths_by_hour[hours_sorted[0]]
-    preferred = None
-    # Prefer accumulations for accumulation variables (e.g., APCP, ASNOW)
-    if variable_config.get("is_accumulation"):
-        preferred = {'stepType': 'accum'}
-    
-    # Allow explicit override from config (e.g. for csnow/prate)
-    if variable_config.get("preferred_step_type"):
-        preferred = {'stepType': variable_config.get("preferred_step_type")}
-        
-    # Legacy hardcode fallback (can be removed if config is updated)
-    if variable_config.get("short_name") == "prate" and not preferred:
-        preferred = {'stepType': 'instant'}
-        
-    ds0 = open_dataset_robust(first_path, preferred)
-    da0 = _select_variable_from_dataset(ds0, variable_config)
+    # Use first hour to get grid and precompute mapping
+    ds0 = datasets_by_hour[hours_sorted[0]]
+    da0 = _extract_data_var(ds0)
 
     # Determine conversion based on units if specified
     conversion = variable_config.get("conversion")
@@ -225,7 +168,7 @@ def build_tiles_for_variable(    grib_paths_by_hour: Dict[int, str],
 
     lat2d = np.array(da0.latitude)
     lon2d = np.array(da0.longitude)
-    
+
     # Handle 1D coordinates (e.g. GFS) by broadcasting to 2D
     if lat2d.ndim == 1 and lon2d.ndim == 1:
         lat2d, lon2d = np.meshgrid(lat2d, lon2d, indexing='ij')
@@ -233,11 +176,8 @@ def build_tiles_for_variable(    grib_paths_by_hour: Dict[int, str],
     order, starts, unique_ids, valid_mask_flat, n_cells, ny, nx = _prep_cell_index(
         lat2d, lon2d, lat_min, lat_max, lon_min, lon_max, res_deg
     )
-    # Record how longitude was indexed for later lookups
     lon_0_360 = bool(np.nanmin(lon2d) >= 0)
     used_lon_min = lon_min if not lon_0_360 else (360.0 + lon_min if lon_min < 0 else lon_min)
-    # Close dataset to free resources
-    ds0.close()
 
     t = len(hours_sorted)
     mins = np.full((t, ny, nx), np.nan, dtype=np.float32)
@@ -245,19 +185,15 @@ def build_tiles_for_variable(    grib_paths_by_hour: Dict[int, str],
     means = np.full((t, ny, nx), np.nan, dtype=np.float32)
 
     for ti, hour in enumerate(hours_sorted):
-        path = grib_paths_by_hour[hour]
-        ds = open_dataset_robust(path, preferred)
-        da = _select_variable_from_dataset(ds, variable_config)
+        ds = datasets_by_hour[hour]
+        da = _extract_data_var(ds)
         if conversion:
             da = convert_units(da, conversion)
-        # Reduce stats
         v2d = np.array(da.values)
-        # Use same mapping as first hour
         mn, mx, mu = _reduce_stats(v2d, valid_mask_flat, order, starts, unique_ids, n_cells, ny, nx)
         mins[ti] = mn
         maxs[ti] = mx
         means[ti] = mu
-        ds.close()
 
     index_meta = {"lon_0_360": lon_0_360, "index_lon_min": used_lon_min}
     return mins, maxs, means, hours_sorted, index_meta

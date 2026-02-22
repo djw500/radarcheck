@@ -9,14 +9,16 @@ from tile_db import init_db
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
-# Scheduler model configuration - mirrors scripts/scheduler.py
-SCHEDULED_MODELS = [
-    {"id": "hrrr", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "48"))},
-    {"id": "nam_nest", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))},
-    {"id": "gfs", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))},
-    {"id": "nbm", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))},
-    {"id": "ecmwf_hres", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_ECMWF_HRES", "240"))},
-]
+def _build_scheduled_models():
+    """Derive scheduled model list from config.py MODELS."""
+    result = []
+    for model_id, model_cfg in repomap["MODELS"].items():
+        env_key = f"TILE_BUILD_MAX_HOURS_{model_id.upper()}"
+        max_hours = int(os.environ.get(env_key, model_cfg["max_forecast_hours"]))
+        result.append({"id": model_id, "max_hours": max_hours})
+    return result
+
+SCHEDULED_MODELS = _build_scheduled_models()
 
 
 def _get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
@@ -139,7 +141,7 @@ def get_run_grid():
             all_vars.update(run_data.keys())
 
         # Order variables: use display order, then alphabetical for any extras
-        preferred_order = ["t2m", "apcp", "prate", "asnow", "csnow", "snod"]
+        preferred_order = ["t2m", "apcp", "asnow", "snod"]
         ordered_vars = [v for v in preferred_order if v in all_vars]
         ordered_vars += sorted(all_vars - set(ordered_vars))
 
@@ -205,7 +207,7 @@ def get_disk_usage():
             "tiles": { "total": int, "models": { "model_id": int } }
         }
     """
-    grib_dir = repomap["GRIB_CACHE_DIR"]
+    grib_dir = repomap.get("HERBIE_SAVE_DIR", "cache/herbie")
     tiles_dir = repomap["TILES_DIR"]
     
     usage = {

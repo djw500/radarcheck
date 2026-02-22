@@ -16,7 +16,7 @@
 set -euo pipefail
 
 # Variable set — must match fly.toml TILE_BUILD_VARIABLES
-export TILE_BUILD_VARIABLES="${TILE_BUILD_VARIABLES:-apcp,prate,asnow,csnow,snod,t2m}"
+export TILE_BUILD_VARIABLES="${TILE_BUILD_VARIABLES:-apcp,asnow,snod,t2m}"
 export TILE_BUILD_MAX_HOURS_NBM="${TILE_BUILD_MAX_HOURS_NBM:-48}"
 
 SCHED_LOG="/tmp/scheduler.log"

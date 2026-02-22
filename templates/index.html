@@ -102,7 +102,7 @@
                     <button data-var="snod" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Depth</button>
                     <button data-var="t2m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
                     <button data-var="wind_10m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
-                    <button data-var="apcp" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Precip</button>
+                    <button data-var="apcp" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Rain Rate</button>
                 </div>
 
                 <!-- Time Period -->
@@ -124,12 +124,12 @@
     <!-- Data Table Toggle -->
     <div class="flex justify-end">
         <button id="toggleTableBtn" class="text-sm text-primary hover:text-blue-400 font-medium transition-colors flex items-center gap-1">
-            <span class="material-icons-outlined text-base">table_chart</span> Show Data Table
+            <span class="material-icons-outlined text-base">expand_less</span> Hide Data Table
         </button>
     </div>
 
     <!-- Data Table (Hidden by default) -->
-    <div id="dataTableContainer" class="hidden bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+    <div id="dataTableContainer" class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
         <div class="overflow-x-auto">
             <table class="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                 <thead class="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700/50 dark:text-slate-400">
@@ -232,15 +232,28 @@ const MODEL_CONFIG = {
 };
 
 const VAR_CONFIG = {
-    'asnow': { label: 'Snowfall', unit: ' in' },
-    'snod': { label: 'Snow Depth', unit: ' in' },
-    'prate': { label: 'Precip Rate', unit: ' in/hr' },
-    't2m': { label: 'Temperature', unit: ' °F' },
-    'wind_10m': { label: 'Wind Speed', unit: ' mph' },
-    'apcp': { label: 'Precipitation', unit: ' in' },
-    'rh': { label: 'Humidity', unit: '%' },
-    'cape': { label: 'CAPE', unit: ' J/kg' },
-    'msl': { label: 'Pressure', unit: ' mb' }
+    'asnow': { label: 'Snowfall', unit: 'in', decimals: 1,
+        color: (v) => { const t = Math.min(v / 12, 1); return `rgba(99,140,255,${t * 0.45})`; } },
+    'snod':  { label: 'Snow Depth', unit: 'in', decimals: 1,
+        color: (v) => { const t = Math.min(v / 24, 1); return `rgba(147,112,219,${t * 0.45})`; } },
+    'prate': { label: 'Precip Rate', unit: 'in/hr', decimals: 2,
+        color: (v) => { const t = Math.min(v / 0.5, 1); return `rgba(59,130,246,${t * 0.5})`; } },
+    't2m':   { label: 'Temperature', unit: '°F', decimals: 0,
+        color: (v) => {
+            if (v <= 32) { const t = Math.min((32 - v) / 32, 1); return `rgba(59,130,246,${0.15 + t * 0.35})`; }
+            if (v >= 70) { const t = Math.min((v - 70) / 30, 1); return `rgba(239,68,68,${t * 0.35})`; }
+            return 'transparent';
+        }},
+    'wind_10m': { label: 'Wind Speed', unit: 'mph', decimals: 0,
+        color: (v) => { const t = Math.min(v / 40, 1); return `rgba(249,115,22,${t * 0.45})`; } },
+    'apcp':  { label: 'Precip Rate', unit: 'in/hr', decimals: 2,
+        color: (v) => { const t = Math.min(v / 0.5, 1); return `rgba(59,130,246,${t * 0.5})`; } },
+    'rh':    { label: 'Humidity', unit: '%', decimals: 0,
+        color: (v) => { const t = Math.min(v / 100, 1); return `rgba(34,211,238,${t * 0.3})`; } },
+    'cape':  { label: 'CAPE', unit: 'J/kg', decimals: 0,
+        color: (v) => { const t = Math.min(v / 2000, 1); return `rgba(239,68,68,${t * 0.4})`; } },
+    'msl':   { label: 'Pressure', unit: 'mb', decimals: 1,
+        color: () => 'transparent' }
 };
 
 // Validate currentVariable
@@ -469,8 +482,24 @@ function updateChart(data) {
             }
             
             // Extract X and Y - convert to Date objects for local timezone display
-            const x = run.series.map(p => new Date(p.valid_time));
-            const y = run.series.map(p => p.value);
+            let x = run.series.map(p => new Date(p.valid_time));
+            let y = run.series.map(p => p.value);
+
+            // For APCP: convert accumulated values to per-hour rate (in/hr)
+            if (currentVariable === 'apcp' && y.length > 1) {
+                const rateX = [];
+                const rateY = [];
+                for (let i = 1; i < y.length; i++) {
+                    const dt = (x[i] - x[i-1]) / 3600000; // hours between steps
+                    if (dt > 0) {
+                        const delta = Math.max(0, y[i] - y[i-1]);
+                        rateX.push(x[i]);
+                        rateY.push(delta / dt); // in/hr
+                    }
+                }
+                x = rateX;
+                y = rateY;
+            }
 
             return {
                 x: x,
@@ -480,11 +509,12 @@ function updateChart(data) {
                 name: name,
                 line: {
                     color: modelConf.color,
-                    width: width
+                    width: width,
+                    shape: currentVariable === 'apcp' ? 'hv' : 'linear'
                 },
                 opacity: opacity,
                 hoverinfo: 'y+name',
-                hovertemplate: `<b>${name}</b>: %{y:.1f}${(VAR_CONFIG[currentVariable] || {unit:''}).unit}<extra></extra>`
+                hovertemplate: `<b>${name}</b>: %{y:.${(VAR_CONFIG[currentVariable] || {decimals:1}).decimals}f} ${(VAR_CONFIG[currentVariable] || {unit:''}).unit}<extra></extra>`
             };
         });
 
@@ -492,18 +522,47 @@ function updateChart(data) {
         const isDark = document.documentElement.classList.contains('dark');
         const periodBtn = document.querySelector('.period-btn.bg-primary');
         const selectedDays = periodBtn ? parseInt(periodBtn.dataset.days) : 3;
-        
+
         // Determine Time Range
         const now = new Date();
         const startHour = Math.floor(now.getHours() / 6) * 6;
         const startTime = new Date(now);
         startTime.setHours(startHour, 0, 0, 0);
         const endTime = new Date(startTime.getTime() + selectedDays * 24 * 60 * 60 * 1000);
-        
-        // Determine Tick Interval (dtick) based on selected days
-        let dtick = 21600000; // 1 Day: 6 hours
-        if (selectedDays > 1) dtick = 43200000; // 3 Days: 12 hours
-        if (selectedDays > 3) dtick = 86400000; // 7 Days: 24 hours
+
+        // Determine Tick Interval + format based on selected days
+        let dtick, tickformat;
+        if (selectedDays <= 1) {
+            dtick = 3600000;    // 24h: hourly ticks
+            tickformat = '%-I %p';  // "6 AM"
+        } else if (selectedDays <= 3) {
+            dtick = 21600000;   // 3 days: 6-hour ticks
+            tickformat = '%-I %p\n%a %b %-d';
+        } else {
+            dtick = 43200000;   // 7 days: 12-hour ticks
+            tickformat = '%-I %p\n%a %b %-d';
+        }
+
+        // Compute tight Y-axis range from visible data
+        let yMin = Infinity, yMax = -Infinity;
+        traces.forEach(tr => {
+            tr.x.forEach((xVal, i) => {
+                const t = xVal.getTime();
+                if (t >= startTime.getTime() && t <= endTime.getTime()) {
+                    const v = tr.y[i];
+                    if (v != null && isFinite(v)) {
+                        if (v < yMin) yMin = v;
+                        if (v > yMax) yMax = v;
+                    }
+                }
+            });
+        });
+        let yRange = undefined;
+        if (isFinite(yMin) && isFinite(yMax)) {
+            const span = yMax - yMin || 1;
+            const pad = span * 0.1;
+            yRange = [yMin - pad, yMax + pad];
+        }
 
         const layout = {
             font: {
@@ -517,17 +576,18 @@ function updateChart(data) {
             xaxis: {
                 type: 'date',
                 range: [startTime, endTime],
-                tickformat: '%-I %p\n%a %b %d', // "6 AM \n Sat Jan 24"
+                tickformat: tickformat,
                 tick0: startTime,
                 dtick: dtick,
                 gridcolor: isDark ? '#334155' : '#e2e8f0',
                 zeroline: false,
-                fixedrange: true // Disable zoom on x-axis to keep strict range
+                fixedrange: true
             },
             yaxis: {
+                range: yRange,
                 gridcolor: isDark ? '#334155' : '#e2e8f0',
                 zeroline: false,
-                fixedrange: true // Disable zoom on y-axis
+                fixedrange: true
             },
             hovermode: false, // Tooltip disabled per user request
             hoverlabel: {
@@ -592,8 +652,9 @@ function renderTable(data, timeline) {
         if (!tableBody || !tableHeadRow) return;
 
         // Clear existing
+        const varUnit = (VAR_CONFIG[currentVariable] || {}).unit || '';
         tableBody.innerHTML = '';
-        tableHeadRow.innerHTML = '<th class="px-4 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time</th>';
+        tableHeadRow.innerHTML = `<th class="px-4 py-3 whitespace-nowrap sticky left-0 bg-slate-50 dark:bg-slate-800 z-10">Time <span class="font-normal text-slate-400">(${varUnit})</span></th>`;
 
         // Get active models from toggles
         const activeModels = Array.from(document.querySelectorAll('.model-toggle:checked')).map(cb => cb.value);
@@ -653,20 +714,47 @@ function renderTable(data, timeline) {
             tableHeadRow.appendChild(th);
         });
 
-        const runData = selectedRuns.map(run => {
+        let runData = selectedRuns.map(run => {
             return timeline.map(t => interpolateValue(run.series, t));
         });
 
-        const HOUR_STEP = 3;
+        // For APCP: convert accumulated values to per-hour rate for table
+        if (currentVariable === 'apcp') {
+            runData = runData.map(vals => {
+                return vals.map((v, i) => {
+                    if (i === 0 || v === null) return null;
+                    const prev = vals[i - 1];
+                    if (prev === null) return null;
+                    return Math.max(0, v - prev); // delta per hour (timeline is hourly)
+                });
+            });
+        }
+
+        const periodBtnT = document.querySelector('.period-btn.bg-primary');
+        const selDays = periodBtnT ? parseInt(periodBtnT.dataset.days) : 3;
+        const HOUR_STEP = selDays <= 1 ? 1 : 3;
+        const varCfg = VAR_CONFIG[currentVariable] || { decimals: 1, color: () => 'transparent' };
+        const dec = varCfg.decimals != null ? varCfg.decimals : 1;
+        const colorFn = varCfg.color || (() => 'transparent');
+
+        // Find per-column peak for bolding
+        const colPeaks = runData.map(vals => {
+            let peak = -Infinity;
+            for (let i = 0; i < vals.length; i += HOUR_STEP) {
+                if (vals[i] !== null && vals[i] > peak) peak = vals[i];
+            }
+            return peak;
+        });
+
         timeline.forEach((time, idx) => {
             if (idx % HOUR_STEP !== 0) return;
 
             const date = new Date(time);
             const tr = document.createElement('tr');
-            tr.className = "bg-white border-b dark:bg-card-dark dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800";
+            tr.className = "border-b border-slate-100 dark:border-slate-700/50";
 
             const timeCell = document.createElement('td');
-            timeCell.className = "px-4 py-2 text-xs font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark";
+            timeCell.className = "px-4 py-1.5 text-xs font-medium text-slate-900 dark:text-white whitespace-nowrap sticky left-0 bg-white dark:bg-card-dark z-10";
             const h = date.getHours();
             if (h === 0) {
                 timeCell.innerHTML = `<span class="font-bold">${date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span><br>12 AM`;
@@ -675,12 +763,16 @@ function renderTable(data, timeline) {
             }
             tr.appendChild(timeCell);
 
-            runData.forEach((data, runIdx) => {
+            runData.forEach((vals, colIdx) => {
                 const td = document.createElement('td');
-                td.className = "px-3 py-2 text-xs text-center";
-                const val = data[idx];
+                td.className = "px-3 py-1.5 text-xs text-center tabular-nums";
+                const val = vals[idx];
                 if (val !== null) {
-                    td.textContent = val.toFixed(1) + VAR_CONFIG[currentVariable].unit;
+                    const bg = colorFn(val);
+                    td.style.backgroundColor = bg;
+                    const isPeak = colPeaks[colIdx] !== -Infinity && val === colPeaks[colIdx];
+                    td.textContent = val.toFixed(dec);
+                    if (isPeak) td.classList.add('font-bold');
                 } else {
                     td.textContent = '-';
                     td.classList.add('text-slate-400');

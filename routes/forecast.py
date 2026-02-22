@@ -13,48 +13,7 @@ from tiles import load_timeseries_for_point, list_tile_runs, list_tile_models
 forecast_bp = Blueprint("forecast", __name__)
 
 
-# --- Snow derivation helpers ---
-
-def _temp_to_slr(t_f: np.ndarray) -> np.ndarray:
-    """Conservative temperature-based snow-to-liquid ratio (SLR).
-    Rough guidance from operational rules of thumb:
-      - >=33 F: rain (0:1)
-      - 31-33 F: 6:1
-      - 28-31 F: 8:1
-      - 22-28 F: 10:1
-      - <22 F: 12:1 (cap)
-    """
-    slr = np.full_like(t_f, 10.0, dtype=float)
-    slr = np.where(t_f >= 33.0, 0.0, slr)
-    slr = np.where((t_f >= 31.0) & (t_f < 33.0), 6.0, slr)
-    slr = np.where((t_f >= 28.0) & (t_f < 31.0), 8.0, slr)
-    slr = np.where((t_f >= 22.0) & (t_f < 28.0), 10.0, slr)
-    slr = np.where(t_f < 22.0, 12.0, slr)
-    return slr
-
-
-def _forward_fill_nan(arr: np.ndarray) -> np.ndarray:
-    """Forward-fill NaNs in a 1D numpy array.
-    Leading NaNs are converted to 0.0.
-    """
-    if arr.size == 0:
-        return arr
-    mask = np.isnan(arr)
-    if not np.any(mask):
-        return arr
-
-    idx = np.where(~mask, np.arange(len(arr)), 0)
-    np.maximum.accumulate(idx, out=idx)
-    out = arr[idx]
-
-    if mask[0]:
-        first_valid = np.where(~mask)[0]
-        if first_valid.size > 0:
-            out[:first_valid[0]] = 0.0
-        else:
-            out[:] = 0.0
-    return out
-
+# --- Accumulation helpers ---
 
 def _is_bucket_data(vals: np.ndarray) -> bool:
     """Detect if accumulation data is per-step buckets vs cumulative/resetting.
@@ -85,6 +44,17 @@ def _is_bucket_data(vals: np.ndarray) -> bool:
     return bucket_like_count > len(decrease_indices) * 0.5
 
 
+def _forward_fill_nan(values: np.ndarray) -> np.ndarray:
+    """Forward-fill NaN values in a 1D array."""
+    out = values.copy()
+    mask = np.isnan(out)
+    if mask.all():
+        return out
+    idx = np.where(~mask, np.arange(len(out)), 0)
+    np.maximum.accumulate(idx, out=idx)
+    return out[idx]
+
+
 def _accumulate_timeseries(values: np.ndarray) -> np.ndarray:
     """Convert potentially incremental/resetting cumulative series to strictly monotonic total accumulation."""
     vals = _forward_fill_nan(np.array(values, dtype=float))
@@ -100,108 +70,6 @@ def _accumulate_timeseries(values: np.ndarray) -> np.ndarray:
     return np.cumsum(total_inc)
 
 
-def _derive_asnow_timeseries_from_tiles(    region_id: str,
-    res: float,
-    model_id: str,
-    run_id: str,
-    lat: float,
-    lon: float,
-) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Derive accumulated snowfall series from APCP/CSNOW/T2M tiles.
-
-    - Detects whether APCP is cumulative or stepwise and converts to per-step deltas.
-    - Gates by CSNOW when available.
-    - Uses T2M to veto warm periods and modulate SLR.
-    - Returns (hours, cumulative_snow_inches) or (None, None) if inputs missing.
-    """
-    try:
-        h_apcp, v_apcp = load_timeseries_for_point(
-            repomap["TILES_DIR"], region_id, res, model_id, run_id, "apcp", lat, lon
-        )
-    except FileNotFoundError:
-        return None, None
-
-    try:
-        h_csnow, v_csnow = load_timeseries_for_point(
-            repomap["TILES_DIR"], region_id, res, model_id, run_id, "csnow", lat, lon
-        )
-    except FileNotFoundError:
-        h_csnow, v_csnow = None, None
-
-    try:
-        h_t2m, v_t2m = load_timeseries_for_point(
-            repomap["TILES_DIR"], region_id, res, model_id, run_id, "t2m", lat, lon
-        )
-    except FileNotFoundError:
-        h_t2m, v_t2m = None, None
-
-    try:
-        h_snod, v_snod = load_timeseries_for_point(
-            repomap["TILES_DIR"], region_id, res, model_id, run_id, "snod", lat, lon
-        )
-    except FileNotFoundError:
-        h_snod, v_snod = None, None
-
-    all_hour_sets = [h_apcp]
-    if h_csnow is not None:
-        all_hour_sets.append(h_csnow)
-    if h_t2m is not None:
-        all_hour_sets.append(h_t2m)
-
-    common_hours = np.unique(np.concatenate(all_hour_sets))
-    common_hours = np.sort(common_hours)
-
-    apcp_min, apcp_max = h_apcp.min(), h_apcp.max()
-    common_hours = common_hours[(common_hours >= apcp_min) & (common_hours <= apcp_max)]
-
-    if common_hours.size == 0:
-        return None, None
-
-    def align_and_interpolate(h, v, target_h, fill_value=0.0):
-        if h is None or v is None:
-            return np.full_like(target_h, fill_value, dtype=float)
-        h_arr = np.array(h, dtype=float)
-        v_arr = np.array(v, dtype=float)
-        mask = ~np.isnan(v_arr)
-        if not np.any(mask):
-            return np.full_like(target_h, fill_value, dtype=float)
-        return np.interp(target_h, h_arr[mask], v_arr[mask], left=fill_value, right=v_arr[mask][-1])
-
-    apcp_aligned = align_and_interpolate(h_apcp, v_apcp, common_hours, fill_value=0.0)
-
-    csnow_aligned = None
-    if h_csnow is not None:
-        csnow_aligned = align_and_interpolate(h_csnow, v_csnow, common_hours, fill_value=0.0)
-
-    t2m_aligned = None
-    if h_t2m is not None:
-        t2m_aligned = align_and_interpolate(h_t2m, v_t2m, common_hours, fill_value=32.0)
-
-    if _is_bucket_data(apcp_aligned):
-        inc_apcp = np.where(apcp_aligned < 1e-3, 0.0, apcp_aligned)
-    else:
-        diffs = np.diff(apcp_aligned)
-        inc_apcp_steps = np.where(diffs >= 0, diffs, apcp_aligned[1:])
-        inc_apcp = np.concatenate(([apcp_aligned[0]], inc_apcp_steps))
-        inc_apcp = np.where(inc_apcp < 1e-3, 0.0, inc_apcp)
-
-    snow_frac = np.ones_like(inc_apcp, dtype=float)
-    if csnow_aligned is not None:
-        frac = np.clip(csnow_aligned, 0.0, 1.0)
-        frac = np.where((frac > 0.0) & (frac < 1.0), frac, (csnow_aligned > 0.5).astype(float))
-        snow_frac *= frac
-
-    if t2m_aligned is not None:
-        slr = _temp_to_slr(t2m_aligned)
-        warm_mask = (slr <= 0.0).astype(float)
-        snow_frac *= (1.0 - warm_mask)
-    else:
-        slr = np.full_like(inc_apcp, 8.0, dtype=float)
-
-    snow_step = inc_apcp * snow_frac * slr
-    snow_cum = np.cumsum(snow_step)
-
-    return common_hours, snow_cum
 
 
 # --- Region helpers ---
@@ -289,10 +157,7 @@ def api_timeseries_multirun():
                 if var_cfg.get("is_accumulation") and values is not None:
                     values = _accumulate_timeseries(values)
             except FileNotFoundError:
-                if variable_id == "asnow":
-                    hours, values = _derive_asnow_timeseries_from_tiles(
-                        region_id, res, model_id, run_id, lat, lon
-                    )
+                pass
 
             if hours is not None and values is not None:
                 series = []

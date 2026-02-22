@@ -2,9 +2,9 @@
 """Tile job scheduler for fly.io deployment.
 
 Runs as a background process that periodically:
-1. Checks NOMADS for new model runs
+1. Checks for new model runs via Herbie inventory
 2. Enqueues tile-building jobs for each model/run/variable/hour
-3. Cleans up old GRIB files and tile runs to save disk space
+3. Cleans up old Herbie GRIB cache and tile runs to save disk space
 
 Workers (job_worker.py) process the queued jobs separately.
 
@@ -14,8 +14,7 @@ Usage:
 
 Environment variables:
     TILE_BUILD_INTERVAL_MINUTES: How often to check for new runs (default: 15)
-    TILE_BUILD_MAX_HOURS_HRRR: Max forecast hours for HRRR (default: 48)
-    TILE_BUILD_MAX_HOURS_GFS: Max forecast hours for GFS (default: 168)
+    TILE_BUILD_MAX_HOURS_<MODEL>: Override max forecast hours per model
 """
 
 import datetime
@@ -25,16 +24,12 @@ import sys
 import time
 import json
 
-import requests
-
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import repomap
-from utils import format_forecast_hour
-from grib_fetcher import get_valid_forecast_hours, get_run_forecast_hours
+from grib_fetcher import get_valid_forecast_hours, get_run_forecast_hours, check_availability
 from tile_db import init_db, delete_tile_run, delete_region_tiles
-from ecmwf import herbie_run_available
 from jobs import (
     init_db as init_jobs_db,
     enqueue,
@@ -73,21 +68,29 @@ logger.setLevel(logging.INFO)
 
 # Configuration from environment with defaults
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
-MAX_HOURS_HRRR = int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "48"))
-MAX_HOURS_NAM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))
-MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
-MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
-MAX_HOURS_ECMWF_HRES = int(os.environ.get("TILE_BUILD_MAX_HOURS_ECMWF_HRES", "240"))
-BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,prate,asnow,csnow,snod,t2m"
-# Max builds per model per cycle - ensures all models get attention
-MAX_BUILDS_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PER_MODEL", "3"))
-# Cleanup settings - defaults are generous for local dev, fly.toml overrides for prod
-MAX_GRIB_RUNS_TO_KEEP = int(os.environ.get("TILE_BUILD_GRIB_RUNS_KEEP", "2"))
+BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,asnow,snod,t2m"
 # Tile retention: keep N synoptic (00/06/12/18z) + M hourly runs per model
 MAX_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "8"))
 MAX_HOURLY_RUNS = int(os.environ.get("TILE_BUILD_HOURLY_RUNS", "12"))
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
+
+
+def _build_models_config():
+    """Derive model list from config.py MODELS, with env var overrides for max_hours."""
+    result = []
+    for model_id, model_cfg in repomap["MODELS"].items():
+        env_key = f"TILE_BUILD_MAX_HOURS_{model_id.upper()}"
+        max_hours = int(os.environ.get(env_key, model_cfg["max_forecast_hours"]))
+        result.append({"id": model_id, "max_hours": max_hours})
+    return result
+
+
+MODELS_CONFIG = _build_models_config()
+
+# Regions to build
+REGIONS = list(repomap.get("TILING_REGIONS", {}).keys())
+
 
 def write_scheduler_status(state="idle", last_run=None, next_run=None, targets=None, error=None):
     """Write current scheduler status to JSON."""
@@ -106,101 +109,11 @@ def write_scheduler_status(state="idle", last_run=None, next_run=None, targets=N
         logger.error(f"Failed to write status file: {e}")
 
 
-# Models to build tiles for (in priority order)
-MODELS_CONFIG = [
-    {"id": "hrrr", "max_hours": MAX_HOURS_HRRR, "check_hours": 6},
-    {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
-    {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
-    {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
-    {"id": "ecmwf_hres", "max_hours": MAX_HOURS_ECMWF_HRES, "check_hours": 12},
-]
-
-# Regions to build
-REGIONS = list(repomap.get("TILING_REGIONS", {}).keys())
-
-
 def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
-    """Check if a model run is available on NOMADS."""
+    """Check if a model run is available via Herbie inventory."""
     logger.info(f"Checking availability for {model_id} {date_str} {init_hour}")
-    model_config = repomap["MODELS"].get(model_id)
-    if not model_config:
-        return False
-
-    if model_config.get("source") == "herbie":
-        # Check availability for first valid hour using Herbie
-        first_hour = get_valid_forecast_hours(model_id, 24)[0]
-        forecast_hour = format_forecast_hour(first_hour, model_id)
-        availability_var = model_config.get("availability_check_var")
-        return herbie_run_available(
-            model_id=model_id,
-            variable_id=availability_var,
-            date_str=date_str,
-            init_hour=init_hour,
-            forecast_hour=forecast_hour,
-            timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"],
-        )
-
-    fhour_str = format_forecast_hour(1, model_id)
-    file_name = model_config["file_pattern"].format(init_hour=init_hour, forecast_hour=fhour_str)
-    dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
-    url = f"{model_config['nomads_url']}?file={file_name}&dir={dir_path}&{model_config['availability_check_var']}=on"
-
-    try:
-        r = requests.head(url, timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"])
-        return r.status_code == 200
-    except requests.RequestException:
-        return False
-
-
-def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
-    """Find all runs in the lookback period that WE WANT to have according to policy.
-
-    Short-circuits NOMADS HEAD requests when tiles already exist for all regions.
-    """
-    model_config = repomap["MODELS"].get(model_id)
-    if not model_config:
-        return []
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    update_freq = model_config.get("update_frequency_hours", 1)
-    required_runs = []
-
-    # Precompute default max hours for the model from MODELS_CONFIG
-    model_cfg_entry = next((m for m in MODELS_CONFIG if m["id"] == model_id), None)
-    default_max = model_cfg_entry["max_hours"] if model_cfg_entry else 24
-
-    for hours_ago in range(lookback_hours):
-        check_time = now - datetime.timedelta(hours=hours_ago)
-        date_str = check_time.strftime("%Y%m%d")
-        init_hour = check_time.strftime("%H")
-
-        # Skip off-cycle hours for models that don't run every hour
-        if update_freq > 1 and int(init_hour) % update_freq != 0:
-            continue
-
-        # Policy Tier 1: All runs in last 12 hours
-        # Policy Tier 2: Synoptic runs (00, 06, 12, 18) in last 72 hours
-        is_recent = hours_ago <= 12
-        is_synoptic = int(init_hour) % 6 == 0
-
-        if is_recent or is_synoptic:
-            run_id = f"run_{date_str}_{init_hour}"
-            run_max_hours = get_max_hours_for_run(model_id, run_id, default_max)
-
-            # Short-circuit: skip NOMADS HEAD request if tiles exist for all regions
-            all_complete = all(
-                tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours)
-                for region_id in REGIONS
-            )
-            if all_complete:
-                required_runs.append(run_id)
-                continue
-
-            # Check if available on NOMADS
-            if check_run_available(model_id, date_str, init_hour):
-                required_runs.append(run_id)
-
-    return required_runs
+    first_hour = get_valid_forecast_hours(model_id, 24)[0]
+    return check_availability(model_id, date_str, init_hour, first_hour)
 
 
 def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: int = 24) -> bool:
@@ -250,24 +163,11 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
         return False
 
 
-def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
-    """Check if a run is old enough to likely have data available on NOMADS.
-    NOMADS usually takes 45-60 minutes to start publishing GRIBs after the init hour.
-    """
-    try:
-        parts = run_id.split('_')
-        run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
-        now = datetime.datetime.now(datetime.timezone.utc)
-        age_mins = (now - run_dt).total_seconds() / 60
-        return age_mins >= min_age_minutes
-    except Exception:
-        return True
-
-
 def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours: int) -> int:
-    """Enqueue build_tile_hour jobs for every variable × forecast_hour.
+    """Enqueue build_tile_hour jobs for every variable * forecast_hour.
 
     Idempotent: duplicate jobs are ignored via UNIQUE(type, args_hash) in jobs table.
+    Newer runs get higher priority so workers process fresh data first.
     Returns the number of newly enqueued jobs.
     """
     parts = run_id.split("_")
@@ -278,6 +178,13 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
     var_ids = [v.strip() for v in BUILD_VARIABLES_ENV.split(",") if v.strip()]
 
     resolution_deg = repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1)
+
+    # Compute priority: newer runs get higher priority
+    now = datetime.datetime.now(datetime.timezone.utc)
+    run_dt = datetime.datetime.strptime(f"{date_str}{init_hour}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
+    hours_old = max(0, int((now - run_dt).total_seconds() / 3600))
+    priority = max(0, 1000 - hours_old)
+
     enqueued = 0
 
     for variable_id in var_ids:
@@ -297,7 +204,7 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
                 "forecast_hour": hour,
                 "resolution_deg": resolution_deg,
             }
-            job_id = enqueue(conn, "build_tile_hour", job_args)
+            job_id = enqueue(conn, "build_tile_hour", job_args, priority=priority)
             if job_id is not None:
                 enqueued += 1
 
@@ -305,56 +212,39 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
 
 
 def process_model(model_cfg: dict, conn) -> tuple[int, list]:
-    """Process a single model - find the latest available run and enqueue it.
-
-    Only enqueues the single most recent available run per model.
-    Use the status page "Enqueue" button for manual backfills.
+    """Process a single model — find all incomplete runs in last 48h and enqueue them.
 
     Returns (jobs_enqueued, targets).
     """
     model_id = model_cfg["id"]
     max_hours = model_cfg["max_hours"]
+    freq = repomap["MODELS"][model_id].get("update_frequency_hours", 1)
+    now = datetime.datetime.now(datetime.timezone.utc)
     jobs_enqueued = 0
     targets = []
 
-    # Only look at recent runs (last 12h) — find the latest available one
-    runs_to_process = get_required_runs(model_id, lookback_hours=12)
-
-    if not runs_to_process:
-        logger.info(f"[{model_id}] No available runs found in last 12h")
-        return 0, []
-
-    logger.info(f"[{model_id}] Found {len(runs_to_process)} candidate run(s): {runs_to_process}")
-
-    # Take only the latest (first, since newest-first) incomplete run
-    for run_id in runs_to_process:
-        if not run_is_ready(run_id):
-            logger.info(f"[{model_id}] {run_id} not ready yet (< 45 min old), skipping")
+    for hours_ago in range(48):
+        t = now - datetime.timedelta(hours=hours_ago)
+        ih = int(t.strftime("%H"))
+        if freq > 1 and ih % freq != 0:
             continue
 
-        run_max_hours = get_max_hours_for_run(model_id, run_id, max_hours)
+        date_str = t.strftime("%Y%m%d")
+        init_hour = t.strftime("%H")
+        run_id = f"run_{date_str}_{init_hour}"
+        run_max = get_max_hours_for_run(model_id, run_id, max_hours)
 
-        missing_regions = [
-            r for r in REGIONS
-            if not tiles_exist(r, model_id, run_id, expected_max_hours=run_max_hours)
-        ]
-
-        if not missing_regions:
-            logger.info(f"[{model_id}] {run_id} already complete for all regions, skipping")
+        if all(tiles_exist(r, model_id, run_id, run_max) for r in REGIONS):
+            continue
+        if not check_run_available(model_id, date_str, init_hour):
             continue
 
-        # Found the latest incomplete run — enqueue it
-        targets.append(f"{model_id}/{run_id}")
-        logger.info(f"[{model_id}] Enqueuing {run_id} (missing regions: {missing_regions}, max_hours={run_max_hours})")
-
-        for region_id in missing_regions:
-            n = enqueue_run_jobs(conn, region_id, model_id, run_id, run_max_hours)
-            logger.info(f"[{model_id}] Enqueued {n} jobs for {run_id} / {region_id}")
+        for region_id in REGIONS:
+            n = enqueue_run_jobs(conn, region_id, model_id, run_id, run_max)
             jobs_enqueued += n
-        break  # Only process the single latest run
+        targets.append(f"{model_id}/{run_id}")
 
     return jobs_enqueued, targets
-
 
 
 def build_cycle():
@@ -400,65 +290,37 @@ def build_cycle():
         conn.close()
 
 
-def cleanup_old_gribs(max_runs_per_model: int = None):
-    """Clean up old GRIB files to save disk space.
+def cleanup_herbie_cache(max_age_days: int = 2):
+    """Clean up old Herbie GRIB cache directories.
 
-    GRIBs are only needed during tile building. A run's GRIBs are preserved
-    while its tiles are still incomplete (workers may still be building them).
-    Once tiles are complete, GRIBs are eligible for deletion based on retention policy.
+    Herbie stores downloads at HERBIE_SAVE_DIR/<model>/YYYYMMDD/.
+    Delete date directories older than max_age_days.
     """
     import shutil
 
-    if max_runs_per_model is None:
-        max_runs_per_model = MAX_GRIB_RUNS_TO_KEEP
-
-    grib_dir = repomap.get("GRIB_CACHE_DIR", "cache/gribs")
-    if not os.path.isdir(grib_dir):
+    herbie_dir = repomap.get("HERBIE_SAVE_DIR", "cache/herbie")
+    if not os.path.isdir(herbie_dir):
         return
 
-    for model_id in os.listdir(grib_dir):
-        model_dir = os.path.join(grib_dir, model_id)
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=max_age_days)
+    cutoff_str = cutoff.strftime("%Y%m%d")
+
+    for model_name in os.listdir(herbie_dir):
+        model_dir = os.path.join(herbie_dir, model_name)
         if not os.path.isdir(model_dir):
             continue
 
-        runs = sorted(
-            [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
-            reverse=True
-        )
-
-        # Determine which runs to delete (oldest beyond retention limit)
-        candidates_for_deletion = runs[max_runs_per_model:]
-        for run_id in candidates_for_deletion:
-            model_cfg = next((m for m in MODELS_CONFIG if m["id"] == model_id), None)
-            default_max = model_cfg["max_hours"] if model_cfg else 24
-            run_max_hours = get_max_hours_for_run(model_id, run_id, default_max)
-            still_building = any(
-                not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours)
-                for region_id in REGIONS
-            )
-
-            # Allow incomplete tiles to block deletion only if the run is recent
-            # (< 24h old). Older runs with incomplete tiles are stale — delete anyway.
-            if still_building:
+        for date_dir in os.listdir(model_dir):
+            date_path = os.path.join(model_dir, date_dir)
+            if not os.path.isdir(date_path):
+                continue
+            # Herbie date dirs are YYYYMMDD
+            if len(date_dir) == 8 and date_dir.isdigit() and date_dir < cutoff_str:
+                logger.info(f"Herbie cache cleanup: removing {model_name}/{date_dir}")
                 try:
-                    parts = run_id.split("_")
-                    run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H")
-                    run_dt = run_dt.replace(tzinfo=datetime.timezone.utc)
-                    age_hours = (datetime.datetime.now(datetime.timezone.utc) - run_dt).total_seconds() / 3600
-                except (IndexError, ValueError):
-                    age_hours = 999
-                if age_hours < 12:
-                    logger.info(f"GRIB cleanup: skipping {model_id}/{run_id} (tiles still incomplete, {age_hours:.0f}h old)")
-                    continue
-                else:
-                    logger.info(f"GRIB cleanup: removing stale {model_id}/{run_id} ({age_hours:.0f}h old, tiles never completed)")
-
-            old_run_dir = os.path.join(model_dir, run_id)
-            logger.info(f"GRIB cleanup: removing {model_id}/{run_id}")
-            try:
-                shutil.rmtree(old_run_dir)
-            except Exception as e:
-                logger.error(f"Failed to remove {old_run_dir}: {e}")
+                    shutil.rmtree(date_path)
+                except Exception as e:
+                    logger.error(f"Failed to remove {date_path}: {e}")
 
 
 def cleanup_old_runs():
@@ -567,7 +429,7 @@ def main():
 
             # Cleanup old runs and GRIBs periodically
             cleanup_old_runs()
-            cleanup_old_gribs()
+            cleanup_herbie_cache()
 
             # Record success and sleep state
             now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -595,6 +457,6 @@ if __name__ == "__main__":
         logger.info("Running single enqueue cycle (--once mode)")
         build_cycle()
         cleanup_old_runs()
-        cleanup_old_gribs()
+        cleanup_herbie_cache()
     else:
         main()
