@@ -15,7 +15,7 @@ forecast_bp = Blueprint("forecast", __name__)
 
 # --- Snow derivation helpers ---
 
-def _temp_to_slr(t_f: np.ndarray) -> np.ndarray:
+def _temp_to_slr(t_f: np.ndarray) -> np.ndarray:  # USED
     """Conservative temperature-based snow-to-liquid ratio (SLR).
     Rough guidance from operational rules of thumb:
       - >=33 F: rain (0:1)
@@ -33,7 +33,7 @@ def _temp_to_slr(t_f: np.ndarray) -> np.ndarray:
     return slr
 
 
-def _forward_fill_nan(arr: np.ndarray) -> np.ndarray:
+def _forward_fill_nan(arr: np.ndarray) -> np.ndarray:  # USED
     """Forward-fill NaNs in a 1D numpy array.
     Leading NaNs are converted to 0.0.
     """
@@ -56,7 +56,7 @@ def _forward_fill_nan(arr: np.ndarray) -> np.ndarray:
     return out
 
 
-def _is_bucket_data(vals: np.ndarray) -> bool:
+def _is_bucket_data(vals: np.ndarray) -> bool:  # USED
     """Detect if accumulation data is per-step buckets vs cumulative/resetting.
 
     Per-step (NBM): values go up and down freely (e.g., 0.8, 1.6, 1.9, 1.8, 1.5).
@@ -85,7 +85,7 @@ def _is_bucket_data(vals: np.ndarray) -> bool:
     return bucket_like_count > len(decrease_indices) * 0.5
 
 
-def _accumulate_timeseries(values: np.ndarray) -> np.ndarray:
+def _accumulate_timeseries(values: np.ndarray) -> np.ndarray:  # USED
     """Convert potentially incremental/resetting cumulative series to strictly monotonic total accumulation."""
     vals = _forward_fill_nan(np.array(values, dtype=float))
 
@@ -100,7 +100,7 @@ def _accumulate_timeseries(values: np.ndarray) -> np.ndarray:
     return np.cumsum(total_inc)
 
 
-def _derive_asnow_timeseries_from_tiles(
+def _derive_asnow_timeseries_from_tiles(  # USED
     region_id: str,
     res: float,
     model_id: str,
@@ -207,7 +207,7 @@ def _derive_asnow_timeseries_from_tiles(
 
 # --- Region helpers ---
 
-def infer_region_for_latlon(lat: float, lon: float) -> Optional[str]:
+def infer_region_for_latlon(lat: float, lon: float) -> Optional[str]:  # USED
     regions = repomap.get("TILING_REGIONS", {})
     for region_id, r in regions.items():
         if (
@@ -218,7 +218,7 @@ def infer_region_for_latlon(lat: float, lon: float) -> Optional[str]:
     return None
 
 
-def parse_run_id_to_init_dt(run_id: str) -> Optional[datetime]:
+def parse_run_id_to_init_dt(run_id: str) -> Optional[datetime]:  # USED
     try:
         _, d, h = run_id.split("_")
         return datetime.strptime(f"{d}{h}", "%Y%m%d%H").replace(tzinfo=pytz.UTC)
@@ -229,7 +229,7 @@ def parse_run_id_to_init_dt(run_id: str) -> Optional[datetime]:
 # --- Route ---
 
 @forecast_bp.route("/api/timeseries/multirun")
-def api_timeseries_multirun():
+def api_timeseries_multirun():  # USED
     """Return timeseries for multiple runs of a model at a lat/lon point."""
     try:
         lat = float(request.args.get("lat"))

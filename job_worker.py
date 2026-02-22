@@ -17,14 +17,14 @@ from tiles import build_tiles_for_variable, upsert_tiles_npz
 from utils import format_forecast_hour
 
 
-def _parse_run_id(run_id: str) -> tuple[str, str]:
+def _parse_run_id(run_id: str) -> tuple[str, str]:  # USED
     parts = run_id.split("_")
     if len(parts) != 3:
         raise ValueError("run_id must be of the form run_YYYYMMDD_HH")
     return parts[1], parts[2]
 
 
-def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
+def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:  # USED
     args = json.loads(job["args_json"])
     region_id = args["region_id"]
     model_id = args["model_id"]
@@ -153,7 +153,7 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
     )
 
 
-def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False, model_id: str | None = None) -> None:
+def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False, model_id: str | None = None) -> None:  # USED
     """Poll the job queue and process jobs until empty (or forever if not once)."""
     if worker_id is None:
         suffix = f"-{model_id}" if model_id else ""

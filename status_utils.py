@@ -19,7 +19,7 @@ SCHEDULED_MODELS = [
 ]
 
 
-def _get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
+def _get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:  # USED
     """Get max forecast hours for a specific run, accounting for init-hour variations."""
     model_config = repomap["MODELS"].get(model_id, {})
     max_hours_by_init = model_config.get("max_hours_by_init")
@@ -34,7 +34,7 @@ def _get_max_hours_for_run(model_id: str, run_id: str, default_max: int) -> int:
         return default_max
 
 
-def _get_expected_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
+def _get_expected_runs(model_id: str, lookback_hours: int = 72) -> list[str]:  # USED
     """Get list of runs we expect to have based on scheduler policy.
 
     Policy:
@@ -68,7 +68,7 @@ def _get_expected_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
     return expected_runs
 
 
-def get_run_grid():
+def get_run_grid():  # USED
     """Get per-model/run/variable job status summary from the jobs table.
 
     Returns a dict keyed by model_id with per-run, per-variable counts.
@@ -185,7 +185,7 @@ def get_run_grid():
     return grid
 
 
-def _get_dir_size(path):
+def _get_dir_size(path):  # USED
     total = 0
     with os.scandir(path) as it:
         for entry in it:
@@ -195,7 +195,7 @@ def _get_dir_size(path):
                 total += _get_dir_size(entry.path)
     return total
 
-def get_disk_usage():
+def get_disk_usage():  # USED
     """
     Calculates disk usage for cache directories.
     Returns:
@@ -253,7 +253,7 @@ def get_disk_usage():
     usage["total"] = usage["gribs"]["total"] + usage["tiles"]["total"]
     return usage
 
-def read_scheduler_logs(lines=100, log_path='logs/scheduler_detailed.log'):
+def read_scheduler_logs(lines=100, log_path='logs/scheduler_detailed.log'):  # USED
     """Reads the last N lines from the scheduler log."""
     if not os.path.exists(log_path):
         return []
@@ -264,7 +264,7 @@ def read_scheduler_logs(lines=100, log_path='logs/scheduler_detailed.log'):
     except Exception:
         return []
 
-def read_scheduler_status():
+def read_scheduler_status():  # USED
     """Read scheduler status from JSON."""
     if not os.path.exists(STATUS_FILE):
         return {}
@@ -275,7 +275,7 @@ def read_scheduler_status():
         return {}
 
 
-def get_job_queue_status():
+def get_job_queue_status():  # USED
     """Get job queue status counts (pending, processing, completed, failed).
 
     Returns:

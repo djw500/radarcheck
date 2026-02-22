@@ -10,7 +10,7 @@ from jobs import init_db as init_jobs_db
 DEFAULT_DB_PATH = repomap.get("DB_PATH", "cache/jobs.db")
 
 
-def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:
+def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:  # USED
     path = db_path or DEFAULT_DB_PATH
     conn = init_jobs_db(path)
     conn.execute("PRAGMA synchronous=NORMAL;")
@@ -93,7 +93,7 @@ def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:
     return conn
 
 
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:  # USED
     try:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
     except sqlite3.OperationalError as exc:
@@ -101,7 +101,7 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: s
             raise
 
 
-def record_tile_run(
+def record_tile_run(  # USED
     conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
@@ -120,7 +120,7 @@ def record_tile_run(
     )
 
 
-def record_tile_variable(
+def record_tile_variable(  # USED
     conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
@@ -164,7 +164,7 @@ def record_tile_variable(
     )
 
 
-def record_tile_hour(
+def record_tile_hour(  # USED
     conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
@@ -201,7 +201,7 @@ def record_tile_hour(
     )
 
 
-def delete_tile_run(
+def delete_tile_run(  # USED
     conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
@@ -232,7 +232,7 @@ def delete_tile_run(
     )
 
 
-def delete_region_tiles(
+def delete_region_tiles(  # USED
     conn: sqlite3.Connection,
     region_id: str,
 ) -> None:
@@ -260,7 +260,7 @@ def delete_region_tiles(
     )
 
 
-def list_tile_runs_db(
+def list_tile_runs_db(  # USED
     conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,
@@ -278,7 +278,7 @@ def list_tile_runs_db(
     return [row["run_id"] for row in rows]
 
 
-def list_tile_models_db(
+def list_tile_models_db(  # USED
     conn: sqlite3.Connection,
     region_id: str,
     resolution_deg: float,

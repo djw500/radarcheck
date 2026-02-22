@@ -13,7 +13,7 @@ from tile_db import init_db, list_tile_models_db, list_tile_runs_db
 from utils import convert_units, time_function
 
 
-def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any]) -> xr.DataArray:
+def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any]) -> xr.DataArray:  # USED
     """Minimal variable selection without importing plotting heavy deps."""
     vector_components = variable_config.get("vector_components")
     if vector_components:
@@ -53,13 +53,13 @@ def _select_variable_from_dataset(ds: xr.Dataset, variable_config: Dict[str, Any
     raise ValueError("No variables found in GRIB dataset.")
 
 
-def _grid_shape(lat_min: float, lat_max: float, lon_min: float, lon_max: float, res_deg: float) -> Tuple[int, int]:
+def _grid_shape(lat_min: float, lat_max: float, lon_min: float, lon_max: float, res_deg: float) -> Tuple[int, int]:  # USED
     ny = int(np.ceil((lat_max - lat_min) / res_deg))
     nx = int(np.ceil((lon_max - lon_min) / res_deg))
     return ny, nx
 
 
-def _prep_cell_index(
+def _prep_cell_index(  # USED
     lat2d: np.ndarray,
     lon2d: np.ndarray,
     lat_min: float,
@@ -121,7 +121,7 @@ def _prep_cell_index(
     return order, starts, unique_ids, valid, ny * nx, ny, nx
 
 
-def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarray, starts: np.ndarray, unique_ids: np.ndarray, n_cells: int, ny: int, nx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarray, starts: np.ndarray, unique_ids: np.ndarray, n_cells: int, ny: int, nx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:  # USED
     if starts.size == 0:
         nan_grid = np.full((ny, nx), np.nan, dtype=np.float32)
         return nan_grid, nan_grid.copy(), nan_grid.copy()
@@ -155,7 +155,7 @@ def _reduce_stats(values2d: np.ndarray, valid_mask: np.ndarray, order: np.ndarra
     return min_grid.reshape(ny, nx), max_grid.reshape(ny, nx), mean_grid.reshape(ny, nx)
 
 
-def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.Dataset:
+def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.Dataset:  # USED
     """
     Open a GRIB file with xarray/cfgrib, handling common index ambiguity errors.
     """
@@ -179,7 +179,7 @@ def open_dataset_robust(path: str, preferred_filter: dict | None = None) -> xr.D
 
 
 @time_function
-def build_tiles_for_variable(
+def build_tiles_for_variable(  # USED
     grib_paths_by_hour: Dict[int, str],
     variable_config: Dict[str, Any],
     lat_min: float,
@@ -265,7 +265,7 @@ def build_tiles_for_variable(
     return mins, maxs, means, hours_sorted, index_meta
 
 
-def _save_tiles_npz_internal(
+def _save_tiles_npz_internal(  # USED
     npz_path: str,
     meta_path: str,
     region_id: str,
@@ -293,7 +293,7 @@ def _save_tiles_npz_internal(
         json.dump(meta, f, indent=2)
 
 
-def upsert_tiles_npz(
+def upsert_tiles_npz(  # USED
     base_dir: str,
     region_id: str,
     resolution_deg: float,
@@ -382,7 +382,7 @@ def upsert_tiles_npz(
 
     return npz_path, merged_hours
 
-def load_timeseries_for_point(
+def load_timeseries_for_point(  # USED
     base_dir: str,
     region_id: str,
     resolution_deg: float,
@@ -456,7 +456,7 @@ def load_timeseries_for_point(
     return hours, values
 
 
-def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:
+def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:  # USED
     conn = init_db(repomap.get("DB_PATH"))
     try:
         return list_tile_runs_db(conn, region_id, resolution_deg, model_id)
@@ -464,7 +464,7 @@ def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_i
         conn.close()
 
 
-def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:
+def list_tile_models(base_dir: str, region_id: str, resolution_deg: float) -> Dict[str, List[str]]:  # USED
     """Return models present under a region/resolution with their available runs."""
     conn = init_db(repomap.get("DB_PATH"))
     try:

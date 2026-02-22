@@ -14,7 +14,7 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
-def time_function(f):
+def time_function(f):  # USED
     @wraps(f)
     def wrapper(*args, **kwargs):
         start = time.perf_counter()
@@ -24,15 +24,15 @@ def time_function(f):
         return result
     return wrapper
 
-class GribDownloadError(Exception):
+class GribDownloadError(Exception):  # USED
     """Failed to download GRIB file from NOMADS."""
 
 
-class GribValidationError(Exception):
+class GribValidationError(Exception):  # USED
     """GRIB file is corrupted or invalid."""
 
 
-def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> None:
+def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> None:  # USED
     """Download a file if it doesn't exist in cache.
 
     Args:
@@ -91,7 +91,7 @@ def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> N
         pass
 
 
-def convert_units(data: Any, conversion: Optional[str]) -> Any:
+def convert_units(data: Any, conversion: Optional[str]) -> Any:  # USED
     """Convert data arrays to display units."""
     if conversion is None:
         return data
@@ -121,7 +121,7 @@ def compute_wind_speed(u_component: Any, v_component: Any) -> Any:
     return np.sqrt(u_component ** 2 + v_component ** 2)
 
 
-def format_forecast_hour(hour: int, model_id: Optional[str] = None) -> str:
+def format_forecast_hour(hour: int, model_id: Optional[str] = None) -> str:  # USED
     """Format forecast hour string based on model requirements."""
     digits = 2
     if model_id:

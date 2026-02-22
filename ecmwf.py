@@ -31,20 +31,20 @@ VAR_MAP = {
 }
 
 
-def get_herbie_search_string(variable_id: str) -> str:
+def get_herbie_search_string(variable_id: str) -> str:  # USED
     if variable_id not in VAR_MAP:
         raise RuntimeError(f"Variable '{variable_id}' not mapped for ECMWF Herbie fetch.")
     return VAR_MAP[variable_id]
 
 
-def _resolve_herbie_model(model_id: str) -> dict[str, str]:
+def _resolve_herbie_model(model_id: str) -> dict[str, str]:  # USED
     # Map internal model ID to Herbie model/product
     if model_id == "ecmwf_eps":
         return {"model": "ifs", "product": "enfo"}  # ensemble forecast
     return {"model": "ifs", "product": "oper"}  # deterministic (HRES)
 
 
-def _url_exists(url: str, timeout: int) -> bool:
+def _url_exists(url: str, timeout: int) -> bool:  # USED
     try:
         response = requests.head(url, timeout=timeout)
         if response.status_code == 200:
@@ -57,7 +57,7 @@ def _url_exists(url: str, timeout: int) -> bool:
         return False
 
 
-def herbie_run_available(
+def herbie_run_available(  # USED
     model_id: str,
     variable_id: Optional[str],
     date_str: str,
@@ -108,7 +108,7 @@ def herbie_run_available(
     return True
 
 
-def fetch_grib_herbie(
+def fetch_grib_herbie(  # USED
     model_id: str,
     variable_id: str,
     date_str: str,

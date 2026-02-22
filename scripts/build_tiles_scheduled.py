@@ -90,7 +90,7 @@ MAX_HOURLY_RUNS = int(os.environ.get("TILE_BUILD_HOURLY_RUNS", "12"))
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
-def write_scheduler_status(state="idle", last_run=None, next_run=None, targets=None, error=None):
+def write_scheduler_status(state="idle", last_run=None, next_run=None, targets=None, error=None):  # USED
     """Write current scheduler status to JSON."""
     status = {
         "state": state,
@@ -120,7 +120,7 @@ MODELS_CONFIG = [
 REGIONS = list(repomap.get("TILING_REGIONS", {}).keys())
 
 
-def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
+def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:  # USED
     """Check if a model run is available on NOMADS."""
     logger.info(f"Checking availability for {model_id} {date_str} {init_hour}")
     model_config = repomap["MODELS"].get(model_id)
@@ -153,7 +153,7 @@ def check_run_available(model_id: str, date_str: str, init_hour: str) -> bool:
         return False
 
 
-def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
+def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:  # USED
     """Find all runs in the lookback period that WE WANT to have according to policy.
 
     Short-circuits NOMADS HEAD requests when tiles already exist for all regions.
@@ -204,7 +204,7 @@ def get_required_runs(model_id: str, lookback_hours: int = 72) -> list[str]:
     return required_runs
 
 
-def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: int = 24) -> bool:
+def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: int = 24) -> bool:  # USED
     """Check if tiles already exist and match the exact expected forecast steps.
 
     Deterministic policy: require the hours array in a proxy variable (t2m)
@@ -251,7 +251,7 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
         return False
 
 
-def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
+def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:  # USED
     """Check if a run is old enough to likely have data available on NOMADS.
     NOMADS usually takes 45-60 minutes to start publishing GRIBs after the init hour.
     """
@@ -265,7 +265,7 @@ def run_is_ready(run_id: str, min_age_minutes: int = 45) -> bool:
         return True
 
 
-def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours: int) -> int:
+def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours: int) -> int:  # USED
     """Enqueue build_tile_hour jobs for every variable × forecast_hour.
 
     Idempotent: duplicate jobs are ignored via UNIQUE(type, args_hash) in jobs table.
@@ -305,7 +305,7 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
     return enqueued
 
 
-def process_model(model_cfg: dict, conn) -> tuple[int, list]:
+def process_model(model_cfg: dict, conn) -> tuple[int, list]:  # USED
     """Process a single model - find the latest available run and enqueue it.
 
     Only enqueues the single most recent available run per model.
@@ -358,7 +358,7 @@ def process_model(model_cfg: dict, conn) -> tuple[int, list]:
 
 
 
-def build_cycle():
+def build_cycle():  # USED
     """Run one build cycle: enqueue jobs for all models, then drain the queue."""
     cycle_start = time.monotonic()
     now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -401,7 +401,7 @@ def build_cycle():
         conn.close()
 
 
-def cleanup_old_gribs(max_runs_per_model: int = None):
+def cleanup_old_gribs(max_runs_per_model: int = None):  # USED
     """Clean up old GRIB files to save disk space.
 
     GRIBs are only needed during tile building. A run's GRIBs are preserved
@@ -462,7 +462,7 @@ def cleanup_old_gribs(max_runs_per_model: int = None):
                 logger.error(f"Failed to remove {old_run_dir}: {e}")
 
 
-def cleanup_old_runs():
+def cleanup_old_runs():  # USED
     """Clean up old tile runs using tiered retention:
     - Keep up to MAX_SYNOPTIC_RUNS synoptic runs (00, 06, 12, 18z)
     - Keep up to MAX_HOURLY_RUNS recent hourly runs (for HRRR etc)
@@ -529,7 +529,7 @@ def cleanup_old_runs():
         conn.close()
 
 
-def main():
+def main():  # USED
     """Main entry point for scheduled tile building."""
     logger.info("=" * 60)
     logger.info("Scheduled Tile Builder Starting")

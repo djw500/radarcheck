@@ -43,7 +43,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("cfgrib").setLevel(logging.WARNING)
 
 
-def get_valid_forecast_hours(model_id: str, max_hours: int) -> list[int]:
+def get_valid_forecast_hours(model_id: str, max_hours: int) -> list[int]:  # USED
     """Get list of valid forecast hours for a model, respecting its schedule.
 
     Some models (like NBM) have non-hourly data after a certain point:
@@ -71,7 +71,7 @@ def get_valid_forecast_hours(model_id: str, max_hours: int) -> list[int]:
 
 from functools import lru_cache
 
-def _nomads_head(url: str) -> bool:
+def _nomads_head(url: str) -> bool:  # USED
     try:
         response = requests.head(url, timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"])
         return response.status_code == 200
@@ -80,7 +80,7 @@ def _nomads_head(url: str) -> bool:
 
 
 @lru_cache(maxsize=128)
-def detect_hourly_support(model_id: str, date_str: str, init_hour: str) -> bool:
+def detect_hourly_support(model_id: str, date_str: str, init_hour: str) -> bool:  # USED
     """Detect if this run supports hourly files for the first hours.
 
     - For NOMADS models with a configured hourly file pattern (e.g., GFS pgrb2b), probe hour 001.
@@ -109,7 +109,7 @@ def detect_hourly_support(model_id: str, date_str: str, init_hour: str) -> bool:
     return _nomads_head(url)
 
 
-def get_run_forecast_hours(model_id: str, date_str: str, init_hour: str, max_hours: int) -> list[int]:
+def get_run_forecast_hours(model_id: str, date_str: str, init_hour: str, max_hours: int) -> list[int]:  # USED
     """Return expected hours for this run, applying hourly override if supported.
 
     Base schedule is get_valid_forecast_hours; if hourly_override_first_hours is set and
@@ -128,7 +128,7 @@ def get_run_forecast_hours(model_id: str, date_str: str, init_hour: str, max_hou
     return hourly + rest
 
 
-def build_variable_query(variable_config: dict[str, Any]) -> str:
+def build_variable_query(variable_config: dict[str, Any]) -> str:  # USED
     params = [f"{param}=on" for param in variable_config.get("nomads_params", [])]
     levels = variable_config.get("level_params", [])
     query = "&".join(params + levels)
@@ -137,7 +137,7 @@ def build_variable_query(variable_config: dict[str, Any]) -> str:
     return ""
 
 
-def build_model_url(
+def build_model_url(  # USED
     model_config: dict[str, Any],
     date_str: str,
     init_hour: str,
@@ -160,7 +160,7 @@ def build_model_url(
     )
 
 
-def fetch_grib(
+def fetch_grib(  # USED
     model_id: str,
     variable_id: str,
     date_str: str,
