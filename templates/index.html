@@ -711,7 +711,12 @@ function renderTable(data, timeline) {
             const color = modelColors[run.modelId] || '#94a3b8';
             const initDate = new Date(run.init_time);
             const dateStr = initDate.toLocaleString('en-US', { month: 'short', day: 'numeric' });
-            th.innerHTML = `<span style="color: ${color}">${run.model_id.toUpperCase().replace('_', ' ')}</span><br><span class="text-slate-500 font-normal">${dateStr} ${runHour}${isSynoptic ? '*' : ''}</span>`;
+            const localTime = initDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            const hrsOld = Math.round((Date.now() - initDate.getTime()) / 3600000);
+            const ageStr = hrsOld < 1 ? '<1h ago' : `${hrsOld}h ago`;
+            th.innerHTML = `<span style="color: ${color}">${run.model_id.toUpperCase().replace('_', ' ')}</span><br>` +
+                           `<span class="text-slate-500 font-normal">${dateStr} ${runHour}${isSynoptic ? '*' : ''}</span><br>` +
+                           `<span class="text-slate-400 font-normal text-[10px]">Valid ${localTime} · ${ageStr}</span>`;
             tableHeadRow.appendChild(th);
         });
 

@@ -84,7 +84,7 @@ def enqueue(    conn: sqlite3.Connection,
     if cursor.rowcount > 0:
         return cursor.lastrowid
     # Job already exists — reset if it previously failed/was cancelled so it can
-    # be retried. Leaves pending/processing jobs untouched.
+    # be retried. Leaves pending/processing/completed jobs untouched.
     cursor = conn.execute(
         """
         UPDATE jobs
@@ -95,7 +95,7 @@ def enqueue(    conn: sqlite3.Connection,
             worker_id     = NULL,
             started_at    = NULL,
             completed_at  = NULL
-        WHERE type = ? AND args_hash = ? AND status = 'failed';
+        WHERE type = ? AND args_hash = ? AND status IN ('failed', 'cancelled');
         """,
         (job_type, args_hash),
     )
@@ -248,6 +248,33 @@ def prune_completed(conn: sqlite3.Connection, older_than_hours: int = 72) -> int
     )
     conn.commit()
     return cursor.rowcount
+
+
+def prune_failed(conn: sqlite3.Connection, older_than_hours: int = 24) -> int:
+    """Delete old failed/cancelled jobs to keep the DB clean."""
+    cursor = conn.execute(
+        """
+        DELETE FROM jobs
+        WHERE status IN ('failed', 'cancelled')
+        AND completed_at < strftime('%Y-%m-%dT%H:%M:%SZ','now', ?);
+        """,
+        (f"-{older_than_hours} hours",),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
+def count_pending_by_model(conn: sqlite3.Connection) -> dict:
+    """Count pending jobs per model_id."""
+    rows = conn.execute(
+        """
+        SELECT json_extract(args_json, '$.model_id') as model_id, COUNT(*) as cnt
+        FROM jobs
+        WHERE status = 'pending'
+        GROUP BY 1;
+        """
+    ).fetchall()
+    return {row["model_id"]: row["cnt"] for row in rows}
 
 
 def count_by_status(conn: sqlite3.Connection) -> Dict[str, int]:

@@ -10,6 +10,7 @@ from config import repomap
 from status_utils import (
     get_disk_usage,
     get_job_queue_status,
+    get_rebuild_eta,
     get_run_grid,
     read_scheduler_logs,
     read_scheduler_status,
@@ -71,6 +72,7 @@ def api_status_summary():
         "memory": _get_memory_info(),
         "scheduler_status": scheduler_status,
         "job_queue": job_queue,
+        "rebuild_eta": get_rebuild_eta(),
         "timestamp": datetime.now(pytz.UTC).isoformat()
     })
 

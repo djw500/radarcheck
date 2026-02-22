@@ -167,6 +167,10 @@ def get_run_grid():
                 for k in totals:
                     totals[k] += summary.get(k, 0)
 
+            # Skip runs with zero useful work (only failed/cancelled jobs)
+            if totals["completed"] == 0 and totals["pending"] == 0 and totals["processing"] == 0:
+                continue
+
             run_list.append({
                 "run_id": run_id,
                 "display": display,
@@ -291,3 +295,43 @@ def get_job_queue_status():
             conn.close()
     except Exception:
         return {}
+
+
+def get_rebuild_eta():
+    """Estimate time to drain the job queue.
+
+    Returns:
+        dict with pending_total, avg_job_seconds, active_workers, eta_seconds
+    """
+    try:
+        conn = init_jobs_db(repomap.get("DB_PATH", "cache/jobs.db"))
+        try:
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE status IN ('pending','processing')"
+            ).fetchone()[0]
+
+            row = conn.execute(
+                """SELECT AVG((julianday(completed_at) - julianday(started_at)) * 86400)
+                   FROM jobs WHERE status='completed'
+                   AND started_at IS NOT NULL AND completed_at IS NOT NULL"""
+            ).fetchone()
+            avg_duration = row[0] if row[0] else None
+
+            workers = conn.execute(
+                "SELECT COUNT(DISTINCT worker_id) FROM jobs WHERE status='processing'"
+            ).fetchone()[0] or 1
+
+            eta_seconds = None
+            if avg_duration and pending > 0:
+                eta_seconds = int((pending * avg_duration) / max(workers, 1))
+
+            return {
+                "pending_total": pending,
+                "avg_job_seconds": round(avg_duration, 1) if avg_duration else None,
+                "active_workers": workers,
+                "eta_seconds": eta_seconds,
+            }
+        finally:
+            conn.close()
+    except Exception:
+        return None

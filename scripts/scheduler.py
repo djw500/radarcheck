@@ -35,6 +35,8 @@ from jobs import (
     enqueue,
     recover_stale,
     prune_completed,
+    prune_failed,
+    count_pending_by_model,
 )
 from status_utils import _get_max_hours_for_run as get_max_hours_for_run
 
@@ -80,6 +82,10 @@ def _get_retention(model_id):
     syn = int(os.environ.get(f"TILE_BUILD_SYNOPTIC_RUNS_{model_id.upper()}", DEFAULT_SYNOPTIC_RUNS))
     hr = int(os.environ.get(f"TILE_BUILD_HOURLY_RUNS_{model_id.upper()}", DEFAULT_HOURLY_RUNS))
     return syn, hr
+
+# Safety cap: refuse to enqueue more if a model already has this many pending jobs.
+# Prevents runaway enqueue from misconfigured hour limits.
+MAX_PENDING_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PENDING_PER_MODEL", "500"))
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -219,8 +225,11 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
     return enqueued
 
 
-def process_model(model_cfg: dict, conn) -> tuple[int, list]:
-    """Process a single model — find all incomplete runs in last 48h and enqueue them.
+def process_model(model_cfg: dict, conn, pending_counts: dict) -> tuple[int, list]:
+    """Process a single model — find incomplete runs and enqueue them.
+
+    Only enqueues up to the retention limit (synoptic + hourly) so we don't
+    build tiles that cleanup will immediately delete.
 
     Returns (jobs_enqueued, targets).
     """
@@ -231,16 +240,40 @@ def process_model(model_cfg: dict, conn) -> tuple[int, list]:
     jobs_enqueued = 0
     targets = []
 
+    # Safety cap: skip if already too many pending jobs for this model
+    current_pending = pending_counts.get(model_id, 0)
+    if current_pending >= MAX_PENDING_PER_MODEL:
+        logger.warning(f"SKIP {model_id}: {current_pending} pending jobs already (cap={MAX_PENDING_PER_MODEL})")
+        return 0, []
+
+    # Retention limits: only enqueue this many runs (newest first)
+    max_syn, max_hr = _get_retention(model_id)
+    synoptic_found = 0
+    hourly_found = 0
+
     for hours_ago in range(48):
         t = now - datetime.timedelta(hours=hours_ago)
         ih = int(t.strftime("%H"))
         if freq > 1 and ih % freq != 0:
             continue
 
+        # Check retention budget
+        is_synoptic = ih % 6 == 0
+        if is_synoptic and synoptic_found >= max_syn:
+            continue
+        if not is_synoptic and hourly_found >= max_hr:
+            continue
+
         date_str = t.strftime("%Y%m%d")
         init_hour = t.strftime("%H")
         run_id = f"run_{date_str}_{init_hour}"
         run_max = get_max_hours_for_run(model_id, run_id, max_hours)
+
+        # Count toward budget whether tiles exist or not
+        if is_synoptic:
+            synoptic_found += 1
+        else:
+            hourly_found += 1
 
         if all(tiles_exist(r, model_id, run_id, run_max) for r in REGIONS):
             continue
@@ -251,6 +284,10 @@ def process_model(model_cfg: dict, conn) -> tuple[int, list]:
             n = enqueue_run_jobs(conn, region_id, model_id, run_id, run_max)
             jobs_enqueued += n
         targets.append(f"{model_id}/{run_id}")
+
+        # Early exit if both budgets exhausted
+        if synoptic_found >= max_syn and hourly_found >= max_hr:
+            break
 
     return jobs_enqueued, targets
 
@@ -273,11 +310,14 @@ def build_cycle():
         total_enqueued = 0
         all_targets = []
 
+        # Snapshot pending counts before enqueue phase (for safety cap)
+        pending_counts = count_pending_by_model(conn)
+
         # Enqueue phase: sequential per model (fast, no I/O besides HEAD requests)
         logger.info(f"--- Enqueue phase ({len(MODELS_CONFIG)} models) ---")
         for model_cfg in MODELS_CONFIG:
             try:
-                enqueued, targets = process_model(model_cfg, conn)
+                enqueued, targets = process_model(model_cfg, conn, pending_counts)
                 total_enqueued += enqueued
                 all_targets.extend(targets)
             except Exception as e:
@@ -285,10 +325,13 @@ def build_cycle():
 
         write_scheduler_status(state="running", targets=all_targets)
 
-        # Prune old completed jobs
+        # Prune old completed and failed jobs
         pruned = prune_completed(conn)
         if pruned:
             logger.info(f"Pruned {pruned} old completed jobs from DB")
+        pruned_failed = prune_failed(conn)
+        if pruned_failed:
+            logger.info(f"Pruned {pruned_failed} old failed jobs from DB")
 
         elapsed = time.monotonic() - cycle_start
         logger.info(f"Enqueue cycle complete in {elapsed:.0f}s: {total_enqueued} new jobs queued for workers")
@@ -425,6 +468,45 @@ def main():
                         logger.error(f"Failed to clear cache: {e}")
         finally:
             conn.close()
+
+    # Clean slate on restart: nuke everything (jobs, tiles, GRIBs).
+    # The scheduler will rebuild from scratch each deploy.
+    import shutil
+
+    # 1. Nuke job queue
+    conn = init_jobs_db(repomap["DB_PATH"])
+    try:
+        nuked = conn.execute("DELETE FROM jobs").rowcount
+        conn.commit()
+        if nuked:
+            logger.info(f"Startup: nuked {nuked} jobs")
+    finally:
+        conn.close()
+
+    # 2. Nuke tiles
+    tiles_dir = repomap["TILES_DIR"]
+    if os.path.isdir(tiles_dir):
+        shutil.rmtree(tiles_dir)
+        logger.info(f"Startup: nuked tiles dir {tiles_dir}")
+    os.makedirs(tiles_dir, exist_ok=True)
+
+    # 3. Nuke tile metadata DB
+    tile_conn = init_db(repomap.get("DB_PATH"))
+    try:
+        for region_id in REGIONS:
+            delete_region_tiles(tile_conn, region_id)
+        logger.info("Startup: nuked tile metadata")
+    finally:
+        tile_conn.close()
+
+    # 4. Nuke Herbie GRIB cache
+    herbie_dir = repomap.get("HERBIE_SAVE_DIR", "cache/herbie")
+    if os.path.isdir(herbie_dir):
+        shutil.rmtree(herbie_dir)
+        logger.info(f"Startup: nuked GRIB cache {herbie_dir}")
+    os.makedirs(herbie_dir, exist_ok=True)
+
+    logger.info("Startup: clean slate complete")
 
     logger.info(f"Build interval: {BUILD_INTERVAL_MINUTES} minutes")
     logger.info(f"Models: {[m['id'] for m in MODELS_CONFIG]}")

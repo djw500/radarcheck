@@ -107,6 +107,7 @@ async function refreshAll() {
         renderSchedulerStats(summaryData.scheduler_status);
         renderDiskUsage(summaryData.disk_usage);
         renderMemory(summaryData.memory);
+        renderETA(summaryData.rebuild_eta);
         renderRunGrid(gridData);
     } catch (e) {
         console.error('Failed to load status:', e);
@@ -168,6 +169,29 @@ function renderDiskUsage(u) {
     if (e('diskTotal')) e('diskTotal').textContent = formatBytes(u.total);
     if (e('diskGribs')) e('diskGribs').textContent = formatBytes(u.gribs?.total || 0);
     if (e('diskTiles')) e('diskTiles').textContent = formatBytes(u.tiles?.total || 0);
+}
+
+function renderETA(eta) {
+    const el = document.getElementById('qETA');
+    const detail = document.getElementById('qETADetail');
+    if (!el) return;
+
+    if (!eta || !eta.eta_seconds || eta.pending_total === 0) {
+        el.textContent = 'Idle';
+        if (detail) detail.textContent = '';
+        return;
+    }
+
+    const s = eta.eta_seconds;
+    let text;
+    if (s < 60) text = '<1 min';
+    else if (s < 3600) text = `~${Math.round(s / 60)} min`;
+    else text = `~${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
+
+    el.textContent = text;
+    if (detail) {
+        detail.textContent = `${eta.pending_total} jobs · ${eta.active_workers} workers · ${eta.avg_job_seconds?.toFixed(0) || '?'}s avg`;
+    }
 }
 
 function renderMemory(m) {
