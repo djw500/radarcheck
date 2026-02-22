@@ -55,6 +55,13 @@ if [[ $# -eq 0 ]]; then
     set -- claude --dangerously-skip-permissions
 fi
 
+# Mount fly.io config if available
+FLY_MOUNT=()
+if [[ -f "${HOME}/.fly/config.yml" ]]; then
+    mkdir -p "${HOME}/.fly"
+    FLY_MOUNT=(-v "${HOME}/.fly:/home/dev/.fly:ro")
+fi
+
 exec docker run -it --rm \
     -p 5001:5001 \
     -e PORT=5001 \
@@ -64,5 +71,6 @@ exec docker run -it --rm \
     -v "/app/.venv" \
     -v "/app/venv" \
     -v "radarcheck-logs:/app/logs" \
+    "${FLY_MOUNT[@]}" \
     "$IMAGE" \
     "$@"

@@ -59,6 +59,10 @@
             </div>
             
             <div class="flex items-center gap-2">
+                <!-- Forecast Writeup -->
+                <a id="writeupLink" href="/writeup" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="Forecast Writeup">
+                    <span class="material-icons-outlined">article</span>
+                </a>
                 <!-- System Status -->
                 <a id="statusLink" href="/status" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="System Status">
                     <span class="material-icons-outlined">dns</span>
@@ -215,7 +219,10 @@ const STORAGE_KEY_CACHE_PREFIX = 'radarcheck_cache_v1:';
 const LOCAL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 // Read API key from URL so authenticated fetches work in production
 const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
-if (API_KEY) document.getElementById('statusLink').href = '/status?api_key=' + encodeURIComponent(API_KEY);
+if (API_KEY) {
+    document.getElementById('statusLink').href = '/status?api_key=' + encodeURIComponent(API_KEY);
+    document.getElementById('writeupLink').href = '/writeup?api_key=' + encodeURIComponent(API_KEY);
+}
 let chartInstance = null;
 let currentLat = null;
 let currentLon = null;
@@ -668,18 +675,22 @@ function renderTable(data, timeline) {
             runsByModel[run.model_id].push(run);
         });
 
-        const SYNOPTIC_HOURS = ['00', '12'];
+        const SYNOPTIC_HOURS = ['00', '06', '12', '18'];
         const selectedRuns = [];
 
         Object.entries(runsByModel).forEach(([modelId, runs]) => {
             runs.sort((a, b) => new Date(b.init_time) - new Date(a.init_time));
             const getRunHour = (run) => run.run_id.slice(-2);
-            const synopticRuns = runs.filter(r => SYNOPTIC_HOURS.includes(getRunHour(r)));
-            const nonSynopticRuns = runs.filter(r => !SYNOPTIC_HOURS.includes(getRunHour(r)));
+            // Always include the latest synoptic (extended) run
+            const latestSynoptic = runs.find(r => SYNOPTIC_HOURS.includes(getRunHour(r)));
             let selected = [];
-            if (synopticRuns.length > 0) {
-                selected = nonSynopticRuns.slice(0, 2);
-                selected.push(synopticRuns[0]);
+            if (latestSynoptic) {
+                selected.push(latestSynoptic);
+                // Fill remaining slots (up to 3) with the most recent other runs
+                for (const r of runs) {
+                    if (selected.length >= 3) break;
+                    if (r.run_id !== latestSynoptic.run_id) selected.push(r);
+                }
             } else {
                 selected = runs.slice(0, 3);
             }

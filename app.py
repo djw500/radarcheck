@@ -93,9 +93,11 @@ def track_metrics(response):
 
 from routes.forecast import forecast_bp
 from routes.status import status_bp
+from routes.writeup import writeup_bp
 
 app.register_blueprint(forecast_bp)
 app.register_blueprint(status_bp)
+app.register_blueprint(writeup_bp)
 
 
 # Apply auth globally (skip /health and /metrics which are unauthenticated)

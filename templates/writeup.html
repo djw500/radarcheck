@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Forecast Writeup | RadarCheck</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#0ea5e9",
+                        "background-light": "#f8fafc",
+                        "background-dark": "#0B1120",
+                        "card-dark": "#1e293b",
+                        "card-light": "#ffffff",
+                    },
+                    fontFamily: {
+                        display: ["Inter", "sans-serif"],
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .prose-writeup h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .prose-writeup h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; margin-top: 1.5rem; color: #e2e8f0; }
+        .prose-writeup h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem; margin-top: 0.75rem; }
+        .prose-writeup p { margin-bottom: 0.75rem; line-height: 1.7; }
+        .prose-writeup strong { font-weight: 600; color: #f1f5f9; }
+        .prose-writeup ul, .prose-writeup ol { margin-left: 1.5rem; margin-bottom: 0.75rem; list-style: disc; }
+        .prose-writeup ol { list-style: decimal; }
+        .prose-writeup li { margin-bottom: 0.25rem; line-height: 1.6; }
+        .prose-writeup blockquote { border-left: 3px solid #0ea5e9; padding-left: 1rem; margin: 0.75rem 0; color: #94a3b8; }
+        .prose-writeup table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.85rem; }
+        .prose-writeup th, .prose-writeup td { border: 1px solid #334155; padding: 0.375rem 0.75rem; text-align: left; }
+        .prose-writeup th { background: rgba(30, 41, 59, 0.8); font-weight: 600; color: #e2e8f0; }
+        .prose-writeup td { color: #cbd5e1; }
+        .prose-writeup code { background: #1e293b; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.875em; }
+        .prose-writeup hr { border-color: #334155; margin: 1.5rem 0; }
+        .prose-writeup del { text-decoration: none; } /* disable strikethrough rendering */
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-200 min-h-screen flex flex-col font-display antialiased selection:bg-primary selection:text-white">
+
+<!-- Header -->
+<nav class="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+            <div class="flex items-center gap-2">
+                <span class="material-icons-outlined text-primary text-2xl">article</span>
+                <span class="font-bold text-lg tracking-tight">Forecast Writeup</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="refreshCountdown" class="text-xs text-slate-400 font-mono"></span>
+                <button id="listenBtn" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors flex items-center gap-1">
+                    <span class="material-icons-outlined text-sm">volume_up</span> Listen
+                </button>
+                <button id="copyBtn" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1">
+                    <span class="material-icons-outlined text-sm">content_copy</span> Copy
+                </button>
+                <a id="forecastLink" href="/" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="Back to Forecast">
+                    <span class="material-icons-outlined">arrow_back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<main class="flex-grow p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto w-full space-y-4">
+    <!-- Empty state -->
+    <div id="writeupEmpty" class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 sm:p-8 text-center py-12 text-slate-400">
+        <span class="material-icons-outlined text-4xl mb-2">edit_note</span>
+        <p>No forecast writeup yet.</p>
+        <p class="text-sm mt-1">Run <code class="bg-slate-700 px-1.5 py-0.5 rounded text-xs">/weather-analysis lat lon</code> to generate one.</p>
+    </div>
+
+    <!-- Summary Card -->
+    <div id="writeupContent" class="hidden">
+        <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 sm:p-8">
+            <h1 id="writeupTitle" class="text-2xl font-bold text-slate-900 dark:text-white mb-2"></h1>
+            <div class="flex flex-wrap items-center gap-3 mb-6 text-xs text-slate-400">
+                <span class="flex items-center gap-1">
+                    <span class="material-icons-outlined text-sm">schedule</span>
+                    <span id="writeupTimestamp"></span>
+                </span>
+                <span id="writeupAge" class="text-slate-500"></span>
+                <span id="writeupLocation" class="flex items-center gap-1 hidden">
+                    <span class="material-icons-outlined text-sm">place</span>
+                    <span id="writeupLocationText"></span>
+                </span>
+            </div>
+            <div id="writeupBody" class="prose-writeup text-slate-700 dark:text-slate-300 text-[15px]"></div>
+
+            <!-- Copy panel (toggled by Copy button) -->
+            <div id="copyPanel" class="hidden mt-4">
+                <div class="border-t border-slate-200 dark:border-slate-700 pt-4">
+                    <label class="text-xs text-slate-400 mb-1 block">Select all and copy (Ctrl+C / Cmd+C):</label>
+                    <textarea id="copyTextarea" readonly
+                        class="w-full h-48 p-3 rounded-lg bg-slate-900 text-slate-200 text-sm font-mono border border-slate-700 focus:border-primary focus:ring-1 focus:ring-primary resize-none"
+                    ></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Player Card -->
+        <div id="audioCard" class="hidden bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5">
+            <div class="flex items-center gap-3">
+                <button id="audioPlayBtn" class="w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center transition-colors flex-shrink-0">
+                    <span class="material-icons-outlined text-xl" id="audioPlayIcon">play_arrow</span>
+                </button>
+                <div class="flex-grow min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-sm font-medium text-slate-300">Forecast Audio</span>
+                        <span id="audioTime" class="text-xs text-slate-500 font-mono">0:00 / 0:00</span>
+                    </div>
+                    <div class="relative h-1.5 bg-slate-700 rounded-full cursor-pointer group" id="audioProgressBar">
+                        <div id="audioProgress" class="absolute left-0 top-0 h-full bg-emerald-500 rounded-full transition-all" style="width: 0%"></div>
+                        <div id="audioProgressHandle" class="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity" style="left: 0%"></div>
+                    </div>
+                </div>
+                <button id="audioVolumeBtn" class="p-1.5 text-slate-400 hover:text-white transition-colors flex-shrink-0">
+                    <span class="material-icons-outlined text-lg">volume_up</span>
+                </button>
+            </div>
+            <!-- Generating spinner -->
+            <div id="audioGenerating" class="hidden flex items-center gap-2 mt-3 text-sm text-slate-400">
+                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                Generating audio...
+            </div>
+        </div>
+
+        <!-- Detail Card (collapsible) -->
+        <div id="writeupDetailCard" class="hidden bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <button id="detailToggle" class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-xl">
+                <span class="flex items-center gap-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    <span class="material-icons-outlined text-primary text-lg">analytics</span>
+                    Supporting Data &amp; Analysis
+                </span>
+                <span id="detailChevron" class="material-icons-outlined text-slate-400 transition-transform">expand_more</span>
+            </button>
+            <div id="detailBody" class="hidden px-6 pb-6">
+                <div class="border-t border-slate-200 dark:border-slate-700 pt-4">
+                    <div id="writeupDetail" class="prose-writeup text-slate-700 dark:text-slate-300 text-sm"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+    // Disable GFM strikethrough to avoid ~~ issues with units like inches
+    marked.setOptions({ gfm: true, breaks: false });
+    const renderer = new marked.Renderer();
+    renderer.del = (text) => text.text || text;
+    marked.use({ renderer });
+
+    const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
+
+    function authHeaders() {
+        const h = {};
+        if (API_KEY) h['X-API-Key'] = API_KEY;
+        return h;
+    }
+
+    function timeAgo(isoStr) {
+        const ms = Date.now() - new Date(isoStr).getTime();
+        const min = Math.floor(ms / 60000);
+        if (min < 1) return 'just now';
+        if (min < 60) return min + ' min ago';
+        const hrs = Math.floor(min / 60);
+        if (hrs < 24) return hrs + 'h ' + (min % 60) + 'm ago';
+        return Math.floor(hrs / 24) + 'd ago';
+    }
+
+    async function loadWriteup() {
+        try {
+            const res = await fetch('/api/writeup', { headers: authHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            const w = data.writeup;
+
+            if (!w) {
+                document.getElementById('writeupEmpty').classList.remove('hidden');
+                document.getElementById('writeupContent').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('writeupEmpty').classList.add('hidden');
+            document.getElementById('writeupContent').classList.remove('hidden');
+
+            document.getElementById('writeupTitle').textContent = w.title || 'Forecast';
+            window._writeupRawBody = w.body || '';
+            document.getElementById('writeupBody').innerHTML = marked.parse(w.body || '');
+
+            // Detail section
+            const detailCard = document.getElementById('writeupDetailCard');
+            if (w.detail) {
+                detailCard.classList.remove('hidden');
+                document.getElementById('writeupDetail').innerHTML = marked.parse(w.detail);
+            } else {
+                detailCard.classList.add('hidden');
+            }
+
+            const ts = w.updated_at || w.created_at;
+            if (ts) {
+                const d = new Date(ts);
+                document.getElementById('writeupTimestamp').textContent =
+                    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
+                    ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                document.getElementById('writeupAge').textContent = timeAgo(ts);
+            }
+
+            if (w.location && w.location.name) {
+                document.getElementById('writeupLocation').classList.remove('hidden');
+                document.getElementById('writeupLocationText').textContent = w.location.name;
+            }
+        } catch (e) {
+            console.error('Failed to load writeup:', e);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (API_KEY) {
+            const q = '?api_key=' + encodeURIComponent(API_KEY);
+            const fl = document.getElementById('forecastLink');
+            if (fl) fl.href = '/' + q;
+        }
+
+        // Copy: toggle textarea with raw text, auto-select
+        document.getElementById('copyBtn').addEventListener('click', () => {
+            const panel = document.getElementById('copyPanel');
+            const ta = document.getElementById('copyTextarea');
+            const btn = document.getElementById('copyBtn');
+            const isHidden = panel.classList.toggle('hidden');
+            if (!isHidden) {
+                // Fill with current body text and select all
+                const bodyEl = document.getElementById('writeupBody');
+                ta.value = window._writeupRawBody || bodyEl.innerText;
+                btn.innerHTML = '<span class="material-icons-outlined text-sm">close</span> Close';
+                requestAnimationFrame(() => { ta.focus(); ta.select(); });
+            } else {
+                btn.innerHTML = '<span class="material-icons-outlined text-sm">content_copy</span> Copy';
+            }
+        });
+
+        // Detail toggle
+        document.getElementById('detailToggle').addEventListener('click', () => {
+            const body = document.getElementById('detailBody');
+            const chevron = document.getElementById('detailChevron');
+            const isHidden = body.classList.toggle('hidden');
+            chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
+        });
+
+        loadWriteup();
+        setInterval(loadWriteup, 30000);
+
+        // --- Audio Player ---
+        const audio = new Audio();
+        let audioReady = false;
+
+        function formatTime(s) {
+            if (!s || isNaN(s)) return '0:00';
+            const m = Math.floor(s / 60);
+            const sec = Math.floor(s % 60);
+            return m + ':' + (sec < 10 ? '0' : '') + sec;
+        }
+
+        async function checkAudioStatus() {
+            try {
+                const res = await fetch('/api/writeup/audio/status', { headers: authHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                const card = document.getElementById('audioCard');
+                const genSpinner = document.getElementById('audioGenerating');
+
+                if (data.generating) {
+                    card.classList.remove('hidden');
+                    genSpinner.classList.remove('hidden');
+                    // Poll until done
+                    setTimeout(checkAudioStatus, 3000);
+                    return;
+                }
+
+                genSpinner.classList.add('hidden');
+
+                if (data.has_audio) {
+                    card.classList.remove('hidden');
+                    if (!audioReady) {
+                        const audioUrl = '/api/writeup/audio' + (API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : '');
+                        audio.src = audioUrl;
+                        audio.preload = 'metadata';
+                        audioReady = true;
+                    }
+                }
+            } catch (e) {
+                console.error('Audio status check failed:', e);
+            }
+        }
+
+        // Play/pause
+        document.getElementById('audioPlayBtn').addEventListener('click', () => {
+            if (!audioReady) return;
+            if (audio.paused) {
+                audio.play();
+            } else {
+                audio.pause();
+            }
+        });
+
+        audio.addEventListener('play', () => {
+            document.getElementById('audioPlayIcon').textContent = 'pause';
+        });
+        audio.addEventListener('pause', () => {
+            document.getElementById('audioPlayIcon').textContent = 'play_arrow';
+        });
+        audio.addEventListener('ended', () => {
+            document.getElementById('audioPlayIcon').textContent = 'play_arrow';
+            document.getElementById('audioProgress').style.width = '0%';
+            document.getElementById('audioProgressHandle').style.left = '0%';
+        });
+
+        // Time update
+        audio.addEventListener('timeupdate', () => {
+            const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+            document.getElementById('audioProgress').style.width = pct + '%';
+            document.getElementById('audioProgressHandle').style.left = pct + '%';
+            document.getElementById('audioTime').textContent =
+                formatTime(audio.currentTime) + ' / ' + formatTime(audio.duration);
+        });
+
+        audio.addEventListener('loadedmetadata', () => {
+            document.getElementById('audioTime').textContent =
+                '0:00 / ' + formatTime(audio.duration);
+        });
+
+        // Seek
+        document.getElementById('audioProgressBar').addEventListener('click', (e) => {
+            if (!audio.duration) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const pct = (e.clientX - rect.left) / rect.width;
+            audio.currentTime = pct * audio.duration;
+        });
+
+        // Volume toggle (mute/unmute)
+        document.getElementById('audioVolumeBtn').addEventListener('click', () => {
+            audio.muted = !audio.muted;
+            document.getElementById('audioVolumeBtn').querySelector('span').textContent =
+                audio.muted ? 'volume_off' : 'volume_up';
+        });
+
+        // Listen button in nav — generate audio if none exists, or play if it does
+        document.getElementById('listenBtn').addEventListener('click', async () => {
+            if (audioReady) {
+                // Toggle play
+                if (audio.paused) { audio.play(); } else { audio.pause(); }
+                // Scroll to player
+                document.getElementById('audioCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return;
+            }
+
+            // Trigger generation
+            const btn = document.getElementById('listenBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="animate-spin h-4 w-4 inline" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Generating...';
+
+            try {
+                await fetch('/api/writeup/audio/generate', {
+                    method: 'POST',
+                    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}),
+                });
+                // Start polling
+                const pollInterval = setInterval(async () => {
+                    const res = await fetch('/api/writeup/audio/status', { headers: authHeaders() });
+                    const data = await res.json();
+                    if (!data.generating) {
+                        clearInterval(pollInterval);
+                        btn.disabled = false;
+                        btn.innerHTML = '<span class="material-icons-outlined text-sm">volume_up</span> Listen';
+                        checkAudioStatus();
+                    }
+                }, 3000);
+            } catch (e) {
+                console.error('Failed to start audio generation:', e);
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-icons-outlined text-sm">volume_up</span> Listen';
+            }
+        });
+
+        // Check on load
+        checkAudioStatus();
+    });
+</script>
+</body>
+</html>

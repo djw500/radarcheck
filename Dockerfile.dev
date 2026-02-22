@@ -20,6 +20,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
+# Fly.io CLI (install as root, then make available to all users)
+RUN curl -L https://fly.io/install.sh | FLYCTL_INSTALL=/usr/local sh
+
 WORKDIR /app
 
 # Pre-install Python deps (layer-cached separately from source)
