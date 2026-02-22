@@ -102,7 +102,6 @@
                     <button data-var="snod" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Depth</button>
                     <button data-var="t2m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
                     <button data-var="wind_10m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
-                    <button data-var="gust" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Gust</button>
                     <button data-var="apcp" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Precip</button>
                 </div>
 
@@ -184,7 +183,7 @@
                 <span class="text-xs font-bold text-slate-700 dark:text-slate-200">NBM</span>
             </label>
 
-            <!-- ECMWF -->
+            <!-- ECMWF HRES -->
             <label class="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none whitespace-nowrap">
                 <input type="checkbox" class="hidden peer model-toggle" value="ecmwf_hres" checked>
                 <div class="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full relative peer-checked:bg-ecmwf/20 transition-colors">
@@ -192,6 +191,7 @@
                 </div>
                 <span class="text-xs font-bold text-slate-700 dark:text-slate-200">ECMWF</span>
             </label>
+
 
         </div>
     </div>
@@ -237,7 +237,6 @@ const VAR_CONFIG = {
     'prate': { label: 'Precip Rate', unit: ' in/hr' },
     't2m': { label: 'Temperature', unit: ' °F' },
     'wind_10m': { label: 'Wind Speed', unit: ' mph' },
-    'gust': { label: 'Wind Gust', unit: ' mph' },
     'apcp': { label: 'Precipitation', unit: ' in' },
     'rh': { label: 'Humidity', unit: '%' },
     'cape': { label: 'CAPE', unit: ' J/kg' },
@@ -405,7 +404,17 @@ function updateChart(data) {
 
         // Guard against empty runs
         if (runs.length === 0) {
-            Plotly.newPlot('snowChart', [], {}, { responsive: true, displayModeBar: false });
+            const isDark = document.documentElement.classList.contains('dark');
+            Plotly.newPlot('snowChart', [], {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                annotations: [{
+                    text: 'No forecast data available yet — tiles are building',
+                    xref: 'paper', yref: 'paper',
+                    x: 0.5, y: 0.5, showarrow: false,
+                    font: { size: 14, color: isDark ? '#64748b' : '#94a3b8' }
+                }]
+            }, { responsive: true, displayModeBar: false });
             renderTable(data, []);
             return;
         }

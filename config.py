@@ -26,7 +26,7 @@ WEATHER_VARIABLES = {
         "category": "winter",
         "conversion": "m_to_in",
         "is_accumulation": True,
-        "model_exclusions": ["nam_nest", "gfs", "icon"],
+        "model_exclusions": ["nam_nest", "gfs", "nbm", "icon"],
         "unit_conversions_by_units": {
             "m": "m_to_in",
             "m of water equivalent": "m_water_to_in_snow",
@@ -45,7 +45,7 @@ WEATHER_VARIABLES = {
         "vmax": 1,
         "category": "winter",
         "preferred_step_type": "instant",
-        "model_exclusions": ["icon", "ecmwf_hres", "ecmwf_eps"],
+        "model_exclusions": ["icon", "nbm", "ecmwf_hres", "ecmwf_eps"],
     },
     "snod": {
         "nomads_params": ["var_SNOD"],
@@ -59,7 +59,7 @@ WEATHER_VARIABLES = {
         "category": "winter",
         "conversion": "m_to_in",
         "dwd_var": "h_snow",
-        "model_exclusions": ["ecmwf_hres", "ecmwf_eps"],
+        "model_exclusions": ["nbm", "ecmwf_hres", "ecmwf_eps"],
     },
     "apcp": {
         "nomads_params": ["var_APCP"],
@@ -97,7 +97,7 @@ WEATHER_VARIABLES = {
         "category": "precipitation",
         "conversion": "kg_m2_s_to_in_hr",
         "preferred_step_type": "instant",
-        "model_exclusions": ["icon", "ecmwf_hres", "ecmwf_eps"],
+        "model_exclusions": ["icon", "nbm", "ecmwf_hres", "ecmwf_eps"],
     },
     "t2m": {
         "nomads_params": ["var_TMP"],
@@ -318,10 +318,15 @@ MODELS = {
         "availability_check_var": "var_TMP",
         "forecast_hour_digits": 3,
         # NBM: hourly 1-36, then 6-hourly 42-264 (some vars like TMP are 3-hourly, but ASNOW is 6-hourly)
+        # Only synoptic runs (00/06/12/18z) have extended range; hourly runs stop at 36h
         "forecast_hour_schedule": [
             {"start": 1, "end": 36, "step": 1},
             {"start": 42, "end": 264, "step": 6},
         ],
+        "max_hours_by_init": {
+            "default": 36,
+            "00": 264, "06": 264, "12": 264, "18": 264,
+        },
     },
     "icon": {
         "name": "ICON (DWD)",

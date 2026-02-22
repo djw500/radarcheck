@@ -78,7 +78,8 @@ MAX_HOURS_HRRR = int(os.environ.get("TILE_BUILD_MAX_HOURS_HRRR", "48"))
 MAX_HOURS_NAM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))
 MAX_HOURS_GFS = int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))
 MAX_HOURS_NBM = int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))
-BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES")
+MAX_HOURS_ECMWF_HRES = int(os.environ.get("TILE_BUILD_MAX_HOURS_ECMWF_HRES", "240"))
+BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,prate,asnow,csnow,snod,t2m"
 # Max builds per model per cycle - ensures all models get attention
 MAX_BUILDS_PER_MODEL = int(os.environ.get("TILE_BUILD_MAX_PER_MODEL", "3"))
 # Cleanup settings - defaults are generous for local dev, fly.toml overrides for prod
@@ -112,7 +113,7 @@ MODELS_CONFIG = [
     {"id": "nam_nest", "max_hours": MAX_HOURS_NAM, "check_hours": 12},
     {"id": "gfs", "max_hours": MAX_HOURS_GFS, "check_hours": 12},
     {"id": "nbm", "max_hours": MAX_HOURS_NBM, "check_hours": 12},
-    # {"id": "ecmwf_hres", "max_hours": 240, "check_hours": 12},
+    {"id": "ecmwf_hres", "max_hours": MAX_HOURS_ECMWF_HRES, "check_hours": 12},
 ]
 
 # Regions to build
@@ -275,10 +276,7 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
     forecast_hours = get_run_forecast_hours(model_id, date_str, init_hour, max_hours)
 
     # Determine variables to build
-    if BUILD_VARIABLES_ENV:
-        var_ids = [v.strip() for v in BUILD_VARIABLES_ENV.split(",") if v.strip()]
-    else:
-        var_ids = list(repomap["WEATHER_VARIABLES"].keys())
+    var_ids = [v.strip() for v in BUILD_VARIABLES_ENV.split(",") if v.strip()]
 
     resolution_deg = repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1)
     enqueued = 0
@@ -432,8 +430,6 @@ def cleanup_old_gribs(max_runs_per_model: int = None):
         # Determine which runs to delete (oldest beyond retention limit)
         candidates_for_deletion = runs[max_runs_per_model:]
         for run_id in candidates_for_deletion:
-            # Never delete GRIBs for a run that still has incomplete tiles —
-            # workers may still be fetching and processing them.
             model_cfg = next((m for m in MODELS_CONFIG if m["id"] == model_id), None)
             default_max = model_cfg["max_hours"] if model_cfg else 24
             run_max_hours = get_max_hours_for_run(model_id, run_id, default_max)
@@ -441,9 +437,22 @@ def cleanup_old_gribs(max_runs_per_model: int = None):
                 not tiles_exist(region_id, model_id, run_id, expected_max_hours=run_max_hours)
                 for region_id in REGIONS
             )
+
+            # Allow incomplete tiles to block deletion only if the run is recent
+            # (< 24h old). Older runs with incomplete tiles are stale — delete anyway.
             if still_building:
-                logger.info(f"GRIB cleanup: skipping {model_id}/{run_id} (tiles still incomplete)")
-                continue
+                try:
+                    parts = run_id.split("_")
+                    run_dt = datetime.datetime.strptime(f"{parts[1]}{parts[2]}", "%Y%m%d%H")
+                    run_dt = run_dt.replace(tzinfo=datetime.timezone.utc)
+                    age_hours = (datetime.datetime.now(datetime.timezone.utc) - run_dt).total_seconds() / 3600
+                except (IndexError, ValueError):
+                    age_hours = 999
+                if age_hours < 12:
+                    logger.info(f"GRIB cleanup: skipping {model_id}/{run_id} (tiles still incomplete, {age_hours:.0f}h old)")
+                    continue
+                else:
+                    logger.info(f"GRIB cleanup: removing stale {model_id}/{run_id} ({age_hours:.0f}h old, tiles never completed)")
 
             old_run_dir = os.path.join(model_dir, run_id)
             logger.info(f"GRIB cleanup: removing {model_id}/{run_id}")

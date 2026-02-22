@@ -153,10 +153,11 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
     )
 
 
-def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False) -> None:
+def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False, model_id: str | None = None) -> None:
     """Poll the job queue and process jobs until empty (or forever if not once)."""
     if worker_id is None:
-        worker_id = f"worker-{os.getpid()}"
+        suffix = f"-{model_id}" if model_id else ""
+        worker_id = f"worker-{os.getpid()}{suffix}"
 
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -169,13 +170,13 @@ def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once:
     logging.getLogger("cfgrib").setLevel(logging.ERROR)
 
     wlog = logging.getLogger(f"worker.{worker_id}")
-    wlog.info(f"Worker {worker_id} starting (poll_interval={poll_interval_s}s)")
+    wlog.info(f"Worker {worker_id} starting (poll_interval={poll_interval_s}s, model_filter={model_id or 'all'})")
 
     conn = init_tile_db(repomap["DB_PATH"])
     processed = 0
     try:
         while True:
-            job = claim(conn, worker_id)
+            job = claim(conn, worker_id, model_id=model_id)
             if job is None:
                 if once:
                     wlog.info(f"No jobs available, exiting (--once). Processed {processed} total.")
@@ -229,7 +230,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Tile job worker")
     parser.add_argument("--once", action="store_true", help="Process a single job and exit")
     parser.add_argument("--poll-interval", type=float, default=5.0)
-    parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes")
+    parser.add_argument("--model", type=str, default=None, help="Only process jobs for this model_id")
     parser.add_argument("--log-file", type=str, help="Log file path (default: stdout only)")
     args = parser.parse_args()
 
@@ -239,25 +240,4 @@ if __name__ == "__main__":
         fh.setFormatter(_logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         _logging.getLogger().addHandler(fh)
 
-    if args.workers > 1 and not args.once:
-        import multiprocessing
-        procs = []
-        for i in range(args.workers):
-            wid = f"worker-{os.getpid()}-{i}"
-            p = multiprocessing.Process(
-                target=run_worker,
-                kwargs={"worker_id": wid, "poll_interval_s": args.poll_interval},
-                name=wid,
-                daemon=True,
-            )
-            p.start()
-            procs.append(p)
-        print(f"Started {args.workers} worker processes: {[p.pid for p in procs]}")
-        try:
-            for p in procs:
-                p.join()
-        except KeyboardInterrupt:
-            for p in procs:
-                p.terminate()
-    else:
-        run_worker(poll_interval_s=args.poll_interval, once=args.once)
+    run_worker(poll_interval_s=args.poll_interval, once=args.once, model_id=args.model)

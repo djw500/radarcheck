@@ -38,9 +38,10 @@ def get_herbie_search_string(variable_id: str) -> str:
 
 
 def _resolve_herbie_model(model_id: str) -> dict[str, str]:
-    # Map internal model ID to Herbie model name
-    # 'ecmwf_eps' might map to 'aifs' or other products, but use IFS until updated.
-    return {"model": "ifs", "product": "oper"}
+    # Map internal model ID to Herbie model/product
+    if model_id == "ecmwf_eps":
+        return {"model": "ifs", "product": "enfo"}  # ensemble forecast
+    return {"model": "ifs", "product": "oper"}  # deterministic (HRES)
 
 
 def _url_exists(url: str, timeout: int) -> bool:

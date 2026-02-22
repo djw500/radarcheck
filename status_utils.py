@@ -16,7 +16,7 @@ SCHEDULED_MODELS = [
     {"id": "nam_nest", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_NAM", "60"))},
     {"id": "gfs", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_GFS", "168"))},
     {"id": "nbm", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_NBM", "168"))},
-    {"id": "ecmwf_hres", "max_hours": 240},
+    {"id": "ecmwf_hres", "max_hours": int(os.environ.get("TILE_BUILD_MAX_HOURS_ECMWF_HRES", "240"))},
 ]
 
 
@@ -213,14 +213,8 @@ def get_run_grid():
     """
     conn = init_db(repomap.get("DB_PATH"))
     try:
-        build_vars = os.environ.get("TILE_BUILD_VARIABLES", "")
-        var_filter = (
-            f"AND json_extract(args_json, '$.variable_id') IN ({','.join('?' * len(build_vars.split(',')))}) "
-            if build_vars else ""
-        )
-        var_params = build_vars.split(",") if build_vars else []
         rows = conn.execute(
-            f"""
+            """
             SELECT
                 json_extract(args_json, '$.model_id') as model_id,
                 json_extract(args_json, '$.run_id') as run_id,
@@ -229,11 +223,9 @@ def get_run_grid():
                 COUNT(*) as cnt
             FROM jobs
             WHERE type = 'build_tile_hour'
-            {var_filter}
             GROUP BY 1, 2, 3, 4
             ORDER BY model_id, run_id DESC, variable_id, status
             """,
-            var_params,
         ).fetchall()
     finally:
         conn.close()
@@ -257,15 +249,13 @@ def get_run_grid():
         model_config = repomap["MODELS"].get(model_id, {})
         model_raw = raw.get(model_id, {})
 
-        # Only show variables that are valid for this model (not in model_exclusions)
+        # Only show variables that actually have jobs in the DB for this model
         all_vars = set()
-        for var_id, var_config in repomap["WEATHER_VARIABLES"].items():
-            if model_id not in var_config.get("model_exclusions", []):
-                all_vars.add(var_id)
+        for run_data in model_raw.values():
+            all_vars.update(run_data.keys())
 
-        # Order variables: use display order from config (t2m first, then alphabetical)
-        preferred_order = ["t2m", "apcp", "prate", "asnow", "csnow", "snod",
-                           "refc", "wind_10m", "gust", "dpt", "rh", "msl", "cape", "hlcy", "hail"]
+        # Order variables: use display order, then alphabetical for any extras
+        preferred_order = ["t2m", "apcp", "prate", "asnow", "csnow", "snod"]
         ordered_vars = [v for v in preferred_order if v in all_vars]
         ordered_vars += sorted(all_vars - set(ordered_vars))
 

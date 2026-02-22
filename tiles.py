@@ -355,11 +355,20 @@ def upsert_tiles_npz(
             )
             return npz_path, hours
 
-        with np.load(npz_path) as data:
-            existing_hours = data.get("hours", np.array([], dtype=np.int32))
-            existing_means = data["means"] if "means" in data.files else None
-            existing_mins = data["mins"] if "mins" in data.files else None
-            existing_maxs = data["maxs"] if "maxs" in data.files else None
+        try:
+            with np.load(npz_path) as data:
+                existing_hours = data.get("hours", np.array([], dtype=np.int32))
+                existing_means = data["means"] if "means" in data.files else None
+                existing_mins = data["mins"] if "mins" in data.files else None
+                existing_maxs = data["maxs"] if "maxs" in data.files else None
+        except Exception:
+            # Corrupt NPZ — overwrite with fresh data
+            logger.warning(f"Corrupt NPZ at {npz_path}, overwriting with fresh data")
+            _save_tiles_npz_internal(
+                npz_path, meta_path, region_id, variable_id,
+                mins, maxs, means, hours, meta,
+            )
+            return npz_path, hours
 
         merged_hours = sorted(set(existing_hours.tolist()) | set(new_hours.tolist()))
         hour_index = {h: i for i, h in enumerate(merged_hours)}
@@ -424,7 +433,11 @@ def load_timeseries_for_point(
     # Use indexing lon_min if present (handles 0-360 indexing)
     lon_min_index = meta.get("index_lon_min", meta.get("lon_min"))
     lon_0_360 = bool(meta.get("lon_0_360", False))
-    with np.load(npz_path) as d:
+    try:
+        npz_data = np.load(npz_path)
+    except Exception:
+        raise FileNotFoundError(f"Corrupt tile for {variable_id} at {npz_path}")
+    with npz_data as d:
         hours = d["hours"]
         # Fallback to means when requested stat is not available
         key = "means"
@@ -490,7 +503,11 @@ def load_grid_slice(
         raise FileNotFoundError(f"Tiles not found for {variable_id} at {npz_path}")
     with open(meta_path, "r") as f:
         meta = json.load(f)
-    with np.load(npz_path) as d:
+    try:
+        npz_data = np.load(npz_path)
+    except Exception:
+        raise FileNotFoundError(f"Corrupt tile for {variable_id} at {npz_path}")
+    with npz_data as d:
         hours = d["hours"]
         # Map requested hour to index
         try:

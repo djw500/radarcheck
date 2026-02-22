@@ -82,29 +82,72 @@ def enqueue(
         (job_type, args_json, args_hash, priority),
     )
     conn.commit()
-    if cursor.rowcount == 0:
-        return None
-    return cursor.lastrowid
-
-
-def claim(conn: sqlite3.Connection, worker_id: str) -> Optional[Dict[str, Any]]:
+    if cursor.rowcount > 0:
+        return cursor.lastrowid
+    # Job already exists — reset if it previously failed/was cancelled so it can
+    # be retried. Leaves pending/processing jobs untouched.
     cursor = conn.execute(
         """
         UPDATE jobs
-        SET    status     = 'processing',
-               worker_id  = ?,
-               started_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-        WHERE  id = (
-            SELECT id FROM jobs
-            WHERE  status = 'pending'
-            AND    (retry_after IS NULL OR retry_after <= strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            ORDER BY priority DESC, created_at ASC, id ASC
-            LIMIT 1
-        )
-        RETURNING *;
+        SET status       = 'pending',
+            error_message = NULL,
+            retry_after   = NULL,
+            retry_count   = 0,
+            worker_id     = NULL,
+            started_at    = NULL,
+            completed_at  = NULL
+        WHERE type = ? AND args_hash = ? AND status = 'failed';
         """,
-        (worker_id,),
+        (job_type, args_hash),
     )
+    conn.commit()
+    if cursor.rowcount > 0:
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE type = ? AND args_hash = ?;",
+            (job_type, args_hash),
+        ).fetchone()
+        return row["id"] if row else None
+    return None
+
+
+def claim(conn: sqlite3.Connection, worker_id: str, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    if model_id is not None:
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET    status     = 'processing',
+                   worker_id  = ?,
+                   started_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+            WHERE  id = (
+                SELECT id FROM jobs
+                WHERE  status = 'pending'
+                AND    (retry_after IS NULL OR retry_after <= strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                AND    args_json LIKE ?
+                ORDER BY priority DESC, created_at ASC, id ASC
+                LIMIT 1
+            )
+            RETURNING *;
+            """,
+            (worker_id, f'%"model_id":"{model_id}"%'),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET    status     = 'processing',
+                   worker_id  = ?,
+                   started_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+            WHERE  id = (
+                SELECT id FROM jobs
+                WHERE  status = 'pending'
+                AND    (retry_after IS NULL OR retry_after <= strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ORDER BY priority DESC, created_at ASC, id ASC
+                LIMIT 1
+            )
+            RETURNING *;
+            """,
+            (worker_id,),
+        )
     row = cursor.fetchone()
     conn.commit()
     if row is None:
