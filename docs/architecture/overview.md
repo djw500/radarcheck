@@ -11,7 +11,7 @@ NOMADS (HRRR, NAM Nest, GFS, NBM)
    scheduler (enqueues jobs to SQLite)
         │
         ▼
-   job_worker.py → build_tiles.py
+   job_worker.py
         │
         ▼
    GRIB files ──────────────────► cache/gribs/<model>/<run>/<var>/
@@ -36,7 +36,6 @@ NOMADS (HRRR, NAM Nest, GFS, NBM)
 
 | File | Purpose |
 |------|---------|
-| `build_tiles.py` | CLI tool to fetch GRIBs and generate tile statistics |
 | `tiles.py` | Tile generation logic, point queries |
 | `config.py` | Model definitions, variable configs, regions |
 | `jobs.py` | SQLite job queue |

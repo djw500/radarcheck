@@ -14,14 +14,6 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
-# Audit stats for build monitoring
-audit_stats = {
-    "tiles_skipped": 0,
-    "tiles_processed": 0,
-    "grib_hits": 0,
-    "grib_misses": 0
-}
-
 def time_function(f):
     @wraps(f)
     def wrapper(*args, **kwargs):

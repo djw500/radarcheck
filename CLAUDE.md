@@ -9,17 +9,17 @@ Radarcheck is a weather forecast visualization app that fetches GRIB2 data from 
 ## Architecture
 
 ```
-NOMADS → scheduler → job_worker.py → build_tiles.py → tiles.py → NPZ tiles
-                                                                      ↓
-                                                              Flask API → UI
+NOMADS → scheduler → job_worker.py → tiles.py → NPZ tiles
+                                                      ↓
+                                              Flask API → UI
 ```
 
 **Key files**:
 - `app.py` - Flask app factory, global auth, index/health/metrics routes
 - `routes/forecast.py` - `/api/timeseries/multirun` endpoint + snow derivation
 - `routes/status.py` - `/status` dashboard + `/api/status/*` + `/api/jobs/*`
-- `build_tiles.py` - CLI to fetch GRIBs and generate tiles
-- `tiles.py` - Tile statistics and point queries
+- `tiles.py` - Tile generation, statistics, and point queries
+- `cache_builder.py` - GRIB fetching and validation
 - `config.py` - Models, variables, regions configuration
 - `jobs.py` - SQLite job queue
 - `job_worker.py` - Background worker that processes jobs
@@ -46,9 +46,6 @@ python app.py -p 5001
 
 # Start all dev services (server + scheduler + per-model workers)
 bash dev-services.sh start
-
-# Build tiles manually
-python build_tiles.py --region ne --model hrrr --max-hours 24
 
 # Run tests
 pytest tests/
@@ -102,9 +99,7 @@ pytest tests/
 ## Testing
 
 ```bash
-pytest tests/                    # All tests
-pytest tests/test_tiles_build.py # Tile tests
-pytest --cov=. --cov-report=term # With coverage
+pytest tests/
 ```
 
 ## Commit Style

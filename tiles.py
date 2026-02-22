@@ -293,32 +293,6 @@ def _save_tiles_npz_internal(
         json.dump(meta, f, indent=2)
 
 
-def save_tiles_npz(
-    base_dir: str,
-    region_id: str,
-    resolution_deg: float,
-    model_id: str,
-    run_id: str,
-    variable_id: str,
-    mins: np.ndarray,
-    maxs: np.ndarray,
-    means: np.ndarray,
-    hours: List[int],
-    meta: Dict[str, Any],
-) -> str:
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    out_dir = os.path.join(base_dir, region_id, res_dir, model_id, run_id)
-    os.makedirs(out_dir, exist_ok=True)
-    npz_path = os.path.join(out_dir, f"{variable_id}.npz")
-    meta_path = os.path.join(out_dir, f"{variable_id}.meta.json")
-
-    with FileLock(f"{npz_path}.lock"):
-        _save_tiles_npz_internal(
-            npz_path, meta_path, region_id, variable_id, mins, maxs, means, hours, meta
-        )
-    return npz_path
-
-
 def upsert_tiles_npz(
     base_dir: str,
     region_id: str,

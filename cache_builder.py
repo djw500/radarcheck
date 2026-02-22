@@ -3,12 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 import random
 
-import pytz
 import requests
 import xarray as xr
 from filelock import FileLock, Timeout
@@ -23,8 +21,6 @@ from utils import (
     GribValidationError,
     download_file,
     format_forecast_hour,
-    time_function,
-    audit_stats,
 )
 
 
@@ -164,132 +160,6 @@ def build_model_url(
     )
 
 
-def get_available_model_runs(model_id: str, max_runs: int = 5) -> list[dict[str, str]]:
-    """Find multiple recent model runs available, from newest to oldest."""
-    model_config = repomap["MODELS"][model_id]
-    now = datetime.now(timezone.utc)
-    available_runs = []
-    
-    # Check the last 24 hours of potential runs
-    for hours_ago in range(0, repomap["HOURS_TO_CHECK_FOR_RUNS"]):
-        # Stop once we have enough runs
-        if len(available_runs) >= max_runs:
-            break
-            
-        check_time = now - timedelta(hours=hours_ago)
-        date_str = check_time.strftime("%Y%m%d")
-        init_hour = check_time.strftime("%H")
-        
-        # Skip non-synoptic hours if needed
-        update_freq = model_config.get("update_frequency_hours", 1)
-        if update_freq >= 6 and int(init_hour) % 6 != 0:
-            continue
-
-        # Use the first valid forecast hour for availability check (e.g. 3 for ECMWF)
-        first_hour = get_valid_forecast_hours(model_id, 24)[0]
-        forecast_hour = format_forecast_hour(first_hour, model_id)
-        
-        if model_config.get("source") == "herbie":
-            model_time = datetime(
-                year=check_time.year,
-                month=check_time.month,
-                day=check_time.day,
-                hour=int(init_hour),
-                minute=0,
-                second=0,
-                tzinfo=pytz.UTC,
-            )
-            availability_var = model_config.get("availability_check_var")
-            if herbie_run_available(
-                model_id=model_id,
-                variable_id=availability_var,
-                date_str=date_str,
-                init_hour=init_hour,
-                forecast_hour=forecast_hour,
-                timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"],
-            ):
-                run_info = {
-                    "date_str": date_str,
-                    "init_hour": init_hour,
-                    "init_time": model_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "run_id": f"run_{date_str}_{init_hour}",
-                }
-                available_runs.append(run_info)
-                logger.info(f"Confirmed Herbie run for {model_id}: {run_info['run_id']}")
-                continue
-            logger.info(
-                "Herbie run not yet available for %s %s %s",
-                model_id,
-                date_str,
-                init_hour,
-            )
-            continue
-
-        if model_config.get("source") == "dwd":
-            # DWD check: construct URL to a key file (availability_check_var)
-            check_var = model_config.get("availability_check_var", "t_2m")
-            # We need to resolve dwd_var_upper for the filename pattern
-            # Assuming availability_check_var is the dwd_var (e.g. 't_2m')
-            # But the file pattern might expect {dwd_var_upper}
-            # Let's assume standard mapping: t_2m -> T_2M
-            dwd_var_upper = check_var.upper()
-            
-            # Format filename using all required keys including date_str
-            file_name = model_config["file_pattern"].format(
-                date_str=date_str,
-                init_hour=init_hour,
-                forecast_hour=forecast_hour,
-                dwd_var_upper=dwd_var_upper
-            )
-            dir_path = model_config["dir_pattern"].format(
-                init_hour=init_hour, 
-                dwd_var=check_var
-            )
-            url = f"{model_config['nomads_url']}/{dir_path}/{file_name}"
-        else:
-            # NOMADS check
-            file_name = model_config["file_pattern"].format(
-                init_hour=init_hour,
-                forecast_hour=forecast_hour,
-            )
-            dir_path = model_config["dir_pattern"].format(date_str=date_str, init_hour=init_hour)
-            url = (
-                f"{model_config['nomads_url']}?"
-                f"file={file_name}&"
-                f"dir={dir_path}&"
-                f"{model_config['availability_check_var']}=on"
-            )
-        
-        try:
-            response = requests.head(url, timeout=repomap["HEAD_REQUEST_TIMEOUT_SECONDS"])
-            if response.status_code == 200:
-                model_time = datetime(
-                    year=check_time.year,
-                    month=check_time.month,
-                    day=check_time.day,
-                    hour=int(init_hour),
-                    minute=0,
-                    second=0,
-                    tzinfo=pytz.UTC
-                )
-                
-                run_info = {
-                    'date_str': date_str,
-                    'init_hour': init_hour,
-                    'init_time': model_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    'run_id': f"run_{date_str}_{init_hour}"
-                }
-                
-                available_runs.append(run_info)
-                logger.info(f"Found available {model_id} run: {run_info['run_id']}")
-        except (requests.RequestException, requests.Timeout) as exc:
-            logger.warning(f"Error checking run from {hours_ago} hours ago: {str(exc)}")
-    
-    if not available_runs:
-        raise GribDownloadError(f"Could not find any recent {model_id} runs")
-        
-    return available_runs
-
 def fetch_grib(
     model_id: str,
     variable_id: str,
@@ -358,10 +228,8 @@ def fetch_grib(
     # Audit Check: skip if GRIB already exists and is valid
     if try_load_grib(filename):
         logger.info(f"[CACHE HIT] {model_id} {variable_id} {forecast_hour}")
-        audit_stats["grib_hits"] += 1
         return filename
 
-    audit_stats["grib_misses"] += 1
     # Use CONUS region for all downloads to ensure full coverage and deduplication
     download_region = repomap["DOWNLOAD_REGIONS"]["conus"]
     
@@ -548,72 +416,4 @@ def fetch_grib(
                 time.sleep(delay)
     
     raise GribDownloadError("Failed to obtain valid GRIB file after retries")
-
-
-@time_function
-def download_all_hours_parallel(
-    model_id: str,
-    variable_id: str,
-    date_str: str,
-    init_hour: str,
-    run_id: str,
-    max_hours: int,
-) -> dict[int, str]:
-    """Download GRIB files in parallel using a thread pool.
-
-    Strictly schedules every expected hour for the model/run based on
-    get_valid_forecast_hours. No short-circuiting; every step is attempted to
-    ensure deterministic caching on a model/run/step/var basis.
-    """
-    results: dict[int, str] = {}
-    max_workers = repomap["PARALLEL_DOWNLOAD_WORKERS"]
-    model_config = repomap["MODELS"][model_id]
-    digits = model_config.get("forecast_hour_digits", 2)
-
-    # Enumerate expected hours for this run (applying hourly override if supported)
-    valid_hours = get_run_forecast_hours(model_id, date_str, init_hour, max_hours)
-    # Identify the set of hours in the hourly override window (for NOMADS models needing alt pattern)
-    model_cfg = repomap["MODELS"][model_id]
-    hourly_first = int(model_cfg.get("hourly_override_first_hours", 0) or 0)
-    hourly_cutoff = min(hourly_first, max_hours)
-    hourly_set = set(range(1, hourly_cutoff + 1)) if (hourly_cutoff > 0 and detect_hourly_support(model_id, date_str, init_hour)) else set()
-
-    print(f"Downloading {len(valid_hours)} forecast hours: ", end="", flush=True)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        def fetch_with_check(h):
-            try:
-                res = fetch_grib(
-                    model_id,
-                    variable_id,
-                    date_str,
-                    init_hour,
-                    f"{h:0{digits}d}",
-                    run_id,
-                    use_hourly=(h in hourly_set),
-                )
-                return res
-            except Exception as e:
-                raise e
-
-        futures = {executor.submit(fetch_with_check, hour): hour for hour in valid_hours}
-        # Consume futures in submission order by sorting on planned hour
-        for future in sorted(futures.keys(), key=lambda f: futures[f]):
-            hour = futures[future]
-            try:
-                val = future.result()
-                if val:
-                    results[hour] = val
-                    print(".", end="", flush=True)
-            except Exception as exc:
-                if "404" in str(exc):
-                    print("x", end="", flush=True)
-                else:
-                    logger.warning(f"Hour {hour} failed: {exc}")
-                    print("!", end="", flush=True)
-
-    if results:
-        print(f" Done. ({len(results)}/{len(valid_hours)} hours)", flush=True)
-    else:
-        print(" Failed.", flush=True)
-    return results
 
