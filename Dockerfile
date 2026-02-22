@@ -23,6 +23,17 @@ COPY . .
 # Create directories for volume mount and logs
 RUN mkdir -p /app/cache /app/logs
 
+# Memory optimization for 1GB container:
+# - MALLOC_ARENA_MAX: limit glibc malloc arenas (default = 8*cores, wastes RSS)
+# - OMP/OPENBLAS threads: numpy/scipy default to all cores, 1 is enough
+# - PYTHONDONTWRITEBYTECODE: skip .pyc writes (tiny savings)
+ENV MALLOC_ARENA_MAX=2 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 # Copy supervisor config
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
