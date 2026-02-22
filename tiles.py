@@ -6,7 +6,6 @@ import os
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
-import xarray as xr
 from filelock import FileLock
 
 from config import repomap
