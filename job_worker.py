@@ -49,15 +49,18 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
     ds = open_as_xarray(model_id, variable_id, date_str, init_hour, forecast_hour)
 
     variable_config = repomap["WEATHER_VARIABLES"][variable_id]
-    mins, maxs, means, hours, index_meta = build_tiles_for_variable(
-        {forecast_hour: ds},
-        variable_config,
-        lat_min,
-        lat_max,
-        lon_min,
-        lon_max,
-        resolution_deg,
-    )
+    try:
+        mins, maxs, means, hours, index_meta = build_tiles_for_variable(
+            {forecast_hour: ds},
+            variable_config,
+            lat_min,
+            lat_max,
+            lon_min,
+            lon_max,
+            resolution_deg,
+        )
+    finally:
+        ds.close()
 
     init_time_utc = None
     try:
