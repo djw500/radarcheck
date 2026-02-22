@@ -301,8 +301,11 @@ def get_rebuild_eta():
     """Estimate time to drain the job queue.
 
     Returns:
-        dict with pending_total, avg_job_seconds, active_workers, eta_seconds
+        dict with pending_total, avg_job_seconds, workers, eta_seconds
     """
+    # Worker count from env (matches supervisord numprocs), not from DB
+    workers = int(os.environ.get("TILE_BUILD_WORKERS", "2"))
+
     try:
         conn = init_jobs_db(repomap.get("DB_PATH", "cache/jobs.db"))
         try:
@@ -317,10 +320,6 @@ def get_rebuild_eta():
             ).fetchone()
             avg_duration = row[0] if row[0] else None
 
-            workers = conn.execute(
-                "SELECT COUNT(DISTINCT worker_id) FROM jobs WHERE status='processing'"
-            ).fetchone()[0] or 1
-
             eta_seconds = None
             if avg_duration and pending > 0:
                 eta_seconds = int((pending * avg_duration) / max(workers, 1))
@@ -328,7 +327,7 @@ def get_rebuild_eta():
             return {
                 "pending_total": pending,
                 "avg_job_seconds": round(avg_duration, 1) if avg_duration else None,
-                "active_workers": workers,
+                "workers": workers,
                 "eta_seconds": eta_seconds,
             }
         finally:

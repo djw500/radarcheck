@@ -190,7 +190,7 @@ function renderETA(eta) {
 
     el.textContent = text;
     if (detail) {
-        detail.textContent = `${eta.pending_total} jobs · ${eta.active_workers} workers · ${eta.avg_job_seconds?.toFixed(0) || '?'}s avg`;
+        detail.textContent = `${eta.pending_total} jobs · ${eta.workers} workers · ${eta.avg_job_seconds?.toFixed(0) || '?'}s avg`;
     }
 }
 
