@@ -40,9 +40,15 @@ primary_region = 'ewr'
   TILE_BUILD_VARIABLES = "apcp,asnow,snod,t2m"
   # Herbie GRIB cache directory (on the volume for persistence)
   HERBIE_SAVE_DIR = "/app/cache/herbie"
-  # Keep cache small - synoptic (00/06/12/18z) + hourly runs
-  TILE_BUILD_SYNOPTIC_RUNS = "4"
-  TILE_BUILD_HOURLY_RUNS = "4"
+  # Retention: HRRR/NBM keep few runs (high frequency, disk heavy)
+  # GFS/ECMWF keep more synoptic runs (long-range forecasts)
+  TILE_BUILD_SYNOPTIC_RUNS_HRRR = "2"
+  TILE_BUILD_HOURLY_RUNS_HRRR = "2"
+  TILE_BUILD_SYNOPTIC_RUNS_NBM = "2"
+  TILE_BUILD_HOURLY_RUNS_NBM = "2"
+  TILE_BUILD_SYNOPTIC_RUNS_GFS = "4"
+  TILE_BUILD_SYNOPTIC_RUNS_ECMWF_HRES = "4"
+  TILE_BUILD_SYNOPTIC_RUNS_NAM_NEST = "3"
 
 [[vm]]
   memory = '1gb'

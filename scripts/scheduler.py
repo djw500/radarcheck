@@ -70,8 +70,16 @@ logger.setLevel(logging.INFO)
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
 BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,asnow,snod,t2m"
 # Tile retention: keep N synoptic (00/06/12/18z) + M hourly runs per model
-MAX_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "8"))
-MAX_HOURLY_RUNS = int(os.environ.get("TILE_BUILD_HOURLY_RUNS", "12"))
+# Global defaults; override per-model with TILE_BUILD_SYNOPTIC_RUNS_<MODEL>
+DEFAULT_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "8"))
+DEFAULT_HOURLY_RUNS = int(os.environ.get("TILE_BUILD_HOURLY_RUNS", "12"))
+
+
+def _get_retention(model_id):
+    """Get (synoptic, hourly) retention counts for a model."""
+    syn = int(os.environ.get(f"TILE_BUILD_SYNOPTIC_RUNS_{model_id.upper()}", DEFAULT_SYNOPTIC_RUNS))
+    hr = int(os.environ.get(f"TILE_BUILD_HOURLY_RUNS_{model_id.upper()}", DEFAULT_HOURLY_RUNS))
+    return syn, hr
 
 STATUS_FILE = os.path.join(repomap["CACHE_DIR"], "scheduler_status.json")
 
@@ -366,9 +374,10 @@ def cleanup_old_runs():
                     except (IndexError, ValueError):
                         hourly_runs.append(run_id)
 
-                # Keep top N synoptic + top M hourly
-                keep_synoptic = set(synoptic_runs[:MAX_SYNOPTIC_RUNS])
-                keep_hourly = set(hourly_runs[:MAX_HOURLY_RUNS])
+                # Keep top N synoptic + top M hourly (per-model)
+                max_syn, max_hr = _get_retention(model_id)
+                keep_synoptic = set(synoptic_runs[:max_syn])
+                keep_hourly = set(hourly_runs[:max_hr])
                 keep_all = keep_synoptic | keep_hourly
 
                 runs_to_remove = [r for r in runs if r not in keep_all]
