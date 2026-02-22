@@ -5,10 +5,13 @@
 Radarcheck fetches weather forecast data from NOAA NOMADS, processes it into statistical tiles, and serves it through a Flask web application.
 
 ```
-NOMADS (HRRR, NAM, GFS)
+NOMADS (HRRR, NAM Nest, GFS, NBM)
         │
         ▼
-   build_tiles.py
+   scheduler (enqueues jobs to SQLite)
+        │
+        ▼
+   job_worker.py → build_tiles.py
         │
         ▼
    GRIB files ──────────────────► cache/gribs/<model>/<run>/<var>/
@@ -20,11 +23,11 @@ NOMADS (HRRR, NAM, GFS)
    NPZ tile files ──────────────► cache/tiles/<region>/<res>/<model>/<run>/<var>.npz
         │
         ▼
-   Flask app (app.py)
+   Flask app
         │
-        ├──► /forecast (HTML table)
-        ├──► /api/forecast (JSON)
-        └──► /api/tile_* (tile discovery)
+        ├──► / (forecast UI)
+        ├──► /api/timeseries/multirun (JSON)
+        └──► /status (dashboard)
 ```
 
 ## Key Components
@@ -34,14 +37,18 @@ NOMADS (HRRR, NAM, GFS)
 | File | Purpose |
 |------|---------|
 | `build_tiles.py` | CLI tool to fetch GRIBs and generate tile statistics |
-| `tiles.py` | Tile generation logic, point queries, grid slicing |
+| `tiles.py` | Tile generation logic, point queries |
 | `config.py` | Model definitions, variable configs, regions |
+| `jobs.py` | SQLite job queue |
+| `job_worker.py` | Background worker that processes queued jobs |
 
 ### Web Layer
 
 | File | Purpose |
 |------|---------|
-| `app.py` | Flask routes, API endpoints |
+| `app.py` | Flask app factory, global auth, index/health/metrics |
+| `routes/forecast.py` | `/api/timeseries/multirun` + snow derivation helpers |
+| `routes/status.py` | `/status` dashboard + `/api/status/*` + `/api/jobs/*` |
 | `templates/` | Jinja2 HTML templates |
 | `static/` | JavaScript, CSS |
 
@@ -53,7 +60,8 @@ cache/
 │   └── <model>/<run>/<var>/grib_XX.grib2
 ├── tiles/                    # Statistical tiles (regional)
 │   └── <region>/<resolution>/<model>/<run>/<var>.npz
-└── county_shapefile/         # US county boundaries
+├── jobs.db                   # Job queue (SQLite)
+└── tiles.db                  # Tile metadata (SQLite)
 ```
 
 ## Tile System
@@ -70,16 +78,14 @@ Default resolution: **0.1° (~10km cells)**
 ## Models and Variables
 
 See `config.py` for full definitions:
-- **MODELS**: HRRR, NAM Nest, NAM 12km, GFS, RAP, ECMWF (scaffolded)
-- **WEATHER_VARIABLES**: 15+ variables across precipitation, temperature, wind, severe categories
-- **TILING_REGIONS**: Currently only "ne" (Northeast US)
+- **Models**: HRRR (48h), NAM Nest (60h), GFS (168h), NBM (168h), ECMWF HRES (disabled)
+- **Built variables**: apcp, prate, asnow, csnow, snod, t2m
+- **Tiling region**: `ne` (Northeast US)
 
 ## Deployment
 
 - **Platform**: Fly.io (ewr region)
 - **Container**: Python 3.11-slim + eccodes
 - **Storage**: 1GB persistent volume at `/app/cache`
-- **Process**: gunicorn serving Flask app
-- **CI/CD**: GitHub Actions → fly deploy on push to main
-
-See `docs/operations/flyio-guide.md` for deployment details.
+- **Processes**: gunicorn (web) + scheduler + worker via supervisord
+- **CI/CD**: Push to main → fly deploy

@@ -237,15 +237,6 @@ WEATHER_VARIABLES = {
     },
 }
 
-WEATHER_CATEGORIES = {
-    "precipitation": "Precipitation & Storms",
-    "winter": "Winter Weather",
-    "wind": "Wind",
-    "temperature": "Temperature & Moisture",
-    "severe": "Severe Weather",
-    "surface": "Surface",
-}
-
 MODELS = {
     "hrrr": {
         "name": "HRRR",
@@ -387,7 +378,6 @@ repomap = {
     "DEFAULT_MODEL": "hrrr",
     "DEFAULT_VARIABLE": "refc",
     "WEATHER_VARIABLES": WEATHER_VARIABLES,
-    "WEATHER_CATEGORIES": WEATHER_CATEGORIES,
     "MODELS": MODELS,
     # Network settings
     "DOWNLOAD_TIMEOUT_SECONDS": 60,

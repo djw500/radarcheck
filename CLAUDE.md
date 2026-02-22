@@ -6,25 +6,32 @@ This file provides guidance to Claude Code and other AI agents working with this
 
 Radarcheck is a weather forecast visualization app that fetches GRIB2 data from NOAA NOMADS, generates statistical tiles, and serves forecast tables through a Flask web interface.
 
-**Current Focus**: Transitioning from legacy PNG-based location views to a tile-based multi-model tabular interface.
-
 ## Architecture
 
 ```
-NOMADS → build_tiles.py → GRIB → tiles.py → NPZ tiles → Flask → /forecast UI
+NOMADS → scheduler → job_worker.py → build_tiles.py → tiles.py → NPZ tiles
+                                                                      ↓
+                                                              Flask API → UI
 ```
 
 **Key files**:
+- `app.py` - Flask app factory, global auth, index/health/metrics routes
+- `routes/forecast.py` - `/api/timeseries/multirun` endpoint + snow derivation
+- `routes/status.py` - `/status` dashboard + `/api/status/*` + `/api/jobs/*`
 - `build_tiles.py` - CLI to fetch GRIBs and generate tiles
 - `tiles.py` - Tile statistics and point queries
-- `app.py` - Flask routes and API
 - `config.py` - Models, variables, regions configuration
+- `jobs.py` - SQLite job queue
+- `job_worker.py` - Background worker that processes jobs
+- `scripts/build_tiles_scheduled.py` - Scheduler that enqueues jobs
 
 **Cache structure**:
 ```
 cache/
 ├── gribs/<model>/<run>/<var>/grib_XX.grib2   # Raw GRIB files
-└── tiles/<region>/<res>/<model>/<run>/<var>.npz  # Statistical tiles
+├── tiles/<region>/<res>/<model>/<run>/<var>.npz  # Statistical tiles
+├── jobs.db                                    # Job queue (SQLite)
+└── tiles.db                                   # Tile metadata (SQLite)
 ```
 
 ## Common Commands
@@ -37,64 +44,47 @@ pip install -r requirements.txt
 # Run development server
 python app.py -p 5001
 
-# Build tiles for a region/model
-python build_tiles.py --region ne --model hrrr --max-hours 24
+# Start all dev services (server + scheduler + per-model workers)
+bash dev-services.sh start
 
-# Build with cleanup (saves disk space)
-python build_tiles.py --region ne --model gfs --max-hours 168 --clean-gribs
+# Build tiles manually
+python build_tiles.py --region ne --model hrrr --max-hours 24
 
 # Run tests
 pytest tests/
-
-# Run single test
-pytest tests/test_tiles_build.py -v
 ```
 
 ## Key Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/table/geo` | Main tabular forecast UI (tile-backed) |
-| `/api/table/bylatlon` | JSON forecast data at lat/lon |
-| `/api/tile_models` | Available models with tiles |
-| `/api/tile_runs/<model>` | Available runs for a model |
+| `/` | Main forecast UI |
+| `/status` | System status dashboard |
 | `/health` | Health check |
-
-## Current State (January 2026)
-
-**Working**:
-- Tile building for HRRR and NAM Nest (NE region)
-- `/table/geo` UI with lat/lon input
-- Centralized GRIB caching
-
-**Deprecated/Broken**:
-- `/location/<id>` PNG-based views
-- `cache_builder.py` image generation
-
-## Documentation
-
-```
-docs/
-├── planning/roadmap.md      # Vision and phases
-├── planning/todos.md        # Implementation checklist
-├── architecture/overview.md # System design
-├── operations/flyio-guide.md # Deployment
-└── ux/ideas.md              # UX improvements
-```
+| `/metrics` | Prometheus metrics |
+| `/api/timeseries/multirun` | Multi-run forecast timeseries at lat/lon |
+| `/api/status/summary` | System status JSON |
+| `/api/status/run-grid` | Model run completeness grid |
+| `/api/status/logs` | Scheduler log tail |
+| `/api/jobs/list` | Job queue listing |
+| `/api/jobs/retry-failed` | Retry failed jobs |
+| `/api/jobs/cancel` | Cancel a job |
+| `/api/jobs/enqueue-run` | Manually enqueue a run |
 
 ## Development Workflow
 
-**Branch strategy**: Work directly on `main` branch. No PRs or feature branches—commit directly to main.
+**Branch strategy**: Work directly on `main` branch. No PRs or feature branches.
 
 **Local development**:
-- Run dev server on macbook: `python app.py -p 5001`
-- Test tile building and caching locally before deploying
+- Run dev server: `python app.py -p 5001`
+- Dev services (server + workers): `bash dev-services.sh start`
 - No API key required for local dev server
 
 **Production (Fly.io)**:
 - Push to `main` triggers automatic deploy
-- API key authentication is required (set via `FLY_API_KEY` secret)
+- API key authentication via global `before_request` (set via `FLY_API_KEY` secret)
 - 1GB volume for tile/GRIB caches
+- Single generic worker (RAM constrained)
 
 ## Development Notes
 
@@ -107,7 +97,7 @@ docs/
 1. **New variable**: Add to `WEATHER_VARIABLES` in `config.py`
 2. **New model**: Add to `MODELS` in `config.py`
 3. **New region**: Add to `TILING_REGIONS` in `config.py`
-4. **New API endpoint**: Add route in `app.py`
+4. **New API endpoint**: Add route in `routes/forecast.py` or `routes/status.py`
 
 ## Testing
 

@@ -8,19 +8,26 @@ cache/
 
 # Server logs
 logs/
+*.log
 
 # IDE settings
 .vscode/
 
 # Virtual environment
 venv/
+.venv/
 
 # Fly.io
 .fly/
 
-# iOS / Xcode
-ios/*/xcuserdata/
-ios/*/.build/
-ios/*/DerivedData/
-*.xcworkspace/xcuserdata/
+# Test/build artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Debug files
+debug_*.grib2*
+
+# Node
 node_modules/
