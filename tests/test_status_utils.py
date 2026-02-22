@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from status_utils import get_disk_usage, read_scheduler_logs
-from status_utils import _parse_updated_at_to_timestamp
 from tile_db import init_db, record_tile_run, record_tile_variable
 
 # Mock configuration
@@ -101,7 +100,3 @@ def test_read_scheduler_logs():
         assert read_scheduler_logs() == []
 
 
-def test_parse_updated_at_to_timestamp():
-    ts = _parse_updated_at_to_timestamp("2024-01-01 12:30:00")
-    assert ts > 0
-    assert _parse_updated_at_to_timestamp("bad") == 0.0

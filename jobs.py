@@ -259,18 +259,6 @@ def count_by_status(conn: sqlite3.Connection) -> Dict[str, int]:
     return {row["status"]: row["count"] for row in rows}
 
 
-def count_by_type_and_status(conn: sqlite3.Connection) -> Dict[str, Dict[str, int]]:
-    rows = conn.execute(
-        """
-        SELECT type, status, COUNT(*) as count
-        FROM jobs
-        GROUP BY type, status;
-        """
-    ).fetchall()
-    results: Dict[str, Dict[str, int]] = {}
-    for row in rows:
-        results.setdefault(row["type"], {})[row["status"]] = row["count"]
-    return results
 
 
 def get_jobs(

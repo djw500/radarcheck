@@ -6,7 +6,6 @@ from jobs import (
     claim,
     complete,
     count_by_status,
-    count_by_type_and_status,
     enqueue,
     fail,
     get_jobs,
@@ -286,18 +285,6 @@ def test_count_by_status_returns_correct_counts(tmp_path):
     counts = count_by_status(conn)
     assert counts["pending"] == 2
     assert counts["completed"] == 1
-
-
-def test_count_by_type_and_status(tmp_path):
-    conn = init_db(str(tmp_path / "jobs.db"))
-    enqueue(conn, "ingest_grib", {"a": 1})
-    enqueue(conn, "build_tile", {"a": 2})
-    job_id = enqueue(conn, "build_tile", {"a": 3})
-    complete(conn, job_id)
-    counts = count_by_type_and_status(conn)
-    assert counts["ingest_grib"]["pending"] == 1
-    assert counts["build_tile"]["pending"] == 1
-    assert counts["build_tile"]["completed"] == 1
 
 
 def test_concurrent_claims_no_duplicates(tmp_path):

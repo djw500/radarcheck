@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -18,43 +17,16 @@ import numpy as np
 
 from config import repomap
 from ecmwf import fetch_grib_herbie, herbie_run_available  # using Herbie for ECMWF
-from tiles import open_dataset_robust
+from tiles import open_dataset_robust, _select_variable_from_dataset as select_variable_from_dataset
 from utils import (
     GribDownloadError,
     GribValidationError,
-    compute_wind_speed,
     download_file,
     format_forecast_hour,
     time_function,
     audit_stats,
 )
 
-
-def select_variable_from_dataset(ds: xr.Dataset, variable_config: dict[str, Any]) -> xr.DataArray:
-    """Select the appropriate variable from a GRIB dataset."""
-    vector_components = variable_config.get("vector_components")
-    if vector_components:
-        u_name, v_name = vector_components
-        if u_name in ds.data_vars and v_name in ds.data_vars:
-            return compute_wind_speed(ds[u_name], ds[v_name])
-        candidates = variable_config.get("vector_component_candidates")
-        if candidates and len(candidates) == 2:
-            u_alts, v_alts = candidates
-            found_u = next((name for name in u_alts if name in ds.data_vars), None)
-            found_v = next((name for name in v_alts if name in ds.data_vars), None)
-            if found_u and found_v:
-                return compute_wind_speed(ds[found_u], ds[found_v])
-        raise ValueError(f"Missing wind components: {vector_components}")
-
-    preferred_name = variable_config.get("short_name")
-    if preferred_name in ds.data_vars:
-        return ds[preferred_name]
-    for alt_name in variable_config.get("source_short_names", []):
-        if alt_name in ds.data_vars:
-            return ds[alt_name]
-    if ds.data_vars:
-        return ds[list(ds.data_vars.keys())[0]]
-    raise ValueError("No variables found in GRIB dataset.")
 
 # Set up logging
 os.makedirs('logs', exist_ok=True)

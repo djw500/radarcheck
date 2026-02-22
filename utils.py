@@ -40,10 +40,6 @@ class GribValidationError(Exception):
     """GRIB file is corrupted or invalid."""
 
 
-class PlotGenerationError(Exception):
-    """Failed to generate forecast plot."""
-
-
 def download_file(url: str, local_path: str, timeout: Optional[int] = None) -> None:
     """Download a file if it doesn't exist in cache.
 

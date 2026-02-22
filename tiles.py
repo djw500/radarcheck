@@ -9,7 +9,7 @@ import xarray as xr
 from filelock import FileLock
 
 from config import repomap
-from tile_db import init_db, list_tile_models_db, list_tile_runs_db, list_tile_variables_db
+from tile_db import init_db, list_tile_models_db, list_tile_runs_db
 from utils import convert_units, time_function
 
 
@@ -486,21 +486,6 @@ def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_i
     conn = init_db(repomap.get("DB_PATH"))
     try:
         return list_tile_runs_db(conn, region_id, resolution_deg, model_id)
-    finally:
-        conn.close()
-
-
-def list_tile_variables(
-    base_dir: str,
-    region_id: str,
-    resolution_deg: float,
-    model_id: str,
-    run_id: str,
-) -> Dict[str, Dict[str, Any]]:
-    """Return variables present for a tile run with basic info (hours, file size)."""
-    conn = init_db(repomap.get("DB_PATH"))
-    try:
-        return list_tile_variables_db(conn, region_id, resolution_deg, model_id, run_id)
     finally:
         conn.close()
 
