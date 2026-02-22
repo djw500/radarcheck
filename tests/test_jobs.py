@@ -226,7 +226,10 @@ def test_fail_requeue_sets_retry_after_with_backoff(tmp_path):
 def test_recover_stale_resets_processing_to_pending(tmp_path):
     conn = init_db(str(tmp_path / "jobs.db"))
     job_id = enqueue(conn, "ingest_grib", {"a": 1})
-    conn.execute("UPDATE jobs SET status = 'processing' WHERE id = ?", (job_id,))
+    conn.execute(
+        "UPDATE jobs SET status = 'processing', started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-20 minutes') WHERE id = ?",
+        (job_id,),
+    )
     conn.commit()
     recover_stale(conn)
     status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()[0]
@@ -237,7 +240,7 @@ def test_recover_stale_clears_worker_id(tmp_path):
     conn = init_db(str(tmp_path / "jobs.db"))
     job_id = enqueue(conn, "ingest_grib", {"a": 1})
     conn.execute(
-        "UPDATE jobs SET status = 'processing', worker_id = 'w' WHERE id = ?",
+        "UPDATE jobs SET status = 'processing', worker_id = 'w', started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-20 minutes') WHERE id = ?",
         (job_id,),
     )
     conn.commit()

@@ -123,7 +123,7 @@ def test_run_worker_cancels_siblings_on_failure(tmp_path, monkeypatch):
         ids.append(job_id)
 
     # Worker processes first job (H1) and it fails — should cancel H2, H3
-    with patch("job_worker.process_build_tile_hour", side_effect=RuntimeError("404")):
+    with patch("job_worker.process_build_tile_hour", side_effect=RuntimeError("not available (404)")):
         run_worker(once=True)
 
     statuses = []

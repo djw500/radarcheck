@@ -77,9 +77,14 @@ def test_stale_recovery_then_reprocess(tmp_path):
     job = claim(conn, "w1")
     assert job is not None
 
-    # Simulate crash: job stuck in processing
+    # Simulate crash: job stuck in processing for 20 minutes
     row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
     assert row["status"] == "processing"
+    conn.execute(
+        "UPDATE jobs SET started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-20 minutes') WHERE id = ?",
+        (job_id,),
+    )
+    conn.commit()
 
     # Recover stale jobs
     recovered = recover_stale(conn)
