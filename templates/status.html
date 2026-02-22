@@ -48,7 +48,7 @@
                 <button id="refreshBtn" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1">
                     <span class="material-icons-outlined text-sm">refresh</span> Refresh
                 </button>
-                <a href="/" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="Back to Forecast">
+                <a id="forecastLink" href="/" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="Back to Forecast">
                     <span class="material-icons-outlined">arrow_back</span>
                 </a>
             </div>
@@ -204,7 +204,7 @@
         <div class="bg-slate-900 text-slate-300 p-4 rounded-lg font-mono text-xs h-96 overflow-y-auto leading-relaxed" id="logsContainer">
         </div>
         <div class="mt-2 text-right">
-            <a href="/api/status/logs?lines=1000" target="_blank" class="text-xs text-slate-500 hover:text-primary hover:underline">View Raw Log</a>
+            <a id="rawLogLink" href="/api/status/logs?lines=1000" target="_blank" class="text-xs text-slate-500 hover:text-primary hover:underline">View Raw Log</a>
         </div>
     </div>
 
@@ -213,6 +213,15 @@
 <script src="{{ url_for('static', filename='js/statusView.js') }}"></script>
 <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // Pass API key through links
+        const apiKey = new URLSearchParams(window.location.search).get('api_key') || '';
+        if (apiKey) {
+            const q = '?api_key=' + encodeURIComponent(apiKey);
+            const fl = document.getElementById('forecastLink');
+            if (fl) fl.href = '/' + q;
+            const rl = document.getElementById('rawLogLink');
+            if (rl) rl.href = rl.href + '&api_key=' + encodeURIComponent(apiKey);
+        }
         if (typeof initStatusPage === 'function') {
             initStatusPage();
         }

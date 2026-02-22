@@ -1,9 +1,14 @@
+// --- Auth ---
+const STATUS_API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
+
 // --- Eager timeout fetch ---
 async function fetchJSON(url) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
+    const headers = {};
+    if (STATUS_API_KEY) headers['X-API-Key'] = STATUS_API_KEY;
     try {
-        const res = await fetch(url, { signal: ctrl.signal });
+        const res = await fetch(url, { headers, signal: ctrl.signal });
         if (!res.ok) throw new Error(await res.text());
         return res.json();
     } finally {
@@ -14,10 +19,12 @@ async function fetchJSON(url) {
 async function postJSON(url, body) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
+    const headers = { 'Content-Type': 'application/json' };
+    if (STATUS_API_KEY) headers['X-API-Key'] = STATUS_API_KEY;
     try {
         const res = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify(body),
             signal: ctrl.signal,
         });

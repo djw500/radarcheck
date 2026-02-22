@@ -60,7 +60,7 @@
             
             <div class="flex items-center gap-2">
                 <!-- System Status -->
-                <a href="/status" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="System Status">
+                <a id="statusLink" href="/status" class="p-2 rounded-full text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-white transition-colors" title="System Status">
                     <span class="material-icons-outlined">dns</span>
                 </a>
 
@@ -215,6 +215,7 @@ const STORAGE_KEY_CACHE_PREFIX = 'radarcheck_cache_v1:';
 const LOCAL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 // Read API key from URL so authenticated fetches work in production
 const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
+if (API_KEY) document.getElementById('statusLink').href = '/status?api_key=' + encodeURIComponent(API_KEY);
 let chartInstance = null;
 let currentLat = null;
 let currentLon = null;
