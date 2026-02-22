@@ -32,15 +32,15 @@ primary_region = 'ewr'
 [env]
   TILE_BUILD_INTERVAL_MINUTES = "15"
   TILE_BUILD_MAX_HOURS_HRRR = "18"
-  TILE_BUILD_MAX_HOURS_NAM = "36"
+  TILE_BUILD_MAX_HOURS_NAM_NEST = "36"
   TILE_BUILD_MAX_HOURS_GFS = "72"
   TILE_BUILD_MAX_HOURS_NBM = "48"
+  TILE_BUILD_MAX_HOURS_ECMWF_HRES = "72"
   # Core precip/snow/temp variables only — keeps GRIB and tile footprint small
   TILE_BUILD_VARIABLES = "apcp,asnow,snod,t2m"
   # Herbie GRIB cache directory (on the volume for persistence)
   HERBIE_SAVE_DIR = "/app/cache/herbie"
   # Keep cache small - synoptic (00/06/12/18z) + hourly runs
-  TILE_BUILD_GRIB_RUNS_KEEP = "0"
   TILE_BUILD_SYNOPTIC_RUNS = "4"
   TILE_BUILD_HOURLY_RUNS = "4"
 
