@@ -21,9 +21,8 @@ export TILE_BUILD_MAX_HOURS_NBM="${TILE_BUILD_MAX_HOURS_NBM:-48}"
 
 SCHED_LOG="/tmp/scheduler.log"
 SCHED_PID="/tmp/scheduler.pid"
-WORKER_LOG="/tmp/workers.log"
-WORKER_PID="/tmp/workers.pid"
-WORKER_COUNT="${TILE_WORKER_COUNT:-2}"
+
+MODELS=(hrrr nam_nest gfs nbm ecmwf_hres)
 
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
@@ -47,32 +46,34 @@ stop_scheduler() {
     rm -f "$SCHED_PID"
 }
 
-# ── Workers ──────────────────────────────────────────────────────────────────
+# ── Workers (one per model — dev is not resource constrained) ─────────────────
 
 start_workers() {
-    if [[ -f "$WORKER_PID" ]] && kill -0 "$(cat "$WORKER_PID")" 2>/dev/null; then
-        echo "Workers already running (pid $(cat "$WORKER_PID"))"
-        return
-    fi
-    nohup python3 job_worker.py --workers "$WORKER_COUNT" --log-file "$WORKER_LOG" > "$WORKER_LOG" 2>&1 &
-    echo $! > "$WORKER_PID"
-    echo "Started $WORKER_COUNT workers (pid $!), log: $WORKER_LOG"
+    for model in "${MODELS[@]}"; do
+        local pidfile="/tmp/worker_${model}.pid"
+        local logfile="/tmp/worker_${model}.log"
+        if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+            echo "Worker[$model]: already running (pid $(cat "$pidfile"))"
+            continue
+        fi
+        nohup python3 job_worker.py --model "$model" --poll-interval 10 --log-file "$logfile" > "$logfile" 2>&1 &
+        echo $! > "$pidfile"
+        echo "Worker[$model]: started (pid $!), log: $logfile"
+    done
 }
 
 stop_workers() {
-    if [[ -f "$WORKER_PID" ]] && kill -0 "$(cat "$WORKER_PID")" 2>/dev/null; then
-        local pid; pid=$(cat "$WORKER_PID")
-        # Kill the manager and any child processes it spawned (multiprocessing daemons
-        # use their own process groups, so we kill children explicitly)
-        local children
-        children=$(awk -v ppid="$pid" '$4==ppid{print $1}' /proc/[0-9]*/stat 2>/dev/null | tr '\n' ' ')
-        kill $children 2>/dev/null || true
-        kill "$pid" 2>/dev/null || true
-        echo "Stopped workers (pid $pid, children: ${children:-none})"
-    else
-        echo "Workers not running"
-    fi
-    rm -f "$WORKER_PID"
+    for model in "${MODELS[@]}"; do
+        local pidfile="/tmp/worker_${model}.pid"
+        if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+            local pid; pid=$(cat "$pidfile")
+            kill "$pid" 2>/dev/null || true
+            echo "Worker[$model]: stopped (pid $pid)"
+        else
+            echo "Worker[$model]: not running"
+        fi
+        rm -f "$pidfile"
+    done
 }
 
 # ── Combined ─────────────────────────────────────────────────────────────────
@@ -93,17 +94,22 @@ status_all() {
     else
         echo "Scheduler: stopped"
     fi
-    if [[ -f "$WORKER_PID" ]] && kill -0 "$(cat "$WORKER_PID")" 2>/dev/null; then
-        echo "Workers:   running (pid $(cat "$WORKER_PID"), count=$WORKER_COUNT)"
-    else
-        echo "Workers:   stopped"
-    fi
+    for model in "${MODELS[@]}"; do
+        local pidfile="/tmp/worker_${model}.pid"
+        if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+            echo "Worker[$model]: running (pid $(cat "$pidfile"))"
+        else
+            echo "Worker[$model]: stopped"
+        fi
+    done
     echo ""
-    echo "=== Scheduler log (last 15 lines) ==="
-    tail -n 15 "$SCHED_LOG" 2>/dev/null || echo "(no log yet)"
+    echo "=== Scheduler log (last 10 lines) ==="
+    tail -n 10 "$SCHED_LOG" 2>/dev/null || echo "(no log yet)"
     echo ""
-    echo "=== Worker log (last 15 lines) ==="
-    tail -n 15 "$WORKER_LOG" 2>/dev/null || echo "(no log yet)"
+    for model in "${MODELS[@]}"; do
+        echo "=== Worker[$model] log (last 5 lines) ==="
+        tail -n 5 "/tmp/worker_${model}.log" 2>/dev/null || echo "(no log yet)"
+    done
 }
 
 case "${1:-}" in
@@ -124,7 +130,7 @@ case "${1:-}" in
     status)
         status_all ;;
     logs)
-        tail -f "$SCHED_LOG" "$WORKER_LOG" ;;
+        tail -f "$SCHED_LOG" /tmp/worker_*.log 2>/dev/null ;;
     *)
         echo "Usage: $0 {start|stop|restart|status|logs} [scheduler|workers]" >&2
         exit 1 ;;

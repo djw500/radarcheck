@@ -379,29 +379,6 @@ MODELS = {
     },
 }
 
-MAP_LAYERS = {
-    "observed_radar": {
-        "name": "Observed Radar (NEXRAD)",
-        "type": "tile",
-        "url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/"
-        "nexrad-n0q-900913/{z}/{x}/{y}.png",
-        "attribution": "Weather data © Iowa Environmental Mesonet",
-        "max_zoom": 12,
-        "min_zoom": 4,
-        "opacity": 0.7,
-    },
-    "goes_ir": {
-        "name": "GOES-16 IR Satellite",
-        "type": "tile",
-        "url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/"
-        "goes-16-ch13-0p5km/{z}/{x}/{y}.png",
-        "attribution": "Satellite data © NOAA GOES",
-        "max_zoom": 12,
-        "min_zoom": 4,
-        "opacity": 0.6,
-    },
-}
-
 repomap = {
     "CACHE_DIR": "cache",
     "GRIB_CACHE_DIR": "cache/gribs",
@@ -412,10 +389,6 @@ repomap = {
     "WEATHER_VARIABLES": WEATHER_VARIABLES,
     "WEATHER_CATEGORIES": WEATHER_CATEGORIES,
     "MODELS": MODELS,
-    "MAP_LAYERS": MAP_LAYERS,
-    "COUNTY_ZIP_NAME": "cb_2018_us_county_20m.zip",
-    "COUNTY_DIR_NAME": "county_shapefile",
-    "COUNTY_SHP_NAME": "cb_2018_us_county_20m.shp",
     # Network settings
     "DOWNLOAD_TIMEOUT_SECONDS": 60,
     "HEAD_REQUEST_TIMEOUT_SECONDS": 10,
@@ -424,10 +397,6 @@ repomap = {
 
     # File validation
     "MIN_GRIB_FILE_SIZE_BYTES": 1000,
-    "MIN_PNG_FILE_SIZE_BYTES": 1000,
-
-    # Cache settings
-    "CACHE_REFRESH_INTERVAL_MINUTES": 15,
 
     # Model discovery
     "HOURS_TO_CHECK_FOR_RUNS": 27,
@@ -437,13 +406,6 @@ repomap = {
 
     # Parallel download settings
     "PARALLEL_DOWNLOAD_WORKERS": 1,
-
-    # Map tile generation settings
-    "GENERATE_STATIC_IMAGES": True,
-    "GENERATE_MAP_TILES": False,
-    "GENERATE_VECTOR_CONTOURS": False,
-    "TILE_MIN_ZOOM": 4,
-    "TILE_MAX_ZOOM": 10,
 
     # Download regions for centralized GRIB fetching
     "DOWNLOAD_REGIONS": {
@@ -475,89 +437,6 @@ repomap = {
         }
     },
 
-    # Location configurations
-    "LOCATIONS": {
-        "philly": {
-            "name": "Philadelphia",
-            "center_lat": 40.04877,
-            "center_lon": -75.38903,
-            "zoom": 1.5,
-            "lat_min": 38.8,
-            "lat_max": 40.7,
-            "lon_min": -76.5,
-            "lon_max": -73.5,
-        },
-        "nyc": {
-            "name": "New York City",
-            "center_lat": 40.7128,
-            "center_lon": -74.0060,
-            "zoom": 1.5,
-            "lat_min": 39.5,
-            "lat_max": 41.5,
-            "lon_min": -75.0,
-            "lon_max": -72.0,
-        },
-        "boston": {
-            "name": "Boston",
-            "center_lat": 42.3601,
-            "center_lon": -71.0589,
-            "zoom": 1.5,
-            "lat_min": 41.0,
-            "lat_max": 43.5,
-            "lon_min": -72.5,
-            "lon_max": -69.5,
-        },
-        "dc": {
-            "name": "Washington DC",
-            "center_lat": 38.9072,
-            "center_lon": -77.0369,
-            "zoom": 1.5,
-            "lat_min": 37.5,
-            "lat_max": 40.0,
-            "lon_min": -78.5,
-            "lon_max": -75.5,
-        },
-        "chicago": {
-            "name": "Chicago",
-            "center_lat": 41.8781,
-            "center_lon": -87.6298,
-            "zoom": 1.5,
-            "lat_min": 40.5,
-            "lat_max": 43.0,
-            "lon_min": -89.5,
-            "lon_max": -86.0,
-        },
-        "denver": {
-            "name": "Denver",
-            "center_lat": 39.7392,
-            "center_lon": -104.9903,
-            "zoom": 1.5,
-            "lat_min": 38.5,
-            "lat_max": 41.0,
-            "lon_min": -106.5,
-            "lon_max": -103.5,
-        },
-        "la": {
-            "name": "Los Angeles",
-            "center_lat": 34.0522,
-            "center_lon": -118.2437,
-            "zoom": 1.5,
-            "lat_min": 32.5,
-            "lat_max": 35.5,
-            "lon_min": -120.0,
-            "lon_max": -116.5,
-        },
-        "seattle": {
-            "name": "Seattle",
-            "center_lat": 47.6062,
-            "center_lon": -122.3321,
-            "zoom": 1.5,
-            "lat_min": 46.0,
-            "lat_max": 49.0,
-            "lon_min": -124.0,
-            "lon_max": -121.0,
-        },
-    },
 }
 
 if not os.path.exists(repomap["CACHE_DIR"]):

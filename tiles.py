@@ -482,56 +482,6 @@ def load_timeseries_for_point(
     return hours, values
 
 
-def load_grid_slice(
-    base_dir: str,
-    region_id: str,
-    resolution_deg: float,
-    model_id: str,
-    run_id: str,
-    variable_id: str,
-    hour: int,
-    stat: str = "mean",
-) -> Tuple[np.ndarray, Dict[str, float]]:
-    """
-    Load a 2D grid slice for a given hour from tiles. Returns (array, meta_bounds).
-    meta_bounds includes lat_min, lat_max, lon_min, lon_max and resolution_deg.
-    """
-    res_dir = f"{resolution_deg:.3f}deg".rstrip("0").rstrip(".")
-    npz_path = os.path.join(base_dir, region_id, res_dir, model_id, run_id, f"{variable_id}.npz")
-    meta_path = os.path.join(base_dir, region_id, res_dir, model_id, run_id, f"{variable_id}.meta.json")
-    if not os.path.exists(npz_path) or not os.path.exists(meta_path):
-        raise FileNotFoundError(f"Tiles not found for {variable_id} at {npz_path}")
-    with open(meta_path, "r") as f:
-        meta = json.load(f)
-    try:
-        npz_data = np.load(npz_path)
-    except Exception:
-        raise FileNotFoundError(f"Corrupt tile for {variable_id} at {npz_path}")
-    with npz_data as d:
-        hours = d["hours"]
-        # Map requested hour to index
-        try:
-            idx = int(np.where(hours == hour)[0][0])
-        except Exception:
-            raise IndexError(f"Hour {hour} not found in tiles; available: {hours.tolist()}")
-        # Fallback to means when requested stat is not available
-        key = "means"
-        if stat == "min" and "mins" in d.files:
-            key = "mins"
-        elif stat == "max" and "maxs" in d.files:
-            key = "maxs"
-        arr3d = d[key]
-        slice2d = arr3d[idx].copy()
-    bounds = {
-        "lat_min": meta["lat_min"],
-        "lat_max": meta["lat_max"],
-        "lon_min": meta["lon_min"],
-        "lon_max": meta["lon_max"],
-        "resolution_deg": meta["resolution_deg"],
-    }
-    return slice2d, bounds
-
-
 def list_tile_runs(base_dir: str, region_id: str, resolution_deg: float, model_id: str) -> List[str]:
     conn = init_db(repomap.get("DB_PATH"))
     try:
