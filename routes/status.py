@@ -42,6 +42,23 @@ def api_status_run_grid():
     return jsonify(grid)
 
 
+def _get_memory_info():
+    """Read /proc/meminfo and return memory stats in bytes."""
+    try:
+        info = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split()
+                if parts[0].rstrip(":") in ("MemTotal", "MemAvailable", "MemFree"):
+                    info[parts[0].rstrip(":")] = int(parts[1]) * 1024  # kB to bytes
+        total = info.get("MemTotal", 0)
+        available = info.get("MemAvailable", info.get("MemFree", 0))
+        return {"total": total, "available": available, "used": total - available,
+                "percent_used": round((total - available) / total * 100, 1) if total else 0}
+    except Exception:
+        return None
+
+
 @status_bp.route("/api/status/summary")
 def api_status_summary():
     """Get system status summary (cache, disk, scheduler)."""
@@ -51,6 +68,7 @@ def api_status_summary():
 
     return jsonify({
         "disk_usage": disk_usage,
+        "memory": _get_memory_info(),
         "scheduler_status": scheduler_status,
         "job_queue": job_queue,
         "timestamp": datetime.now(pytz.UTC).isoformat()

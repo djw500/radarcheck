@@ -106,6 +106,7 @@ async function refreshAll() {
         renderJobQueue(summaryData.job_queue);
         renderSchedulerStats(summaryData.scheduler_status);
         renderDiskUsage(summaryData.disk_usage);
+        renderMemory(summaryData.memory);
         renderRunGrid(gridData);
     } catch (e) {
         console.error('Failed to load status:', e);
@@ -167,6 +168,20 @@ function renderDiskUsage(u) {
     if (e('diskTotal')) e('diskTotal').textContent = formatBytes(u.total);
     if (e('diskGribs')) e('diskGribs').textContent = formatBytes(u.gribs?.total || 0);
     if (e('diskTiles')) e('diskTiles').textContent = formatBytes(u.tiles?.total || 0);
+}
+
+function renderMemory(m) {
+    if (!m) return;
+    const e = id => document.getElementById(id);
+    if (e('memUsed')) e('memUsed').textContent = formatBytes(m.used);
+    if (e('memTotal')) e('memTotal').textContent = formatBytes(m.total);
+    if (e('memPct')) e('memPct').textContent = m.percent_used;
+    const bar = e('memBar');
+    if (bar) {
+        bar.style.width = m.percent_used + '%';
+        bar.className = 'h-2 rounded-full transition-all ' +
+            (m.percent_used > 90 ? 'bg-red-500' : m.percent_used > 75 ? 'bg-amber-400' : 'bg-emerald-500');
+    }
 }
 
 // --- Run Grid: table summary view ---

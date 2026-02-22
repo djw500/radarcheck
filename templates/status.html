@@ -119,8 +119,16 @@
         </div>
     </div>
 
-    <!-- Disk Usage -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <!-- Disk & Memory -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
+            <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">Memory</h3>
+            <p id="memUsed" class="text-2xl font-bold text-slate-900 dark:text-white mt-2">-</p>
+            <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 mt-2">
+                <div id="memBar" class="h-2 rounded-full bg-primary transition-all" style="width:0%"></div>
+            </div>
+            <p class="text-xs text-slate-400 mt-1"><span id="memPct">-</span>% of <span id="memTotal">-</span></p>
+        </div>
         <div class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
             <h3 class="text-sm font-medium text-slate-500 dark:text-slate-400">Total Cache Size</h3>
             <p id="diskTotal" class="text-2xl font-bold text-slate-900 dark:text-white mt-2">-</p>
