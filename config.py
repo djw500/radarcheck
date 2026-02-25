@@ -307,6 +307,13 @@ MODELS = {
             {"start": 3, "end": 144, "step": 3},
             {"start": 150, "end": 240, "step": 6},
         ],
+        # 06Z/18Z use ECMWF "scda" stream which only publishes to 144h.
+        # Full 240h range only available on 00Z and 12Z ("oper" stream).
+        "max_hours_by_init": {
+            "00": 240, "12": 240,
+            "06": 144, "18": 144,
+            "default": 144,
+        },
     },
 }
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import time
 from typing import Any, Dict
 
@@ -14,6 +15,10 @@ from jobs import cancel_siblings, claim, complete, fail, init_db
 from tile_db import init_db as init_tile_db
 from tile_db import record_tile_hour, record_tile_run, record_tile_variable
 from tiles import build_tiles_for_variable, upsert_tiles_npz
+
+# Synoptic models that must all be loaded before triggering auto-forecast
+SYNOPTIC_MODELS = {"gfs", "nam_nest", "ecmwf_hres"}
+FORECAST_TRIGGER_FILE = os.path.join(repomap["CACHE_DIR"], "last_forecast_trigger.txt")
 
 
 def _parse_run_id(run_id: str) -> tuple[str, str]:
@@ -134,6 +139,122 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
     )
 
 
+def _remaining_jobs_for_run(conn, model_id: str, run_id: str) -> int:
+    """Count pending + processing jobs for a specific model+run."""
+    row = conn.execute(
+        """
+        SELECT COUNT(*) as cnt FROM jobs
+        WHERE status IN ('pending', 'processing')
+          AND args_json LIKE ?
+          AND args_json LIKE ?
+        """,
+        (f'%"model_id":"{model_id}"%', f'%"run_id":"{run_id}"%'),
+    ).fetchone()
+    return row["cnt"] if row else 0
+
+
+def _latest_complete_synoptic_run(conn, model_id: str, init_hour: str) -> str | None:
+    """Find the most recent fully-loaded run for a model at a given init hour.
+
+    A run is "fully loaded" if it has 0 pending/processing jobs.
+    Looks back 36 hours to find a match.
+    """
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+
+    for days_back in range(3):
+        dt = now - timedelta(days=days_back)
+        date_str = dt.strftime("%Y%m%d")
+        run_id = f"run_{date_str}_{init_hour}"
+
+        # Check if tiles exist for this run
+        res = repomap["TILING_REGIONS"].get("ne", {}).get("default_resolution_deg", 0.1)
+        res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
+        run_dir = os.path.join(repomap["TILES_DIR"], "ne", res_dir, model_id, run_id)
+        if not os.path.isdir(run_dir):
+            continue
+
+        # Check no remaining jobs
+        if _remaining_jobs_for_run(conn, model_id, run_id) == 0:
+            return run_id
+
+    return None
+
+
+def _check_and_trigger_forecast(conn, completed_model: str, completed_run_id: str, wlog) -> None:
+    """Check if all synoptic models are loaded for a cycle and trigger forecast.
+
+    Called after a synoptic model's job completes. Checks:
+    1. Was this the last job for this model+run?
+    2. Do all 3 synoptic models have complete runs at the same init hour?
+    3. Haven't we already triggered for this cycle?
+    """
+    if completed_model not in SYNOPTIC_MODELS:
+        return
+
+    # 1. Check if this model+run is fully loaded
+    remaining = _remaining_jobs_for_run(conn, completed_model, completed_run_id)
+    if remaining > 0:
+        return
+
+    # Extract init hour from run_id (e.g., "run_20260224_12" → "12")
+    try:
+        init_hour = completed_run_id.split("_")[2]
+    except (IndexError, ValueError):
+        return
+
+    wlog.info(f"Synoptic run complete: {completed_model}/{completed_run_id} — checking other models")
+
+    # 2. Check all 3 synoptic models have complete runs at this init hour
+    cycle_runs = {}
+    for model in SYNOPTIC_MODELS:
+        run = _latest_complete_synoptic_run(conn, model, init_hour)
+        if run is None:
+            wlog.info(f"  {model} has no complete {init_hour}Z run yet — not triggering")
+            return
+        cycle_runs[model] = run
+
+    # 3. Dedup: build a cycle ID from the newest run date
+    cycle_id = f"{init_hour}Z_" + "_".join(sorted(cycle_runs.values()))
+    try:
+        if os.path.exists(FORECAST_TRIGGER_FILE):
+            with open(FORECAST_TRIGGER_FILE) as f:
+                last_trigger = f.read().strip()
+            if last_trigger == cycle_id:
+                wlog.info(f"  Already triggered forecast for cycle {cycle_id}")
+                return
+    except Exception:
+        pass
+
+    # All conditions met — trigger forecast
+    wlog.info(f"All synoptic models loaded for {init_hour}Z cycle: {cycle_runs}")
+    wlog.info(f"Triggering auto-forecast...")
+
+    # Write trigger file BEFORE spawning to prevent double-trigger
+    try:
+        os.makedirs(os.path.dirname(FORECAST_TRIGGER_FILE), exist_ok=True)
+        with open(FORECAST_TRIGGER_FILE, "w") as f:
+            f.write(cycle_id)
+    except Exception as e:
+        wlog.error(f"Failed to write trigger file: {e}")
+
+    # Spawn forecast in background (fire and forget)
+    try:
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "run-forecast.sh")
+        # Strip CLAUDECODE from env so nested claude -p works
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        subprocess.Popen(
+            ["bash", script],
+            stdout=open(os.path.join(repomap["CACHE_DIR"], "forecast_run.log"), "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=env,
+        )
+        wlog.info("Forecast script spawned in background")
+    except Exception as e:
+        wlog.error(f"Failed to spawn forecast script: {e}")
+
+
 def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False, model_id: str | None = None) -> None:
     """Poll the job queue and process jobs until empty (or forever if not once)."""
     if worker_id is None:
@@ -180,6 +301,10 @@ def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once:
                     processed += 1
                     elapsed = time.monotonic() - t0
                     wlog.info(f"Job {job['id']} done in {elapsed:.1f}s ({processed} total)")
+                    # Check if all synoptic models are loaded → auto-trigger forecast
+                    _check_and_trigger_forecast(
+                        conn, args.get("model_id", ""), args.get("run_id", ""), wlog
+                    )
                 else:
                     fail(conn, job["id"], f"Unsupported job type: {job['type']}")
                     wlog.warning(f"Job {job['id']} unsupported type: {job['type']}")

@@ -193,11 +193,12 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
 
     resolution_deg = repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1)
 
-    # Compute priority: newer runs get higher priority
+    # Compute priority: newer runs get strictly higher priority.
+    # Use minutes (not hours) so runs 6h apart never collide.
     now = datetime.datetime.now(datetime.timezone.utc)
     run_dt = datetime.datetime.strptime(f"{date_str}{init_hour}", "%Y%m%d%H").replace(tzinfo=datetime.timezone.utc)
-    hours_old = max(0, int((now - run_dt).total_seconds() / 3600))
-    priority = max(0, 1000 - hours_old)
+    minutes_old = max(0, int((now - run_dt).total_seconds() / 60))
+    priority = max(0, 100000 - minutes_old)
 
     enqueued = 0
 

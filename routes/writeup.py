@@ -57,15 +57,12 @@ def api_writeup_save():
 
     now = datetime.now(timezone.utc).isoformat()
 
-    existing = _read_writeup()
-    created_at = existing["created_at"] if existing else now
-
     data = {
         "title": title or "Forecast Writeup",
         "body": text,
         "detail": body.get("detail", "").strip() or None,
         "location": body.get("location"),
-        "created_at": created_at,
+        "created_at": now,
         "updated_at": now,
     }
 

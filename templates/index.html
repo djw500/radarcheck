@@ -134,6 +134,14 @@
 
     <!-- Data Table (Hidden by default) -->
     <div id="dataTableContainer" class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+        <div id="stitchBar" class="hidden px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
+            <label class="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="checkbox" id="stitchToggle" class="rounded border-slate-600 text-emerald-500 focus:ring-emerald-500">
+                <span class="text-slate-400">Stitch runs</span>
+                <span class="text-[10px] text-slate-500">(total event accumulation)</span>
+            </label>
+            <span id="stitchTotal" class="text-sm font-mono text-emerald-400 hidden"></span>
+        </div>
         <div class="overflow-x-auto">
             <table class="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                 <thead class="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700/50 dark:text-slate-400">
@@ -813,10 +821,84 @@ document.getElementById('toggleTableBtn').addEventListener('click', () => {
         : '<span class="material-icons-outlined text-base">expand_less</span> Hide Data Table';
 });
 
+// --- Stitch toggle ---
+const STITCH_VARS = ['asnow', 'snod', 'apcp'];  // accumulation variables
+let stitchData = null;  // cached stitch response
+
+function updateStitchBar() {
+    const bar = document.getElementById('stitchBar');
+    if (STITCH_VARS.includes(currentVariable)) {
+        bar.classList.remove('hidden');
+    } else {
+        bar.classList.add('hidden');
+        document.getElementById('stitchToggle').checked = false;
+    }
+}
+
+document.getElementById('stitchToggle').addEventListener('change', async (e) => {
+    if (e.target.checked) {
+        await fetchStitchData();
+    } else {
+        document.getElementById('stitchTotal').classList.add('hidden');
+        if (currentData) renderTable(currentData, []);
+    }
+});
+
+async function fetchStitchData() {
+    if (!currentLat || !currentLon) return;
+    const totalEl = document.getElementById('stitchTotal');
+    totalEl.textContent = 'loading...';
+    totalEl.classList.remove('hidden');
+
+    try {
+        const url = `/api/timeseries/stitched?lat=${currentLat}&lon=${currentLon}&model=hrrr&variable=${currentVariable}&days=2`;
+        const data = await fetchJSON(url);
+        stitchData = data;
+        totalEl.textContent = `Event total: ${data.event_total} in (${data.baseline_accumulated} already fell)`;
+
+        // Rebuild the table with stitched values injected into the HRRR column
+        if (currentData) {
+            renderStitchedTable(currentData, data);
+        }
+    } catch (e) {
+        console.error('Stitch fetch failed:', e);
+        totalEl.textContent = 'stitch unavailable';
+    }
+}
+
+function renderStitchedTable(rawData, stitch) {
+    // Build a lookup: valid_time -> stitched value
+    const stitchLookup = {};
+    (stitch.series || []).forEach(pt => {
+        stitchLookup[pt.valid_time] = pt.value;
+    });
+
+    // Create a modified copy of rawData where the latest HRRR extended run
+    // gets its values replaced with stitched values
+    const modData = JSON.parse(JSON.stringify(rawData));
+    const latestRun = stitch.latest_run;
+
+    Object.keys(modData.runs).forEach(key => {
+        const run = modData.runs[key];
+        if (run.model_id === 'hrrr' && run.run_id === latestRun) {
+            run.series.forEach(pt => {
+                if (stitchLookup[pt.valid_time] !== undefined) {
+                    pt.value = stitchLookup[pt.valid_time];
+                }
+            });
+            // Mark the run label so renderTable can show it
+            run._stitched = true;
+        }
+    });
+
+    renderTable(modData, []);
+}
+
 async function loadData(daysOverride = null) {
     if (!currentLat || !currentLon) return;
-    
+
     updateVarButtons();
+    updateStitchBar();
 
     let days = daysOverride;
     if (!days) {
@@ -858,7 +940,12 @@ async function loadData(daysOverride = null) {
         try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
         const modelCount = new Set(Object.values(data.runs).map(r => r.model_id)).size;
         statusEl.textContent = `Forecast from ${modelCount} models`;
-        
+
+        // Refresh stitch if toggle is on
+        if (document.getElementById('stitchToggle').checked && STITCH_VARS.includes(currentVariable)) {
+            fetchStitchData();
+        }
+
         // Trigger background preload for other variables
         preloadData(days);
 

@@ -27,21 +27,50 @@ Key fields: `temperature`, `textDescription` (e.g., "Light Rain", "Snow"), `wind
 
 **Why this matters**: Current conditions are the anchor. If it's already snowing but the model says rain until 7 PM, the changeover is ahead of schedule and totals go up. If the forecast says snow but it's 40F and dry, explain the timeline. Always compare what models predicted for RIGHT NOW vs what's actually happening.
 
+### NWS Forecaster Commentary
+
+Fetch the latest Area Forecast Discussion (AFD) and Hazardous Weather Outlook (HWO) from the local NWS office. The AFD contains the forecaster's own analysis, confidence level, and storm narrative -- valuable context beyond raw model data.
+
+```bash
+# Find the forecast office from the points endpoint (e.g., PHI for Mount Holly)
+# Then fetch the latest AFD and HWO
+curl -s -H 'User-Agent: RadarCheck/1.0' 'https://api.weather.gov/products?type=AFD&location={OFFICE}&limit=1'
+curl -s -H 'User-Agent: RadarCheck/1.0' 'https://api.weather.gov/products?type=HWO&location={OFFICE}&limit=1'
+# Fetch the product text from the returned product ID URL
+```
+
+Cross-reference the forecaster's narrative with your model analysis. If the NWS highlights something the models miss (or vice versa), call it out.
+
 ### Fetch Model Data
 
-Read `config.py` and `routes/forecast.py` to understand the current models, variables, and API endpoint signatures. The codebase is the source of truth for what's available — don't assume.
+The API endpoint is `/api/timeseries/multirun`. Query it for every model and variable you need.
 
-Query the local API for every variable relevant to the question. Always fetch **all available runs** for each model — you need the run-to-run trend.
+**API pattern:**
+```
+http://localhost:5001/api/timeseries/multirun?lat={lat}&lon={lon}&model={model}&variable={var}&days={days}
+```
+
+**Models:** `hrrr`, `nam_nest`, `gfs`, `nbm`, `ecmwf_hres`
+
+**Variables by model:**
+- `asnow` (snowfall accumulation) — `hrrr`, `nbm` only (not gfs, nam_nest, ecmwf_hres)
+- `snod` (snow depth) — `hrrr`, `nam_nest`, `gfs`, `ecmwf_hres` (not nbm)
+- `t2m` (temperature) — all models
+- `apcp` (total precip) — all models
+
+**CRITICAL: Use `days=2` or `days=3`** for all queries. The default is `days=1` which is too narrow for synoptic models that cycle every 6 hours. With `days=2` you get 3-4 synoptic runs for trend analysis. For extended range queries, use `days=1` (latest run is sufficient).
+
+**Query each model individually** — do NOT use `model=all`. Query each model+variable combo one at a time. This ensures you get data even if some models have no tiles yet.
 
 For precipitation/snow questions, fetch ALL of these:
-- `asnow` (snowfall accumulation) — HRRR, RAP, NBM only
-- `snod` (snow depth) — all NOAA models + ECMWF
-- `t2m` (temperature) — always, for rain/snow line analysis
-- `apcp` (total precip) — always, to compute snow ratios
+- `asnow` — HRRR, NBM
+- `snod` — HRRR, NAM Nest, GFS, ECMWF
+- `t2m` — all models
+- `apcp` — all models
 
 For temperature questions, fetch `t2m` and optionally `dpt` (dew point).
 
-Fetch for every model configured in `config.py` MODELS dict.
+**If a query returns empty runs or an error, note it and move on** — don't skip the entire model. Some models may not have tiles built for the latest cycle but will have older runs.
 
 ### Geographic Probing
 
@@ -70,7 +99,7 @@ For each, look at the **run-to-run trend** (e.g., last 3-4 synoptic runs):
 
 **Key**: State the trend direction explicitly. "GFS trending DOWN: 9.3 -> 6.9 -> 5.3 inches" not just "GFS shows 5.3 inches."
 
-### 2b. Check Short-Range Confirmation (HRRR, RAP)
+### 2b. Check Short-Range Confirmation (HRRR)
 
 HRRR runs hourly with 48h range. Look at the **most recent 3-4 hourly runs**:
 - Do they align with the synoptic models' latest runs?
@@ -92,6 +121,34 @@ Always check T2M for precipitation type questions:
 - The rain/snow line matters more than total QPF
 - Check if temps are trending colder or warmer through the event
 - A 1-2 degree shift can flip inches of snow to rain
+
+### 2e. Extended Range Storm Outlook (Day 7-16)
+
+Scan the extended range for upcoming storm signals using the longest-range models:
+- **GFS**: out to 384h (16 days)
+- **ECMWF HRES**: out to 240h (10 days)
+
+**You MUST query GFS and ECMWF specifically** for extended range — NOT NBM (NBM only goes to 264h/11 days and lacks the physics resolution for extended outlooks).
+
+```
+# Extended range queries — use days=1 (latest synoptic run is enough)
+curl 'http://localhost:5001/api/timeseries/multirun?lat={lat}&lon={lon}&model=gfs&variable=apcp&days=1'
+curl 'http://localhost:5001/api/timeseries/multirun?lat={lat}&lon={lon}&model=gfs&variable=t2m&days=1'
+curl 'http://localhost:5001/api/timeseries/multirun?lat={lat}&lon={lon}&model=ecmwf_hres&variable=apcp&days=1'
+curl 'http://localhost:5001/api/timeseries/multirun?lat={lat}&lon={lon}&model=ecmwf_hres&variable=t2m&days=1'
+```
+
+Look at forecast hours beyond 168 (day 7) in the response `series` arrays:
+
+1. **Precipitation signals**: Any APCP accumulation > 0.25 inches liquid in a 24-hour window
+2. **Snow potential**: T2M below freezing during those precipitation periods
+3. **Model agreement**: If both GFS and ECMWF show a signal in a similar timeframe, it's worth flagging. Single-model signals beyond day 10 are speculative.
+
+Present as a brief section in the forecast:
+> **Extended Outlook (Day 7-16):** GFS and ECMWF both show a potential precipitation event around [date]. With temps near [X]F, this could be [rain/snow/mix]. Worth watching as models converge.
+
+Or if nothing:
+> **Extended Outlook:** No significant precipitation signals in the day 7-16 window.
 
 ## Step 3: Synthesis
 
@@ -162,10 +219,10 @@ SNOD is "snow depth on the ground" — not snowfall. Models compute it by runnin
 
 5. **ECMWF specifically**: ECMWF outputs `sd` (snow water equivalent) and `rsn` (snow density in kg/m3). We compute physical depth as `sd * 1000 / rsn`. The `rsn` field is model-derived density — if the model's snow physics over-densify the pack, depth comes out too low even with correct water equivalent. Check `grib_fetcher.py` `_fetch_ecmwf_snod()` for the implementation.
 
-**The bottom line**: When temps are solidly cold and APCP broadly agrees across models, trust ASNOW from convective-scale models (HRRR, RAP, NBM) over SNOD from coarse models (GFS, ECMWF). SNOD from coarse models tells you depth-on-ground after physics — it's a different question than "how much snow fell."
+**The bottom line**: When temps are solidly cold and APCP broadly agrees across models, trust ASNOW from convective-scale models (HRRR, NBM) over SNOD from coarse models (GFS, ECMWF). SNOD from coarse models tells you depth-on-ground after physics — it's a different question than "how much snow fell."
 
 **ASNOW vs SNOD cheat sheet:**
-- ASNOW = accumulated snowfall (what fell). Only HRRR, RAP, NBM have it natively.
+- ASNOW = accumulated snowfall (what fell). Only HRRR and NBM have it natively.
 - SNOD = snow depth on ground (what's there after compaction/melt). All models have it.
 - ASNOW > SNOD for the same event. Always.
 - For "how much snow are we getting?" → prefer ASNOW
