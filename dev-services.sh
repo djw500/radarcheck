@@ -15,6 +15,12 @@
 
 set -euo pipefail
 
+# Activate virtualenv if present
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
+    source "$SCRIPT_DIR/.venv/bin/activate"
+fi
+
 # Variable set — must match fly.toml TILE_BUILD_VARIABLES
 export TILE_BUILD_VARIABLES="${TILE_BUILD_VARIABLES:-apcp,asnow,snod,t2m}"
 export TILE_BUILD_MAX_HOURS_NBM="${TILE_BUILD_MAX_HOURS_NBM:-48}"
