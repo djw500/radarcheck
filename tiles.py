@@ -342,7 +342,7 @@ def load_timeseries_for_point(    base_dir: str,
     except Exception:
         raise FileNotFoundError(f"Corrupt tile for {variable_id} at {npz_path}")
     with npz_data as d:
-        hours = d["hours"]
+        hours = d["hours"].copy()
         # Fallback to means when requested stat is not available
         key = "means"
         if stat == "min" and "mins" in d.files:
@@ -358,7 +358,7 @@ def load_timeseries_for_point(    base_dir: str,
         ix = int(np.floor((target_lon - lon_min_index) / meta["resolution_deg"]))
         iy = max(0, min(ny - 1, iy))
         ix = max(0, min(nx - 1, ix))
-        values = arr[:, iy, ix]
+        values = arr[:, iy, ix].copy()
 
         # If the exact point is missing (NaN) due to sparse grid vs tile resolution mismatch,
         # search for the nearest valid neighbor within a small radius.
@@ -376,7 +376,7 @@ def load_timeseries_for_point(    base_dir: str,
                 for cx in range(x_min, x_max + 1):
                     if cy == iy and cx == ix:
                         continue
-                    cand_vals = arr[:, cy, cx]
+                    cand_vals = arr[:, cy, cx].copy()
                     if not np.all(np.isnan(cand_vals)):
                         dist_sq = (cy - iy)**2 + (cx - ix)**2
                         if dist_sq < best_dist_sq:
