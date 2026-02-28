@@ -15,10 +15,13 @@
 
 set -euo pipefail
 
-# Activate virtualenv if present
+# Activate virtualenv if present; otherwise ensure deps are installed system-wide
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
     source "$SCRIPT_DIR/.venv/bin/activate"
+elif ! python3 -c "import flask" 2>/dev/null; then
+    echo "No venv found and Flask not installed — installing dependencies..."
+    pip install -r "$SCRIPT_DIR/requirements.txt" -q
 fi
 
 # Variable set — must match fly.toml TILE_BUILD_VARIABLES
@@ -53,6 +56,8 @@ stop_scheduler() {
 }
 
 # ── Workers (one per model — dev is not resource constrained) ─────────────────
+# Workers auto-restart after --max-jobs to reclaim memory.
+MAX_JOBS_PER_CYCLE="${MAX_JOBS_PER_CYCLE:-50}"
 
 start_workers() {
     for model in "${MODELS[@]}"; do
@@ -62,9 +67,16 @@ start_workers() {
             echo "Worker[$model]: already running (pid $(cat "$pidfile"))"
             continue
         fi
-        nohup python3 job_worker.py --model "$model" --poll-interval 10 --log-file "$logfile" > "$logfile" 2>&1 &
+        # Wrapper loop: restart worker when it exits after max-jobs
+        nohup bash -c '
+            while true; do
+                python3 job_worker.py --model "'"$model"'" --poll-interval 10 --max-jobs '"$MAX_JOBS_PER_CYCLE"' --log-file "'"$logfile"'" 2>&1
+                echo "$(date) Worker['"$model"'] restarting after max-jobs cycle..." >> "'"$logfile"'"
+                sleep 2
+            done
+        ' > "$logfile" 2>&1 &
         echo $! > "$pidfile"
-        echo "Worker[$model]: started (pid $!), log: $logfile"
+        echo "Worker[$model]: started (pid $!), log: $logfile, max_jobs=$MAX_JOBS_PER_CYCLE"
     done
 }
 
@@ -73,6 +85,8 @@ stop_workers() {
         local pidfile="/tmp/worker_${model}.pid"
         if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
             local pid; pid=$(cat "$pidfile")
+            # Kill the wrapper bash loop and all its children
+            pkill -P "$pid" 2>/dev/null || true
             kill "$pid" 2>/dev/null || true
             echo "Worker[$model]: stopped (pid $pid)"
         else

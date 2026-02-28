@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ from typing import Any, Dict
 logger = logging.getLogger("job_worker")
 
 from grib_fetcher import open_as_xarray
-from config import repomap
+from config import repomap, get_tile_resolution
 from jobs import cancel_siblings, claim, complete, fail, init_db
 from tile_db import init_db as init_tile_db
 from tile_db import record_tile_hour, record_tile_run, record_tile_variable
@@ -38,7 +39,7 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
     resolution_deg = float(
         args.get(
             "resolution_deg",
-            repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1),
+            get_tile_resolution(region_id, model_id),
         )
     )
 
@@ -66,6 +67,7 @@ def process_build_tile_hour(conn, job: Dict[str, Any]) -> None:
         )
     finally:
         ds.close()
+        del ds
 
     init_time_utc = None
     try:
@@ -168,7 +170,7 @@ def _latest_complete_synoptic_run(conn, model_id: str, init_hour: str) -> str | 
         run_id = f"run_{date_str}_{init_hour}"
 
         # Check if tiles exist for this run
-        res = repomap["TILING_REGIONS"].get("ne", {}).get("default_resolution_deg", 0.1)
+        res = get_tile_resolution("ne", model_id)
         res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
         run_dir = os.path.join(repomap["TILES_DIR"], "ne", res_dir, model_id, run_id)
         if not os.path.isdir(run_dir):
@@ -255,7 +257,7 @@ def _check_and_trigger_forecast(conn, completed_model: str, completed_run_id: st
         wlog.error(f"Failed to spawn forecast script: {e}")
 
 
-def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False, model_id: str | None = None) -> None:
+def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once: bool = False, model_id: str | None = None, max_jobs: int = 0) -> None:
     """Poll the job queue and process jobs until empty (or forever if not once)."""
     if worker_id is None:
         suffix = f"-{model_id}" if model_id else ""
@@ -321,7 +323,12 @@ def run_worker(worker_id: str | None = None, poll_interval_s: float = 5.0, once:
                     if cancelled:
                         wlog.info(f"Cancelled {cancelled} sibling jobs — run data not available")
 
+            gc.collect()
+
             if once:
+                break
+            if max_jobs and processed >= max_jobs:
+                wlog.info(f"Reached max_jobs={max_jobs}, exiting for memory cleanup")
                 break
     finally:
         conn.close()
@@ -335,6 +342,7 @@ if __name__ == "__main__":
     parser.add_argument("--once", action="store_true", help="Process a single job and exit")
     parser.add_argument("--poll-interval", type=float, default=5.0)
     parser.add_argument("--model", type=str, default=None, help="Only process jobs for this model_id")
+    parser.add_argument("--max-jobs", type=int, default=0, help="Exit after N jobs for memory cleanup (0=unlimited)")
     parser.add_argument("--log-file", type=str, help="Log file path (default: stdout only)")
     args = parser.parse_args()
 
@@ -344,4 +352,4 @@ if __name__ == "__main__":
         fh.setFormatter(_logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         _logging.getLogger().addHandler(fh)
 
-    run_worker(poll_interval_s=args.poll_interval, once=args.once, model_id=args.model)
+    run_worker(poll_interval_s=args.poll_interval, once=args.once, model_id=args.model, max_jobs=args.max_jobs)
