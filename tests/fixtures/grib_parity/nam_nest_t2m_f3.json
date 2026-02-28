@@ -1,0 +1,203 @@
+{
+  "model_id": "nam_nest",
+  "variable_id": "t2m",
+  "date": "20260227",
+  "init_hour": "12",
+  "forecast_hour": 3,
+  "grib_url": "https://noaa-nam-pds.s3.amazonaws.com/nam.20260227/nam.t12z.conusnest.hiresf03.tm00.grib2",
+  "idx_url": "cache/herbie/nam/20260227/nam.t12z.conusnest.hiresf03.tm00.grib2.idx",
+  "search_string": ":TMP:2 m above ground",
+  "herbie_model": "nam",
+  "herbie_product": "conusnest.hiresf",
+  "byte_start": 658265327,
+  "byte_end": 660356311,
+  "grib_message_size_kb": 2042.0,
+  "idx_search_this": ":TMP:2 m above ground:3 hour fcst:",
+  "output_shape": [
+    1059,
+    1799
+  ],
+  "output_dtype": "float32",
+  "lat_range": [
+    21.138,
+    52.6157
+  ],
+  "lon_range": [
+    225.9039,
+    299.0822
+  ],
+  "lat_ndim": 2,
+  "value_range": [
+    246.649994,
+    301.420013
+  ],
+  "units": "K",
+  "var_name_in_dataset": "t2m",
+  "has_nans": true,
+  "grib_fixture_bytes": 2090985,
+  "decode_checkpoints": [
+    {
+      "flat_index": 0,
+      "iy": 0,
+      "ix": 0,
+      "value": 294.600006,
+      "lat": 21.138,
+      "lon": 237.28
+    },
+    {
+      "flat_index": 100342,
+      "iy": 55,
+      "ix": 1397,
+      "value": 295.589996,
+      "lat": 24.7799,
+      "lon": 276.9531
+    },
+    {
+      "flat_index": 200609,
+      "iy": 111,
+      "ix": 920,
+      "value": 293.859985,
+      "lat": 27.2879,
+      "lon": 263.1202
+    },
+    {
+      "flat_index": 300875,
+      "iy": 167,
+      "ix": 442,
+      "value": 291.869995,
+      "lat": 27.8657,
+      "lon": 248.7254
+    },
+    {
+      "flat_index": 401142,
+      "iy": 222,
+      "ix": 1764,
+      "value": 295.109985,
+      "lat": 26.9703,
+      "lon": 288.5208
+    },
+    {
+      "flat_index": 501408,
+      "iy": 278,
+      "ix": 1286,
+      "value": 289.059998,
+      "lat": 31.0581,
+      "lon": 274.6176
+    },
+    {
+      "flat_index": 601675,
+      "iy": 334,
+      "ix": 809,
+      "value": 285.299988,
+      "lat": 33.2055,
+      "lon": 259.6035
+    },
+    {
+      "flat_index": 701941,
+      "iy": 390,
+      "ix": 331,
+      "value": 291.700012,
+      "lat": 33.2198,
+      "lon": 244.1307
+    },
+    {
+      "flat_index": 802208,
+      "iy": 445,
+      "ix": 1653,
+      "value": 293.269989,
+      "lat": 33.5043,
+      "lon": 287.0901
+    },
+    {
+      "flat_index": 902474,
+      "iy": 501,
+      "ix": 1175,
+      "value": 277.959991,
+      "lat": 37.3626,
+      "lon": 271.8763
+    },
+    {
+      "flat_index": 1002741,
+      "iy": 557,
+      "ix": 698,
+      "value": 278.910004,
+      "lat": 39.0463,
+      "lon": 255.5046
+    },
+    {
+      "flat_index": 1103007,
+      "iy": 613,
+      "ix": 220,
+      "value": 283.589996,
+      "lat": 38.3973,
+      "lon": 238.8607
+    },
+    {
+      "flat_index": 1203274,
+      "iy": 668,
+      "ix": 1542,
+      "value": 274.630005,
+      "lat": 40.0793,
+      "lon": 285.3915
+    },
+    {
+      "flat_index": 1303540,
+      "iy": 724,
+      "ix": 1064,
+      "value": 273.640015,
+      "lat": 43.6033,
+      "lon": 268.6198
+    },
+    {
+      "flat_index": 1403807,
+      "iy": 780,
+      "ix": 587,
+      "value": 273.01001,
+      "lat": 44.7151,
+      "lon": 250.687
+    },
+    {
+      "flat_index": 1504073,
+      "iy": 836,
+      "ix": 109,
+      "value": 282.25,
+      "lat": 43.304,
+      "lon": 232.798
+    },
+    {
+      "flat_index": 1604340,
+      "iy": 891,
+      "ix": 1431,
+      "value": 267.700012,
+      "lat": 46.604,
+      "lon": 283.3437
+    },
+    {
+      "flat_index": 1704606,
+      "iy": 947,
+      "ix": 953,
+      "value": 273.179993,
+      "lat": 49.6822,
+      "lon": 264.6987
+    },
+    {
+      "flat_index": 1804873,
+      "iy": 1003,
+      "ix": 476,
+      "value": 266.170013,
+      "lat": 50.1111,
+      "lon": 244.978
+    },
+    {
+      "flat_index": 1905140,
+      "iy": 1058,
+      "ix": 1798,
+      "value": 269.700012,
+      "lat": 47.8424,
+      "lon": 299.0822
+    }
+  ],
+  "total_nonzero": 1905065,
+  "total_nan": 76,
+  "mean_value": 281.882019
+}

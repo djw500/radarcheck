@@ -1,0 +1,203 @@
+{
+  "model_id": "gfs",
+  "variable_id": "apcp",
+  "date": "20260227",
+  "init_hour": "12",
+  "forecast_hour": 3,
+  "grib_url": "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20260227/12/atmos/gfs.t12z.pgrb2.0p25.f003",
+  "idx_url": "cache/herbie/gfs/20260227/gfs.t12z.pgrb2.0p25.f003.idx",
+  "search_string": ":APCP:surface",
+  "herbie_model": "gfs",
+  "herbie_product": "pgrb2.0p25",
+  "byte_start": 423828293,
+  "byte_end": 424135803,
+  "grib_message_size_kb": 300.3,
+  "idx_search_this": ":APCP:surface:0-3 hour acc fcst:",
+  "output_shape": [
+    721,
+    1440
+  ],
+  "output_dtype": "float32",
+  "lat_range": [
+    -90.0,
+    90.0
+  ],
+  "lon_range": [
+    0.0,
+    359.75
+  ],
+  "lat_ndim": 1,
+  "value_range": [
+    0.0,
+    86.625
+  ],
+  "units": "kg m**-2",
+  "var_name_in_dataset": "tp",
+  "has_nans": false,
+  "grib_fixture_bytes": 307511,
+  "decode_checkpoints": [
+    {
+      "flat_index": 0,
+      "iy": 0,
+      "ix": 0,
+      "value": 0.5,
+      "lat": 90.0,
+      "lon": 0.0
+    },
+    {
+      "flat_index": 75316,
+      "iy": 52,
+      "ix": 436,
+      "value": 0.0625,
+      "lat": 77.0,
+      "lon": 109.0
+    },
+    {
+      "flat_index": 135464,
+      "iy": 94,
+      "ix": 104,
+      "value": 0.125,
+      "lat": 66.5,
+      "lon": 26.0
+    },
+    {
+      "flat_index": 190829,
+      "iy": 132,
+      "ix": 749,
+      "value": 0.0625,
+      "lat": 57.0,
+      "lon": 187.25
+    },
+    {
+      "flat_index": 243286,
+      "iy": 168,
+      "ix": 1366,
+      "value": 0.125,
+      "lat": 48.0,
+      "lon": 341.5
+    },
+    {
+      "flat_index": 320222,
+      "iy": 222,
+      "ix": 542,
+      "value": 0.75,
+      "lat": 34.5,
+      "lon": 135.5
+    },
+    {
+      "flat_index": 394460,
+      "iy": 273,
+      "ix": 1340,
+      "value": 0.0625,
+      "lat": 21.75,
+      "lon": 335.0
+    },
+    {
+      "flat_index": 458828,
+      "iy": 318,
+      "ix": 908,
+      "value": 0.0625,
+      "lat": 10.5,
+      "lon": 227.0
+    },
+    {
+      "flat_index": 504889,
+      "iy": 350,
+      "ix": 889,
+      "value": 0.125,
+      "lat": 2.5,
+      "lon": 222.25
+    },
+    {
+      "flat_index": 544685,
+      "iy": 378,
+      "ix": 365,
+      "value": 0.75,
+      "lat": -4.5,
+      "lon": 91.25
+    },
+    {
+      "flat_index": 578281,
+      "iy": 401,
+      "ix": 841,
+      "value": 0.0625,
+      "lat": -10.25,
+      "lon": 210.25
+    },
+    {
+      "flat_index": 612371,
+      "iy": 425,
+      "ix": 371,
+      "value": 0.625,
+      "lat": -16.25,
+      "lon": 92.75
+    },
+    {
+      "flat_index": 650542,
+      "iy": 451,
+      "ix": 1102,
+      "value": 0.1875,
+      "lat": -22.75,
+      "lon": 275.5
+    },
+    {
+      "flat_index": 703523,
+      "iy": 488,
+      "ix": 803,
+      "value": 0.5,
+      "lat": -32.0,
+      "lon": 200.75
+    },
+    {
+      "flat_index": 756752,
+      "iy": 525,
+      "ix": 752,
+      "value": 0.5,
+      "lat": -41.25,
+      "lon": 188.0
+    },
+    {
+      "flat_index": 803187,
+      "iy": 557,
+      "ix": 1107,
+      "value": 1.1875,
+      "lat": -49.25,
+      "lon": 276.75
+    },
+    {
+      "flat_index": 837388,
+      "iy": 581,
+      "ix": 748,
+      "value": 0.125,
+      "lat": -55.25,
+      "lon": 187.0
+    },
+    {
+      "flat_index": 872369,
+      "iy": 605,
+      "ix": 1169,
+      "value": 0.6875,
+      "lat": -61.25,
+      "lon": 292.25
+    },
+    {
+      "flat_index": 914217,
+      "iy": 634,
+      "ix": 1257,
+      "value": 0.1875,
+      "lat": -68.5,
+      "lon": 314.25
+    },
+    {
+      "flat_index": 1013286,
+      "iy": 703,
+      "ix": 966,
+      "value": 0.0625,
+      "lat": -85.75,
+      "lon": 241.5
+    }
+  ],
+  "total_nonzero": 440842,
+  "total_nan": 0,
+  "mean_value": 0.296541
+}

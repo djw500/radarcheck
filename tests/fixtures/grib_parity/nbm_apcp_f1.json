@@ -1,0 +1,203 @@
+{
+  "model_id": "nbm",
+  "variable_id": "apcp",
+  "date": "20260228",
+  "init_hour": "00",
+  "forecast_hour": 1,
+  "grib_url": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/blend/prod/blend.20260228/00/core/blend.t00z.core.f001.co.grib2",
+  "idx_url": "cache/herbie/nbm/20260228/blend.t00z.core.f001.co.grib2.idx",
+  "search_string": ":APCP:surface:.*acc fcst:$",
+  "herbie_model": "nbm",
+  "herbie_product": "co",
+  "byte_start": 74794932,
+  "byte_end": 75658488,
+  "grib_message_size_kb": 843.3,
+  "idx_search_this": ":APCP:surface:0-1 hour acc fcst:",
+  "output_shape": [
+    1597,
+    2345
+  ],
+  "output_dtype": "float32",
+  "lat_range": [
+    19.229,
+    57.0886
+  ],
+  "lon_range": [
+    221.6267,
+    300.9578
+  ],
+  "lat_ndim": 2,
+  "value_range": [
+    0.0,
+    17.525999
+  ],
+  "units": "kg m**-2",
+  "var_name_in_dataset": "tp",
+  "has_nans": false,
+  "grib_fixture_bytes": 863557,
+  "decode_checkpoints": [
+    {
+      "flat_index": 1931,
+      "iy": 0,
+      "ix": 1931,
+      "value": 0.254,
+      "lat": 21.7714,
+      "lon": 280.8246
+    },
+    {
+      "flat_index": 442490,
+      "iy": 188,
+      "ix": 1630,
+      "value": 3.556,
+      "lat": 26.6693,
+      "lon": 273.7432
+    },
+    {
+      "flat_index": 620836,
+      "iy": 264,
+      "ix": 1756,
+      "value": 2.794,
+      "lat": 28.1775,
+      "lon": 277.1231
+    },
+    {
+      "flat_index": 841332,
+      "iy": 358,
+      "ix": 1822,
+      "value": 0.508,
+      "lat": 30.1636,
+      "lon": 279.0733
+    },
+    {
+      "flat_index": 1097126,
+      "iy": 467,
+      "ix": 2011,
+      "value": 3.556,
+      "lat": 32.0915,
+      "lon": 284.405
+    },
+    {
+      "flat_index": 1334090,
+      "iy": 568,
+      "ix": 2130,
+      "value": 1.016,
+      "lat": 33.9284,
+      "lon": 287.9989
+    },
+    {
+      "flat_index": 1507499,
+      "iy": 642,
+      "ix": 2009,
+      "value": 0.254,
+      "lat": 36.0014,
+      "lon": 285.0416
+    },
+    {
+      "flat_index": 1678849,
+      "iy": 715,
+      "ix": 2174,
+      "value": 0.508,
+      "lat": 37.0029,
+      "lon": 289.9049
+    },
+    {
+      "flat_index": 1946385,
+      "iy": 830,
+      "ix": 35,
+      "value": 0.254,
+      "lat": 37.6911,
+      "lon": 229.3423
+    },
+    {
+      "flat_index": 2539671,
+      "iy": 1083,
+      "ix": 36,
+      "value": 0.254,
+      "lat": 43.0548,
+      "lon": 227.4217
+    },
+    {
+      "flat_index": 2834454,
+      "iy": 1208,
+      "ix": 1694,
+      "value": 0.254,
+      "lat": 48.9996,
+      "lon": 277.8348
+    },
+    {
+      "flat_index": 2971922,
+      "iy": 1267,
+      "ix": 807,
+      "value": 0.254,
+      "lat": 50.0485,
+      "lon": 249.6014
+    },
+    {
+      "flat_index": 3072749,
+      "iy": 1310,
+      "ix": 799,
+      "value": 0.508,
+      "lat": 50.9024,
+      "lon": 249.1877
+    },
+    {
+      "flat_index": 3156954,
+      "iy": 1346,
+      "ix": 584,
+      "value": 0.762,
+      "lat": 51.0058,
+      "lon": 242.1516
+    },
+    {
+      "flat_index": 3232041,
+      "iy": 1378,
+      "ix": 631,
+      "value": 0.508,
+      "lat": 51.8,
+      "lon": 243.4874
+    },
+    {
+      "flat_index": 3288011,
+      "iy": 1402,
+      "ix": 321,
+      "value": 0.254,
+      "lat": 51.0562,
+      "lon": 233.4622
+    },
+    {
+      "flat_index": 3349438,
+      "iy": 1428,
+      "ix": 778,
+      "value": 0.254,
+      "lat": 53.207,
+      "lon": 248.0405
+    },
+    {
+      "flat_index": 3417199,
+      "iy": 1457,
+      "ix": 534,
+      "value": 0.508,
+      "lat": 53.0271,
+      "lon": 239.9041
+    },
+    {
+      "flat_index": 3502801,
+      "iy": 1493,
+      "ix": 1716,
+      "value": 0.254,
+      "lat": 54.666,
+      "lon": 279.4847
+    },
+    {
+      "flat_index": 3743073,
+      "iy": 1596,
+      "ix": 453,
+      "value": 0.254,
+      "lat": 55.39,
+      "lon": 236.3169
+    }
+  ],
+  "total_nonzero": 348607,
+  "total_nan": 0,
+  "mean_value": 0.07133
+}

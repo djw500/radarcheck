@@ -1,0 +1,207 @@
+{
+  "model_id": "ecmwf_hres",
+  "variable_id": "snod",
+  "date": "20260227",
+  "init_hour": "12",
+  "forecast_hour": 3,
+  "grib_url": "https://storage.googleapis.com/ecmwf-open-data/20260227/12z/ifs/0p25/oper/20260227120000-3h-oper-fc.grib2",
+  "idx_url": "cache/herbie/ifs/20260227/20260227120000-3h-oper-fc.index",
+  "search_string": ":sd:",
+  "herbie_model": "ifs",
+  "herbie_product": "oper",
+  "byte_start": 26856447,
+  "byte_end": 27043372,
+  "grib_message_size_kb": 182.5,
+  "idx_search_this": ":sd:sfc:g:0001:od:fc:oper:",
+  "special_handling": "ecmwf_snod_sd_rsn",
+  "rsn_byte_start": 1524945,
+  "rsn_byte_end": 1814572,
+  "rsn_search_this": ":rsn:sfc:g:0001:od:fc:oper:",
+  "output_shape": [
+    721,
+    1440
+  ],
+  "output_dtype": "float32",
+  "lat_range": [
+    -90.0,
+    90.0
+  ],
+  "lon_range": [
+    -180.0,
+    179.75
+  ],
+  "lat_ndim": 1,
+  "value_range": [
+    0.0,
+    33.333336
+  ],
+  "units": "",
+  "var_name_in_dataset": "snod",
+  "has_nans": false,
+  "grib_fixture_bytes": 186926,
+  "decode_checkpoints": [
+    {
+      "flat_index": 38002,
+      "iy": 26,
+      "ix": 562,
+      "value": 17.430029,
+      "lat": 83.5,
+      "lon": -39.5
+    },
+    {
+      "flat_index": 89853,
+      "iy": 62,
+      "ix": 573,
+      "value": 33.333336,
+      "lat": 74.5,
+      "lon": -36.75
+    },
+    {
+      "flat_index": 119356,
+      "iy": 82,
+      "ix": 1276,
+      "value": 0.459695,
+      "lat": 69.5,
+      "lon": 139.0
+    },
+    {
+      "flat_index": 135638,
+      "iy": 94,
+      "ix": 278,
+      "value": 0.393088,
+      "lat": 66.5,
+      "lon": -110.5
+    },
+    {
+      "flat_index": 151104,
+      "iy": 104,
+      "ix": 1344,
+      "value": 0.405008,
+      "lat": 64.0,
+      "lon": 156.0
+    },
+    {
+      "flat_index": 168143,
+      "iy": 116,
+      "ix": 1103,
+      "value": 0.783019,
+      "lat": 61.0,
+      "lon": 95.75
+    },
+    {
+      "flat_index": 188966,
+      "iy": 131,
+      "ix": 326,
+      "value": 0.308458,
+      "lat": 57.25,
+      "lon": -98.5
+    },
+    {
+      "flat_index": 211273,
+      "iy": 146,
+      "ix": 1033,
+      "value": 0.257654,
+      "lat": 53.5,
+      "lon": 78.25
+    },
+    {
+      "flat_index": 234090,
+      "iy": 162,
+      "ix": 810,
+      "value": 0.003735,
+      "lat": 49.5,
+      "lon": 22.5
+    },
+    {
+      "flat_index": 262306,
+      "iy": 182,
+      "ix": 226,
+      "value": 0.004419,
+      "lat": 44.5,
+      "lon": -123.5
+    },
+    {
+      "flat_index": 891836,
+      "iy": 619,
+      "ix": 476,
+      "value": 33.333336,
+      "lat": -64.75,
+      "lon": -61.0
+    },
+    {
+      "flat_index": 932876,
+      "iy": 647,
+      "ix": 1196,
+      "value": 33.333336,
+      "lat": -71.75,
+      "lon": 119.0
+    },
+    {
+      "flat_index": 951341,
+      "iy": 660,
+      "ix": 941,
+      "value": 33.333336,
+      "lat": -75.0,
+      "lon": 55.25
+    },
+    {
+      "flat_index": 966125,
+      "iy": 670,
+      "ix": 1325,
+      "value": 33.333336,
+      "lat": -77.5,
+      "lon": 151.25
+    },
+    {
+      "flat_index": 978446,
+      "iy": 679,
+      "ix": 686,
+      "value": 33.333336,
+      "lat": -79.75,
+      "lon": -8.5
+    },
+    {
+      "flat_index": 990405,
+      "iy": 687,
+      "ix": 1125,
+      "value": 33.333336,
+      "lat": -81.75,
+      "lon": 101.25
+    },
+    {
+      "flat_index": 1002363,
+      "iy": 696,
+      "ix": 123,
+      "value": 33.333336,
+      "lat": -84.0,
+      "lon": -149.25
+    },
+    {
+      "flat_index": 1014322,
+      "iy": 704,
+      "ix": 562,
+      "value": 33.333336,
+      "lat": -86.0,
+      "lon": -39.5
+    },
+    {
+      "flat_index": 1026280,
+      "iy": 712,
+      "ix": 1000,
+      "value": 33.333336,
+      "lat": -88.0,
+      "lon": 70.0
+    },
+    {
+      "flat_index": 1038239,
+      "iy": 720,
+      "ix": 1439,
+      "value": 33.333336,
+      "lat": -90.0,
+      "lon": 179.75
+    }
+  ],
+  "total_nonzero": 227211,
+  "total_nan": 0,
+  "mean_value": 3.841707
+}

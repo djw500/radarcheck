@@ -1,0 +1,24 @@
+{
+  "model_id": "hrrr",
+  "variable_id": "apcp",
+  "resolution_deg": 0.03,
+  "region": "ne",
+  "lat_min": 33.0,
+  "lat_max": 47.0,
+  "lon_min": -88.0,
+  "lon_max": -66.0,
+  "tile_shape": [
+    1,
+    467,
+    734
+  ],
+  "mean_range": [
+    0.0,
+    0.341457
+  ],
+  "lon_0_360": true,
+  "index_lon_min": 272.0,
+  "hours": [
+    1
+  ]
+}
