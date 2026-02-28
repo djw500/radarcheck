@@ -134,13 +134,12 @@
 
     <!-- Data Table (Hidden by default) -->
     <div id="dataTableContainer" class="bg-white dark:bg-card-dark rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
-        <div id="stitchBar" class="hidden px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
-            <label class="flex items-center gap-2 cursor-pointer text-sm">
-                <input type="checkbox" id="stitchToggle" class="rounded border-slate-600 text-emerald-500 focus:ring-emerald-500">
-                <span class="text-slate-400">Stitch runs</span>
-                <span class="text-[10px] text-slate-500">(total event accumulation)</span>
-            </label>
-            <span id="stitchTotal" class="text-sm font-mono text-emerald-400 hidden"></span>
+        <div id="stitchBar" class="hidden border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-2">
+            <div class="flex items-center gap-2">
+                <span class="text-[11px] text-slate-500 shrink-0">Integrate from</span>
+                <select id="stitchStartSelect" class="text-[11px] bg-slate-700 text-slate-300 border border-slate-600 rounded px-2 py-1 focus:ring-emerald-500 focus:border-emerald-500 min-w-0"></select>
+            </div>
+            <div id="stitchTotal" class="text-[12px] font-mono text-emerald-400 mt-1"></div>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full text-sm text-left text-slate-500 dark:text-slate-400">
@@ -623,20 +622,29 @@ function updateChart(data) {
         chartInstance = true; // Mark as initialized
         
         // Also build the table using a timeline for interpolation
-        // Create master timeline
-        const masterTimeline = [];
-        let t = startTime.getTime();
-        const endT = endTime.getTime();
-        while (t <= endT) {
-            masterTimeline.push(t);
-            t += 3600000;
-        }
-        renderTable(data, masterTimeline);
+        renderTable(data, buildMasterTimeline());
     } catch (e) {
         console.error("Chart Error:", e);
         const statusEl = document.getElementById('statusText');
         if (statusEl) statusEl.innerHTML = `<span style="color:red">Chart Error: ${e.message}</span>`;
     }
+}
+
+function buildMasterTimeline() {
+    const periodBtn = document.querySelector('.period-btn.bg-primary');
+    const selectedDays = periodBtn ? parseInt(periodBtn.dataset.days) : 3;
+    const now = new Date();
+    const startHour = Math.floor(now.getHours() / 6) * 6;
+    const startTime = new Date(now);
+    startTime.setHours(startHour, 0, 0, 0);
+    const endTime = new Date(startTime.getTime() + selectedDays * 24 * 60 * 60 * 1000);
+    const timeline = [];
+    let t = startTime.getTime();
+    while (t <= endTime.getTime()) {
+        timeline.push(t);
+        t += 3600000;
+    }
+    return timeline;
 }
 
 function interpolateValue(series, targetTime) {
@@ -821,60 +829,116 @@ document.getElementById('toggleTableBtn').addEventListener('click', () => {
         : '<span class="material-icons-outlined text-base">expand_less</span> Hide Data Table';
 });
 
-// --- Stitch toggle ---
-const STITCH_VARS = ['asnow', 'snod', 'apcp'];  // accumulation variables
-let stitchData = null;  // cached stitch response
+// --- Integration bar (snow / rain) ---
+const INTEGRATE_VARS = ['asnow', 'apcp'];
+let stitchData = null;
+
+const INTEGRATE_LABELS = {
+    'asnow': { name: 'HRRR integrated snow', unit: 'in' },
+    'apcp':  { name: 'HRRR integrated rain', unit: 'in' },
+};
 
 function updateStitchBar() {
     const bar = document.getElementById('stitchBar');
-    if (STITCH_VARS.includes(currentVariable)) {
+    if (INTEGRATE_VARS.includes(currentVariable)) {
         bar.classList.remove('hidden');
     } else {
         bar.classList.add('hidden');
-        document.getElementById('stitchToggle').checked = false;
     }
 }
 
-document.getElementById('stitchToggle').addEventListener('change', async (e) => {
-    if (e.target.checked) {
-        await fetchStitchData();
+function populateStitchDropdown() {
+    const sel = document.getElementById('stitchStartSelect');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    if (!currentData || !currentData.runs) return;
+
+    const initTimes = [];
+    Object.values(currentData.runs).forEach(run => {
+        if (run.model_id === 'hrrr' && run.init_time) {
+            const dt = new Date(run.init_time);
+            if (!initTimes.some(t => t.getTime() === dt.getTime())) {
+                initTimes.push(dt);
+            }
+        }
+    });
+    initTimes.sort((a, b) => a - b);
+
+    if (initTimes.length === 0) return;
+
+    const now = new Date();
+    initTimes.forEach(dt => {
+        const hrsAgo = Math.round((now - dt) / 3600000);
+        const dayLabel = _relativeDay(dt, now);
+        const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+        const opt = document.createElement('option');
+        opt.value = dt.toISOString();
+        opt.textContent = `${dayLabel} ${timeStr} (-${hrsAgo}h)`;
+        sel.appendChild(opt);
+    });
+
+    // Restore previous selection if still valid, otherwise default to oldest
+    if (prev && [...sel.options].some(o => o.value === prev)) {
+        sel.value = prev;
     } else {
-        document.getElementById('stitchTotal').classList.add('hidden');
-        if (currentData) renderTable(currentData, []);
+        sel.selectedIndex = 0;
     }
+
+    // Auto-fetch integration
+    fetchStitchData();
+}
+
+function _relativeDay(dt, now) {
+    const today = new Date(now); today.setHours(0,0,0,0);
+    const target = new Date(dt); target.setHours(0,0,0,0);
+    const diff = Math.round((today - target) / 86400000);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function getStitchDays() {
+    const sel = document.getElementById('stitchStartSelect');
+    const val = sel.value;
+    if (!val) return 2;
+    const selTime = new Date(val);
+    const now = new Date();
+    return Math.max(0.25, (now - selTime + 3600000) / 86400000);
+}
+
+document.getElementById('stitchStartSelect').addEventListener('change', () => {
+    fetchStitchData();
 });
 
 async function fetchStitchData() {
     if (!currentLat || !currentLon) return;
+    if (!INTEGRATE_VARS.includes(currentVariable)) return;
     const totalEl = document.getElementById('stitchTotal');
-    totalEl.textContent = 'loading...';
-    totalEl.classList.remove('hidden');
+    totalEl.textContent = 'computing...';
 
     try {
-        const url = `/api/timeseries/stitched?lat=${currentLat}&lon=${currentLon}&model=hrrr&variable=${currentVariable}&days=2`;
+        const days = getStitchDays();
+        const lbl = INTEGRATE_LABELS[currentVariable] || { name: 'precip', unit: 'in' };
+        const url = `/api/timeseries/stitched?lat=${currentLat}&lon=${currentLon}&model=hrrr&variable=${currentVariable}&days=${days}`;
         const data = await fetchJSON(url);
         stitchData = data;
-        totalEl.textContent = `Event total: ${data.event_total} in (${data.baseline_accumulated} already fell)`;
+        totalEl.textContent = `${lbl.name} estimate: ${data.event_total} ${lbl.unit} (${data.baseline_accumulated} ${lbl.unit} already fell)`;
 
-        // Rebuild the table with stitched values injected into the HRRR column
         if (currentData) {
-            renderStitchedTable(currentData, data);
+            renderStitchedView(currentData, data);
         }
     } catch (e) {
-        console.error('Stitch fetch failed:', e);
-        totalEl.textContent = 'stitch unavailable';
+        console.error('Integration fetch failed:', e);
+        totalEl.textContent = 'integration unavailable';
     }
 }
 
-function renderStitchedTable(rawData, stitch) {
-    // Build a lookup: valid_time -> stitched value
+function renderStitchedView(rawData, stitch) {
     const stitchLookup = {};
     (stitch.series || []).forEach(pt => {
         stitchLookup[pt.valid_time] = pt.value;
     });
 
-    // Create a modified copy of rawData where the latest HRRR extended run
-    // gets its values replaced with stitched values
     const modData = JSON.parse(JSON.stringify(rawData));
     const latestRun = stitch.latest_run;
 
@@ -886,12 +950,11 @@ function renderStitchedTable(rawData, stitch) {
                     pt.value = stitchLookup[pt.valid_time];
                 }
             });
-            // Mark the run label so renderTable can show it
             run._stitched = true;
         }
     });
 
-    renderTable(modData, []);
+    updateChart(modData);
 }
 
 async function loadData(daysOverride = null) {
@@ -941,10 +1004,8 @@ async function loadData(daysOverride = null) {
         const modelCount = new Set(Object.values(data.runs).map(r => r.model_id)).size;
         statusEl.textContent = `Forecast from ${modelCount} models`;
 
-        // Refresh stitch if toggle is on
-        if (document.getElementById('stitchToggle').checked && STITCH_VARS.includes(currentVariable)) {
-            fetchStitchData();
-        }
+        // Populate integration dropdown now that currentData is available
+        populateStitchDropdown();
 
         // Trigger background preload for other variables
         preloadData(days);

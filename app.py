@@ -12,7 +12,7 @@ from flask_limiter.util import get_remote_address
 from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
 import pytz
 
-from config import repomap
+from config import repomap, get_tile_resolution
 from tiles import list_tile_runs
 
 # Set up logging
@@ -126,7 +126,7 @@ def health_check():
     default_region = next(iter(regions)) if regions else None
     tile_runs = []
     if default_region:
-        res = regions[default_region].get("default_resolution_deg", 0.1)
+        res = get_tile_resolution(default_region, repomap["DEFAULT_MODEL"])
         tile_runs = list_tile_runs(repomap["TILES_DIR"], default_region, res, repomap["DEFAULT_MODEL"])
     return jsonify({
         "status": "ok",

@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify
 import numpy as np
 import pytz
 
-from config import repomap
+from config import repomap, get_tile_resolution
 from tiles import load_timeseries_for_point, list_tile_runs, list_tile_models
 
 forecast_bp = Blueprint("forecast", __name__)
@@ -123,12 +123,14 @@ def api_timeseries_multirun():
     if region_id not in regions:
         return jsonify({"error": "Invalid region"}), 400
 
-    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
-
     models_to_query = []
     if requested_model == "all":
-        tile_models = list_tile_models(repomap["TILES_DIR"], region_id, res)
-        models_to_query = list(tile_models.keys())
+        # Query each model at its own resolution
+        for mid in repomap["MODELS"]:
+            mres = get_tile_resolution(region_id, mid)
+            tile_runs = list_tile_runs(repomap["TILES_DIR"], region_id, mres, mid)
+            if tile_runs:
+                models_to_query.append(mid)
     elif requested_model in repomap["MODELS"]:
         models_to_query = [requested_model]
     else:
@@ -138,6 +140,7 @@ def api_timeseries_multirun():
     cutoff = datetime.now(pytz.UTC) - timedelta(days=days_back)
 
     for model_id in models_to_query:
+        res = get_tile_resolution(region_id, model_id)
         all_runs = list_tile_runs(repomap["TILES_DIR"], region_id, res, model_id)
 
         selected_runs = []
@@ -225,7 +228,7 @@ def api_timeseries_stitched():
     if region_id not in regions:
         return jsonify({"error": "Invalid region"}), 400
 
-    res = float(request.args.get("resolution", regions[region_id].get("default_resolution_deg", 0.1)))
+    res = get_tile_resolution(region_id, model_id)
     cutoff = datetime.now(pytz.UTC) - timedelta(days=days_back)
 
     # ---------- Collect all runs ----------
@@ -264,19 +267,8 @@ def api_timeseries_stitched():
 
     run_data.sort(key=lambda x: x[0])
 
-    # ---------- Find latest extended run (the forecast) ----------
-    # Extended runs are synoptic cycles (00/06/12/18Z).  Use the latest one
-    # even if it's still ingesting — it'll have more data next refresh.
-    SYNOPTIC_HOURS = {0, 6, 12, 18}
-    latest_extended = None
-    for init_dt, run_id, npts, point_map in reversed(run_data):
-        if init_dt.hour in SYNOPTIC_HOURS:
-            latest_extended = (init_dt, run_id, npts, point_map)
-            break
-
-    if not latest_extended:
-        return jsonify({"error": "No extended run available"}), 404
-
+    # ---------- Find latest run (the forecast going forward) ----------
+    latest_extended = run_data[-1]  # newest by init time
     ext_init = latest_extended[0]
 
     # ---------- Build baseline: chain 1-hour verified segments ----------

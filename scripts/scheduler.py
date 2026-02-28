@@ -27,7 +27,7 @@ import json
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import repomap
+from config import repomap, get_tile_resolution
 from grib_fetcher import get_valid_forecast_hours, get_run_forecast_hours, check_availability
 from tile_db import init_db, delete_tile_run, delete_region_tiles
 from jobs import (
@@ -136,7 +136,7 @@ def tiles_exist(region_id: str, model_id: str, run_id: str, expected_max_hours: 
     Deterministic policy: require the hours array in a proxy variable (t2m)
     to exactly match the model's schedule up to expected_max_hours.
     """
-    res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
+    res = get_tile_resolution(region_id, model_id)
     res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
 
     # Check for t2m tiles as a proxy for the run
@@ -191,7 +191,7 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
     # Determine variables to build
     var_ids = [v.strip() for v in BUILD_VARIABLES_ENV.split(",") if v.strip()]
 
-    resolution_deg = repomap["TILING_REGIONS"][region_id].get("default_resolution_deg", 0.1)
+    resolution_deg = get_tile_resolution(region_id, model_id)
 
     # Compute priority: newer runs get strictly higher priority.
     # Use minutes (not hours) so runs 6h apart never collide.
@@ -384,61 +384,69 @@ def cleanup_old_runs():
     conn = init_db(repomap.get("DB_PATH"))
     try:
         for region_id in REGIONS:
-            res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-            res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-            region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
-
-            if not os.path.isdir(region_dir):
+            base_region_dir = os.path.join(repomap["TILES_DIR"], region_id)
+            if not os.path.isdir(base_region_dir):
                 continue
 
-            for model_id in os.listdir(region_dir):
-                model_dir = os.path.join(region_dir, model_id)
-                if not os.path.isdir(model_dir):
+            # Scan all resolution directories under the region
+            for res_entry in os.listdir(base_region_dir):
+                region_dir = os.path.join(base_region_dir, res_entry)
+                if not os.path.isdir(region_dir) or not res_entry.endswith("deg"):
+                    continue
+                # Parse resolution from dir name (e.g. "0.03deg" -> 0.03)
+                try:
+                    res = float(res_entry.replace("deg", ""))
+                except ValueError:
                     continue
 
-                # Get runs sorted newest to oldest
-                runs = sorted(
-                    [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
-                    reverse=True
-                )
+                for model_id in os.listdir(region_dir):
+                    model_dir = os.path.join(region_dir, model_id)
+                    if not os.path.isdir(model_dir):
+                        continue
 
-                if not runs:
-                    continue
+                    # Get runs sorted newest to oldest
+                    runs = sorted(
+                        [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
+                        reverse=True
+                    )
 
-                # Separate synoptic (00, 06, 12, 18z) from hourly runs
-                synoptic_runs = []
-                hourly_runs = []
-                for run_id in runs:
-                    try:
-                        init_hour = int(run_id.split('_')[2])
-                        if init_hour % 6 == 0:
-                            synoptic_runs.append(run_id)
-                        else:
+                    if not runs:
+                        continue
+
+                    # Separate synoptic (00, 06, 12, 18z) from hourly runs
+                    synoptic_runs = []
+                    hourly_runs = []
+                    for run_id in runs:
+                        try:
+                            init_hour = int(run_id.split('_')[2])
+                            if init_hour % 6 == 0:
+                                synoptic_runs.append(run_id)
+                            else:
+                                hourly_runs.append(run_id)
+                        except (IndexError, ValueError):
                             hourly_runs.append(run_id)
-                    except (IndexError, ValueError):
-                        hourly_runs.append(run_id)
 
-                # Keep top N synoptic + top M hourly (per-model)
-                max_syn, max_hr = _get_retention(model_id)
-                keep_synoptic = set(synoptic_runs[:max_syn])
-                keep_hourly = set(hourly_runs[:max_hr])
-                keep_all = keep_synoptic | keep_hourly
+                    # Keep top N synoptic + top M hourly (per-model)
+                    max_syn, max_hr = _get_retention(model_id)
+                    keep_synoptic = set(synoptic_runs[:max_syn])
+                    keep_hourly = set(hourly_runs[:max_hr])
+                    keep_all = keep_synoptic | keep_hourly
 
-                runs_to_remove = [r for r in runs if r not in keep_all]
+                    runs_to_remove = [r for r in runs if r not in keep_all]
 
-                if runs_to_remove:
-                    logger.info(f"Tile cleanup {model_id}: keeping {len(keep_synoptic)} synoptic + {len(keep_hourly)} hourly, removing {len(runs_to_remove)}")
+                    if runs_to_remove:
+                        logger.info(f"Tile cleanup {model_id}: keeping {len(keep_synoptic)} synoptic + {len(keep_hourly)} hourly, removing {len(runs_to_remove)}")
 
-                for old_run in runs_to_remove:
-                    old_run_dir = os.path.join(model_dir, old_run)
-                    logger.info(f"Removing old tile run: {model_id}/{old_run}")
-                    try:
-                        import shutil
-                        shutil.rmtree(old_run_dir)
-                        # Remove from DB as well
-                        delete_tile_run(conn, region_id, res, model_id, old_run)
-                    except Exception as e:
-                        logger.error(f"Failed to remove {old_run_dir}: {e}")
+                    for old_run in runs_to_remove:
+                        old_run_dir = os.path.join(model_dir, old_run)
+                        logger.info(f"Removing old tile run: {model_id}/{old_run}")
+                        try:
+                            import shutil
+                            shutil.rmtree(old_run_dir)
+                            # Remove from DB as well
+                            delete_tile_run(conn, region_id, res, model_id, old_run)
+                        except Exception as e:
+                            logger.error(f"Failed to remove {old_run_dir}: {e}")
     finally:
         conn.close()
 
@@ -456,9 +464,7 @@ def main():
         conn = init_db(repomap.get("DB_PATH"))
         try:
             for region_id in REGIONS:
-                res = repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
-                res_dir = f"{res:.3f}deg".rstrip("0").rstrip(".")
-                region_dir = os.path.join(repomap["TILES_DIR"], region_id, res_dir)
+                region_dir = os.path.join(repomap["TILES_DIR"], region_id)
                 if os.path.exists(region_dir):
                     logger.info(f"Removing {region_dir}...")
                     try:
@@ -470,42 +476,45 @@ def main():
         finally:
             conn.close()
 
-    # Clean slate on restart: nuke everything (jobs, tiles, GRIBs).
-    # The scheduler will rebuild from scratch each deploy.
-    import shutil
+    # Clean slate on restart: only on Fly.io deploys (not dev restarts).
+    if os.environ.get("CLEAN_SLATE_ON_START") == "1":
+        import shutil
+        logger.info("CLEAN_SLATE_ON_START=1 — nuking all caches")
 
-    # 1. Nuke job queue
-    conn = init_jobs_db(repomap["DB_PATH"])
-    try:
-        nuked = conn.execute("DELETE FROM jobs").rowcount
-        conn.commit()
-        if nuked:
-            logger.info(f"Startup: nuked {nuked} jobs")
-    finally:
-        conn.close()
+        # 1. Nuke job queue
+        conn = init_jobs_db(repomap["DB_PATH"])
+        try:
+            nuked = conn.execute("DELETE FROM jobs").rowcount
+            conn.commit()
+            if nuked:
+                logger.info(f"Startup: nuked {nuked} jobs")
+        finally:
+            conn.close()
 
-    # 2. Nuke tiles
-    tiles_dir = repomap["TILES_DIR"]
-    if os.path.isdir(tiles_dir):
-        shutil.rmtree(tiles_dir)
-        logger.info(f"Startup: nuked tiles dir {tiles_dir}")
-    os.makedirs(tiles_dir, exist_ok=True)
+        # 2. Nuke tiles
+        tiles_dir = repomap["TILES_DIR"]
+        if os.path.isdir(tiles_dir):
+            shutil.rmtree(tiles_dir)
+            logger.info(f"Startup: nuked tiles dir {tiles_dir}")
+        os.makedirs(tiles_dir, exist_ok=True)
 
-    # 3. Nuke tile metadata DB
-    tile_conn = init_db(repomap.get("DB_PATH"))
-    try:
-        for region_id in REGIONS:
-            delete_region_tiles(tile_conn, region_id)
-        logger.info("Startup: nuked tile metadata")
-    finally:
-        tile_conn.close()
+        # 3. Nuke tile metadata DB
+        tile_conn = init_db(repomap.get("DB_PATH"))
+        try:
+            for region_id in REGIONS:
+                delete_region_tiles(tile_conn, region_id)
+            logger.info("Startup: nuked tile metadata")
+        finally:
+            tile_conn.close()
 
-    # 4. Nuke Herbie GRIB cache
-    herbie_dir = repomap.get("HERBIE_SAVE_DIR", "cache/herbie")
-    if os.path.isdir(herbie_dir):
-        shutil.rmtree(herbie_dir)
-        logger.info(f"Startup: nuked GRIB cache {herbie_dir}")
-    os.makedirs(herbie_dir, exist_ok=True)
+        # 4. Nuke Herbie GRIB cache
+        herbie_dir = repomap.get("HERBIE_SAVE_DIR", "cache/herbie")
+        if os.path.isdir(herbie_dir):
+            shutil.rmtree(herbie_dir)
+            logger.info(f"Startup: nuked GRIB cache {herbie_dir}")
+        os.makedirs(herbie_dir, exist_ok=True)
+    else:
+        logger.info("Preserving existing caches (set CLEAN_SLATE_ON_START=1 to nuke)")
 
     logger.info("Startup: clean slate complete")
 

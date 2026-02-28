@@ -259,6 +259,7 @@ MODELS = {
         "update_frequency_hours": 1,
         "forecast_hour_digits": 2,
         "max_hours_by_init": {"00": 48, "06": 48, "12": 48, "18": 48, "default": 18},
+        "tile_resolution_deg": 0.03,
     },
     "nam_nest": {
         "name": "NAM 3km CONUS",
@@ -341,6 +342,14 @@ repomap = {
         }
     },
 }
+
+def get_tile_resolution(region_id: str, model_id: str) -> float:
+    """Return tile resolution for a model+region, with per-model override support."""
+    model_cfg = MODELS.get(model_id, {})
+    if "tile_resolution_deg" in model_cfg:
+        return model_cfg["tile_resolution_deg"]
+    return repomap["TILING_REGIONS"].get(region_id, {}).get("default_resolution_deg", 0.1)
+
 
 if not os.path.exists(repomap["CACHE_DIR"]):
     os.makedirs(repomap["CACHE_DIR"])
