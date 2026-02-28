@@ -1,19 +1,24 @@
-#![allow(dead_code)]
+//! Radarcheck tile worker — fetches GRIB data and builds statistical tiles.
+//!
+//! Drop-in replacement for Python job_worker.py (for NOAA models).
 
 mod config;
+mod db;
 mod fetch;
 mod grib;
 mod idx;
 mod npz;
 mod tiles;
+mod worker;
 
 use anyhow::Result;
 use clap::Parser;
-use log::info;
+use log::{error, info, warn};
+use std::path::Path;
+use std::time::Instant;
 
-/// Radarcheck tile worker — fetches GRIB data and builds statistical tiles
 #[derive(Parser, Debug)]
-#[command(version, about)]
+#[command(version, about = "Radarcheck tile worker")]
 struct Args {
     /// Only process jobs for this model
     #[arg(long)]
@@ -45,18 +50,118 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    info!(
-        "radarcheck-worker starting (model={}, poll={}s, max_jobs={})",
-        args.model.as_deref().unwrap_or("all"),
-        args.poll_interval,
-        args.max_jobs
+    let worker_id = format!(
+        "rust-worker-{}{}",
+        std::process::id(),
+        args.model
+            .as_ref()
+            .map(|m| format!("-{}", m))
+            .unwrap_or_default()
     );
 
-    // TODO: implement job loop (claim from SQLite, process, complete/fail)
-    // For now, this is a skeleton that demonstrates the GRIB pipeline works.
+    info!(
+        "{} starting (model={}, poll={}s, max_jobs={})",
+        worker_id,
+        args.model.as_deref().unwrap_or("all"),
+        args.poll_interval,
+        args.max_jobs,
+    );
 
-    info!("Worker ready. Job loop not yet implemented — use Python worker for now.");
-    info!("Run `cargo test` to verify GRIB decode parity with Python.");
+    let db_path = Path::new(&args.db_path);
+    let tiles_dir = Path::new(&args.tiles_dir);
+    let conn = db::open_db(db_path)?;
 
+    let poll_duration = std::time::Duration::from_secs_f64(args.poll_interval);
+    let mut processed: u32 = 0;
+
+    loop {
+        let job = db::claim(&conn, &worker_id, args.model.as_deref())?;
+
+        let job = match job {
+            Some(j) => j,
+            None => {
+                if args.once {
+                    info!(
+                        "No jobs available, exiting (--once). Processed {} total.",
+                        processed
+                    );
+                    break;
+                }
+                std::thread::sleep(poll_duration);
+                continue;
+            }
+        };
+
+        // Build a human-readable label for logging
+        let job_label = match serde_json::from_str::<db::BuildTileHourArgs>(&job.args_json) {
+            Ok(a) => format!(
+                "{}/{}/{} f{}",
+                a.model_id, a.run_id, a.variable_id, a.forecast_hour
+            ),
+            Err(_) => job.job_type.clone(),
+        };
+
+        info!("Job {}: {}", job.id, job_label);
+        let t0 = Instant::now();
+
+        match job.job_type.as_str() {
+            "build_tile_hour" => {
+                match worker::process_build_tile_hour(&conn, &job, tiles_dir) {
+                    Ok(()) => {
+                        db::complete(&conn, job.id)?;
+                        processed += 1;
+                        let elapsed = t0.elapsed().as_secs_f64();
+                        info!(
+                            "Job {} done in {:.1}s ({} total)",
+                            job.id, elapsed, processed
+                        );
+                    }
+                    Err(e) => {
+                        let elapsed = t0.elapsed().as_secs_f64();
+                        let error_str = format!("{:#}", e);
+                        error!(
+                            "Job {} FAILED after {:.1}s ({}): {}",
+                            job.id, elapsed, job_label, error_str
+                        );
+                        db::fail(&conn, job.id, &error_str)?;
+
+                        // Cancel siblings when run data is unavailable
+                        let unavailable = error_str.contains("GRIB2 file not found")
+                            || error_str.to_lowercase().contains("not found");
+                        if unavailable {
+                            match db::cancel_siblings(&conn, &job) {
+                                Ok(n) if n > 0 => {
+                                    info!(
+                                        "Cancelled {} sibling jobs -- run data not available",
+                                        n
+                                    );
+                                }
+                                Ok(_) => {}
+                                Err(e) => warn!("Failed to cancel siblings: {}", e),
+                            }
+                        }
+                    }
+                }
+            }
+            other => {
+                let msg = format!("Unsupported job type: {}", other);
+                warn!("Job {}: {}", job.id, msg);
+                db::fail(&conn, job.id, &msg)?;
+            }
+        }
+
+        if args.once {
+            break;
+        }
+        if args.max_jobs > 0 && processed >= args.max_jobs {
+            info!(
+                "Reached max_jobs={}, exiting for memory cleanup",
+                args.max_jobs
+            );
+            break;
+        }
+    }
+
+    info!("{} shut down. Processed {} jobs.", worker_id, processed);
     Ok(())
 }

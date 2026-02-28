@@ -91,24 +91,42 @@ impl VariableConfig {
 /// Region for tiling
 #[derive(Debug, Clone)]
 pub struct TilingRegion {
+    pub id: &'static str,
     pub name: &'static str,
     pub lat_min: f64,
     pub lat_max: f64,
     pub lon_min: f64,
     pub lon_max: f64,
     pub default_resolution_deg: f64,
+    /// Which stats to save: "mean", "min", "max"
+    pub stats: &'static [&'static str],
 }
 
 // ── Static config ────────────────────────────────────────────────────────────
 
 pub static NE_REGION: TilingRegion = TilingRegion {
+    id: "ne",
     name: "Northeast US (Expanded)",
     lat_min: 33.0,
     lat_max: 47.0,
     lon_min: -88.0,
     lon_max: -66.0,
     default_resolution_deg: 0.1,
+    stats: &["mean"],
 };
+
+pub fn get_region(region_id: &str) -> Option<&'static TilingRegion> {
+    match region_id {
+        "ne" => Some(&NE_REGION),
+        _ => None,
+    }
+}
+
+/// Format resolution as directory name, matching Python: f"{res:.3f}deg".rstrip("0").rstrip(".")
+pub fn format_res_dir(resolution_deg: f64) -> String {
+    // Match Python: f"{resolution_deg:.3f}deg" (no trimming — Python's rstrip is a no-op here)
+    format!("{:.3}deg", resolution_deg)
+}
 
 pub fn get_model(model_id: &str) -> Option<ModelConfig> {
     Some(match model_id {

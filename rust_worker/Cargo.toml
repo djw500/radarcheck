@@ -25,6 +25,9 @@ ndarray-npy = "0.9"
 flate2 = "1"
 zip = "2"
 
+# File locking for concurrent NPZ writes (matches Python filelock)
+fs2 = "0.4"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 
