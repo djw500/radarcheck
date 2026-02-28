@@ -28,8 +28,8 @@
   ],
   "lat_ndim": 1,
   "value_range": [
-    222.796158,
-    313.286163
+    222.7962,
+    313.2862
   ],
   "units": "K",
   "var_name_in_dataset": "t2m",
