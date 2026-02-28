@@ -2,23 +2,26 @@
   "model_id": "hrrr",
   "variable_id": "t2m",
   "resolution_deg": 0.03,
-  "region": "ne",
-  "lat_min": 33.0,
-  "lat_max": 47.0,
-  "lon_min": -88.0,
-  "lon_max": -66.0,
   "tile_shape": [
     1,
     467,
     734
   ],
-  "mean_range": [
-    5.750971,
-    70.438469
-  ],
+  "conversion": "k_to_f",
+  "src_units": "K",
   "lon_0_360": true,
   "index_lon_min": 272.0,
+  "lat_min": 33.0,
+  "lat_max": 47.0,
+  "lon_min": -88.0,
+  "lon_max": -66.0,
   "hours": [
     1
+  ],
+  "means_finite_count": 288839,
+  "means_nan_count": 53939,
+  "means_range": [
+    5.750970840454102,
+    70.43846893310547
   ]
 }

@@ -42,8 +42,9 @@ pub fn parse_idx(content: &str) -> Vec<IdxEntry> {
         }
 
         // Format: msg_num:byte_offset:d=datetime:VAR:level:description:
-        let parts: Vec<&str> = line.splitn(4, ':').collect();
-        if parts.len() < 4 {
+        let parts: Vec<&str> = line.split(':').collect();
+        // Minimum: msg, offset, d=datetime, VAR, level, desc (6 parts)
+        if parts.len() < 6 {
             continue;
         }
 
@@ -57,23 +58,15 @@ pub fn parse_idx(content: &str) -> Vec<IdxEntry> {
             Err(_) => continue,
         };
 
-        // Rest after "msg:offset:" is "d=datetime:VAR:level:desc:"
-        let remainder = parts[3];
-        let rest_parts: Vec<&str> = remainder.split(':').collect();
-        if rest_parts.len() < 3 {
-            continue;
-        }
-
-        let datetime = rest_parts[0].to_string();
-
-        // Build search_this from VAR:level:desc onwards
-        let search_parts: Vec<&str> = rest_parts[1..].to_vec();
-        let search_this = format!(":{}:", search_parts.join(":").trim_end_matches(':'));
-
-        let variable = rest_parts.get(1).unwrap_or(&"").to_string();
-        let level = rest_parts.get(2).unwrap_or(&"").to_string();
-        let description = rest_parts[3..].join(":");
+        let datetime = parts[2].to_string(); // "d=YYYYMMDDHHH"
+        let variable = parts[3].to_string();
+        let level = parts[4].to_string();
+        let description = parts[5..].join(":");
         let description = description.trim_end_matches(':').to_string();
+
+        // Build search_this: ":VAR:level:desc:"
+        let search_tail = parts[3..].join(":");
+        let search_this = format!(":{}:", search_tail.trim_end_matches(':'));
 
         entries.push(IdxEntry {
             message_num,

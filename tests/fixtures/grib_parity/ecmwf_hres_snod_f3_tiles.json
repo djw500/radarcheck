@@ -2,23 +2,26 @@
   "model_id": "ecmwf_hres",
   "variable_id": "snod",
   "resolution_deg": 0.1,
-  "region": "ne",
-  "lat_min": 33.0,
-  "lat_max": 47.0,
-  "lon_min": -88.0,
-  "lon_max": -66.0,
   "tile_shape": [
     1,
     140,
     220
   ],
-  "mean_range": [
-    0.0,
-    44.409458
-  ],
+  "conversion": "m_to_in",
+  "src_units": "",
   "lon_0_360": false,
   "index_lon_min": -88.0,
+  "lat_min": 33.0,
+  "lat_max": 47.0,
+  "lon_min": -88.0,
+  "lon_max": -66.0,
   "hours": [
     3
+  ],
+  "means_finite_count": 4928,
+  "means_nan_count": 25872,
+  "means_range": [
+    0.0,
+    13.764155387878418
   ]
 }

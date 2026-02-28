@@ -2,23 +2,26 @@
   "model_id": "gfs",
   "variable_id": "snod",
   "resolution_deg": 0.1,
-  "region": "ne",
-  "lat_min": 33.0,
-  "lat_max": 47.0,
-  "lon_min": -88.0,
-  "lon_max": -66.0,
   "tile_shape": [
     1,
     140,
     220
   ],
-  "mean_range": [
-    0.0,
-    52.255146
-  ],
+  "conversion": "m_to_in",
+  "src_units": "m",
   "lon_0_360": true,
   "index_lon_min": 272.0,
+  "lat_min": 33.0,
+  "lat_max": 47.0,
+  "lon_min": -88.0,
+  "lon_max": -66.0,
   "hours": [
     3
+  ],
+  "means_finite_count": 3219,
+  "means_nan_count": 27581,
+  "means_range": [
+    0.0,
+    52.25514602661133
   ]
 }
