@@ -33,6 +33,12 @@ SCHED_PID="/tmp/scheduler.pid"
 
 MODELS=(hrrr nam_nest gfs nbm ecmwf_hres)
 
+# Rust worker for NOAA models, Python for ECMWF (needs Herbie STAC API)
+RUST_MODELS=(hrrr nam_nest gfs nbm)
+PYTHON_MODELS=(ecmwf_hres)
+RUST_BINARY="rust_worker/target/release/radarcheck-worker"
+RUST_BUILD_ENV="rust_worker/build-env.sh"
+
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
 start_scheduler() {
@@ -59,7 +65,30 @@ stop_scheduler() {
 # Workers auto-restart after --max-jobs to reclaim memory.
 MAX_JOBS_PER_CYCLE="${MAX_JOBS_PER_CYCLE:-50}"
 
+_is_rust_model() {
+    local model="$1"
+    for m in "${RUST_MODELS[@]}"; do
+        [[ "$m" == "$model" ]] && return 0
+    done
+    return 1
+}
+
+_ensure_rust_binary() {
+    if [[ ! -x "$SCRIPT_DIR/$RUST_BINARY" ]]; then
+        echo "Building Rust worker (release)..."
+        (source "$SCRIPT_DIR/$RUST_BUILD_ENV" && cargo build --manifest-path "$SCRIPT_DIR/rust_worker/Cargo.toml" --bin radarcheck-worker --release 2>&1 | tail -3)
+        if [[ ! -x "$SCRIPT_DIR/$RUST_BINARY" ]]; then
+            echo "ERROR: Failed to build Rust worker" >&2
+            return 1
+        fi
+        echo "Rust worker built successfully"
+    fi
+}
+
 start_workers() {
+    # Build Rust binary once if any NOAA model needs it
+    _ensure_rust_binary || echo "WARNING: Rust build failed, NOAA models will use Python fallback"
+
     for model in "${MODELS[@]}"; do
         local pidfile="/tmp/worker_${model}.pid"
         local logfile="/tmp/worker_${model}.log"
@@ -67,16 +96,31 @@ start_workers() {
             echo "Worker[$model]: already running (pid $(cat "$pidfile"))"
             continue
         fi
-        # Wrapper loop: restart worker when it exits after max-jobs
-        nohup bash -c '
-            while true; do
-                python3 job_worker.py --model "'"$model"'" --poll-interval 10 --max-jobs '"$MAX_JOBS_PER_CYCLE"' --log-file "'"$logfile"'" 2>&1
-                echo "$(date) Worker['"$model"'] restarting after max-jobs cycle..." >> "'"$logfile"'"
-                sleep 2
-            done
-        ' > "$logfile" 2>&1 &
-        echo $! > "$pidfile"
-        echo "Worker[$model]: started (pid $!), log: $logfile, max_jobs=$MAX_JOBS_PER_CYCLE"
+
+        if _is_rust_model "$model" && [[ -x "$SCRIPT_DIR/$RUST_BINARY" ]]; then
+            # Rust worker for NOAA models
+            nohup bash -c '
+                source "'"$SCRIPT_DIR/$RUST_BUILD_ENV"'"
+                while true; do
+                    "'"$SCRIPT_DIR/$RUST_BINARY"'" --model "'"$model"'" --poll-interval 10 --max-jobs '"$MAX_JOBS_PER_CYCLE"' --db-path cache/jobs.db --tiles-dir cache/tiles 2>&1
+                    echo "$(date) Worker['"$model"'] (rust) restarting after max-jobs cycle..."
+                    sleep 2
+                done
+            ' > "$logfile" 2>&1 &
+            echo $! > "$pidfile"
+            echo "Worker[$model]: started RUST (pid $!), log: $logfile, max_jobs=$MAX_JOBS_PER_CYCLE"
+        else
+            # Python worker for ECMWF (or Rust build fallback)
+            nohup bash -c '
+                while true; do
+                    python3 job_worker.py --model "'"$model"'" --poll-interval 10 --max-jobs '"$MAX_JOBS_PER_CYCLE"' --log-file "'"$logfile"'" 2>&1
+                    echo "$(date) Worker['"$model"'] (python) restarting after max-jobs cycle..."
+                    sleep 2
+                done
+            ' > "$logfile" 2>&1 &
+            echo $! > "$pidfile"
+            echo "Worker[$model]: started PYTHON (pid $!), log: $logfile, max_jobs=$MAX_JOBS_PER_CYCLE"
+        fi
     done
 }
 
@@ -116,10 +160,12 @@ status_all() {
     fi
     for model in "${MODELS[@]}"; do
         local pidfile="/tmp/worker_${model}.pid"
+        local engine="python"
+        _is_rust_model "$model" && engine="rust"
         if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-            echo "Worker[$model]: running (pid $(cat "$pidfile"))"
+            echo "Worker[$model]: running ($engine, pid $(cat "$pidfile"))"
         else
-            echo "Worker[$model]: stopped"
+            echo "Worker[$model]: stopped ($engine)"
         fi
     done
     echo ""

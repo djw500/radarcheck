@@ -74,6 +74,15 @@ fn main() -> Result<()> {
     let poll_duration = std::time::Duration::from_secs_f64(args.poll_interval);
     let mut processed: u32 = 0;
 
+    // Throttle NOMADS-backed models to avoid rate limiting (302 "Over Rate Limit")
+    // S3-backed models (HRRR, GFS) don't need this
+    let nomads_throttle = args
+        .model
+        .as_deref()
+        .and_then(config::get_model)
+        .map(|m| m.grib_url_template.contains("nomads.ncep.noaa.gov"))
+        .unwrap_or(false);
+
     loop {
         let job = db::claim(&conn, &worker_id, args.model.as_deref())?;
 
@@ -103,6 +112,7 @@ fn main() -> Result<()> {
 
         info!("Job {}: {}", job.id, job_label);
         let t0 = Instant::now();
+        let mut job_failed_rate_limit = false;
 
         match job.job_type.as_str() {
             "build_tile_hour" => {
@@ -125,9 +135,12 @@ fn main() -> Result<()> {
                         );
                         db::fail(&conn, job.id, &error_str)?;
 
-                        // Cancel siblings when run data is unavailable
-                        let unavailable = error_str.contains("GRIB2 file not found")
-                            || error_str.to_lowercase().contains("not found");
+                        // Cancel siblings when run data is truly unavailable (404),
+                        // but NOT for rate limits (302) which are temporary
+                        job_failed_rate_limit = error_str.contains("302");
+                        let unavailable = !job_failed_rate_limit
+                            && (error_str.contains("GRIB2 file not found")
+                                || error_str.to_lowercase().contains("not found"));
                         if unavailable {
                             match db::cancel_siblings(&conn, &job) {
                                 Ok(n) if n > 0 => {
@@ -148,6 +161,13 @@ fn main() -> Result<()> {
                 warn!("Job {}: {}", job.id, msg);
                 db::fail(&conn, job.id, &msg)?;
             }
+        }
+
+        // Throttle NOMADS requests to avoid rate limiting.
+        // Back off longer on rate-limit (302) errors.
+        if nomads_throttle {
+            let delay_ms = if job_failed_rate_limit { 5000 } else { 500 };
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         }
 
         if args.once {
