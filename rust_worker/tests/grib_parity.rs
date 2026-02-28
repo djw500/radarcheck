@@ -316,15 +316,17 @@ fn parity_nbm_t2m() {
 
 #[test]
 fn parity_nbm_apcp() {
-    // DRT 3: checkpoint values completely wrong at some points but
-    // aggregate mean=0.00% err, nonzero count exact match
-    check_parity_degraded("nbm_apcp_f1", 0.01, 0.001);
+    // DRT 3: aggregate stats match exactly. Checkpoints are all zeros
+    // (sparse field, ~9% nonzero) so full parity passes, but DRT 3
+    // decoder may diverge at non-zero grid points.
+    check_parity("nbm_apcp_f1");
 }
 
 #[test]
 fn parity_nbm_asnow() {
-    // DRT 3: checkpoint values wrong, mean ~0.5% err, nonzero exact
-    check_parity_degraded("nbm_asnow_f1", 0.02, 0.001);
+    // DRT 3: aggregate stats match (0.54% mean err). Checkpoints all
+    // zeros (~1% nonzero field). Same DRT 3 caveat as APCP.
+    check_parity_with_tolerance("nbm_asnow_f1", 0.02);
 }
 
 // ── ECMWF HRES (regular lat/lon, CCSDS/AEC) ────────────────────────────────
