@@ -1,6 +1,5 @@
 //! Model and variable configuration — mirrors Python config.py
 
-use std::collections::HashMap;
 
 /// URL template for a model's GRIB2 files on NOAA servers
 #[derive(Debug, Clone)]

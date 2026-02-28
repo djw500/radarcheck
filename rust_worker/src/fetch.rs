@@ -1,11 +1,10 @@
 //! HTTP fetching for GRIB2 files and IDX indexes.
 
 use anyhow::{Context, Result, bail};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
-use crate::config::ModelConfig;
-use crate::idx::{self, IdxEntry, IdxMatch};
+use crate::idx::{self, IdxEntry};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 

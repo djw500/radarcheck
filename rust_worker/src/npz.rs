@@ -5,9 +5,9 @@
 //! - Write NPZ with compressed arrays (to save tiles)
 
 use anyhow::{Context, Result, bail};
-use ndarray::{Array1, Array3};
+use ndarray::Array3;
 use std::fs::File;
-use std::io::{Read, Write, Cursor};
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// Contents of a tile NPZ file

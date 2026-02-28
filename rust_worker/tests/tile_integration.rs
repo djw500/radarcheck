@@ -17,14 +17,16 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use radarcheck_worker::config::{self, Conversion, NE_REGION};
+use radarcheck_worker::config::{Conversion, NE_REGION};
 use radarcheck_worker::grib;
 use radarcheck_worker::npz;
 use radarcheck_worker::tiles;
 
 #[derive(Deserialize)]
 struct TileFixtureMeta {
+    #[allow(dead_code)]
     model_id: String,
+    #[allow(dead_code)]
     variable_id: String,
     resolution_deg: f64,
     tile_shape: Vec<usize>,
@@ -35,7 +37,9 @@ struct TileFixtureMeta {
     lon_0_360: bool,
     #[allow(dead_code)]
     index_lon_min: f64,
+    #[allow(dead_code)]
     means_finite_count: usize,
+    #[allow(dead_code)]
     means_nan_count: usize,
 }
 
