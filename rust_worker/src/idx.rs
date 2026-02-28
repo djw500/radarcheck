@@ -87,7 +87,7 @@ pub fn parse_idx(content: &str) -> Vec<IdxEntry> {
 /// The search pattern is matched against each entry's search_this field.
 /// Common patterns: ":APCP:surface", ":TMP:2 m above ground"
 pub fn find_matches(entries: &[IdxEntry], search: &str) -> Vec<IdxMatch> {
-    let pattern = search.trim_start_matches(':').trim_end_matches(':');
+    let pattern = search.trim_end_matches(':');
     let re = match Regex::new(pattern) {
         Ok(r) => r,
         Err(_) => return Vec::new(),

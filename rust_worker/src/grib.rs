@@ -4,7 +4,7 @@
 //! with lat/lon coordinate arrays.
 
 use anyhow::{Context, Result, bail};
-use grib::{GridDefinitionTemplateValues, LambertGridDefinition};
+use grib::{GridDefinitionTemplateValues, LambertGridDefinition, ScanningMode};
 use ndarray::Array2;
 use std::io::Cursor;
 
@@ -89,8 +89,25 @@ pub fn decode_grib_message(grib_bytes: &[u8]) -> Result<DecodedGrib> {
         );
     }
 
-    let values = Array2::from_shape_vec((ny, nx), decoded_values)
+    let mut values = Array2::from_shape_vec((ny, nx), decoded_values)
         .context("Failed to reshape values into 2D array")?;
+
+    // Fix serpentine scanning: dispatch() returns raw values in scanning order.
+    // If adjacent rows scan in opposite directions (boustrophedon), odd rows
+    // are reversed compared to row-major order. Reverse them so values align
+    // with our row-major coordinate arrays.
+    if let Some(sm) = get_scanning_mode(&tmpl) {
+        if sm.scans_alternating_rows() {
+            log::debug!("Fixing serpentine scanning (alternating rows)");
+            for j in (1..ny).step_by(2) {
+                let mut row = values.row_mut(j);
+                let len = row.len();
+                for i in 0..len / 2 {
+                    row.swap(i, len - 1 - i);
+                }
+            }
+        }
+    }
 
     // Get coordinates from the template
     let (latitudes, longitudes) = get_coordinates(&tmpl, ny, nx)?;
@@ -104,6 +121,14 @@ pub fn decode_grib_message(grib_bytes: &[u8]) -> Result<DecodedGrib> {
         short_name: "unknown".to_string(),
         units: "unknown".to_string(),
     })
+}
+
+fn get_scanning_mode(tmpl: &GridDefinitionTemplateValues) -> Option<ScanningMode> {
+    match tmpl {
+        GridDefinitionTemplateValues::Template0(def) => Some(def.scanning_mode),
+        GridDefinitionTemplateValues::Template30(def) => Some(def.scanning_mode),
+        _ => None,
+    }
 }
 
 fn get_coordinates(
@@ -227,31 +252,34 @@ fn lambert_latlons(def: &LambertGridDefinition) -> Result<Vec<(f64, f64)>> {
     let x0 = rho_first * theta_first.sin();
     let y0 = rho0 - rho_first * theta_first.cos();
 
-    // Compute lat/lon for each grid point using the ij iterator
-    let ij_iter = def.ij().context("Failed to create grid point iterator")?;
+    // Compute lat/lon for each grid point in row-major order (j, i).
+    // The decoded values from dispatcher come in row-major order regardless
+    // of scanning mode — the grib crate handles reordering internally.
     let ni = def.ni as usize;
     let nj = def.nj as usize;
     let mut result = Vec::with_capacity(ni * nj);
 
-    for (i, j) in ij_iter {
-        let x = x0 + (i as f64) * dx;
-        let y = y0 + (j as f64) * dy;
+    for j in 0..nj {
+        for i in 0..ni {
+            let x = x0 + (i as f64) * dx;
+            let y = y0 + (j as f64) * dy;
 
-        // Inverse Lambert projection
-        let dy_from_rho0 = rho0 - y;
-        let rho = n.signum() * (x * x + dy_from_rho0 * dy_from_rho0).sqrt();
+            // Inverse Lambert projection
+            let dy_from_rho0 = rho0 - y;
+            let rho = n.signum() * (x * x + dy_from_rho0 * dy_from_rho0).sqrt();
 
-        let lat = if rho.abs() < 1e-10 {
-            n.signum() * std::f64::consts::FRAC_PI_2
-        } else {
-            2.0 * (earth_radius * f_factor / rho).powf(1.0 / n).atan()
-                - std::f64::consts::FRAC_PI_2
-        };
+            let lat = if rho.abs() < 1e-10 {
+                n.signum() * std::f64::consts::FRAC_PI_2
+            } else {
+                2.0 * (earth_radius * f_factor / rho).powf(1.0 / n).atan()
+                    - std::f64::consts::FRAC_PI_2
+            };
 
-        let theta = x.atan2(dy_from_rho0);
-        let lon = lambda0 + theta / n;
+            let theta = x.atan2(dy_from_rho0);
+            let lon = lambda0 + theta / n;
 
-        result.push((lat.to_degrees(), lon.to_degrees()));
+            result.push((lat.to_degrees(), lon.to_degrees()));
+        }
     }
 
     Ok(result)
@@ -269,5 +297,54 @@ mod tests {
         assert_eq!(decoded.ny, 1059);
         assert_eq!(decoded.nx, 1799);
         assert!(matches!(decoded.latitudes, GribCoords::Projected2D(_)));
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_nbm_serpentine() {
+        // Try run_20260228_15 f1 first, fall back to run_20260228_04
+        let grib_path = if std::path::Path::new("/tmp/nbm_t2m_r15_f1.grib2").exists() {
+            "/tmp/nbm_t2m_r15_f1.grib2"
+        } else {
+            "/tmp/nbm_t2m.grib2"
+        };
+        let grib_bytes = std::fs::read(grib_path)
+            .expect("Missing NBM t2m GRIB file");
+        let decoded = decode_grib_message(&grib_bytes).expect("Failed to decode");
+        println!("File: {}", grib_path);
+        println!("Grid: ny={}, nx={}", decoded.ny, decoded.nx);
+
+        let v = &decoded.values;
+        if let GribCoords::Projected2D(ref lats) = decoded.latitudes {
+            if let GribCoords::Projected2D(ref lons) = decoded.longitudes {
+                // Check grid points that map to tile cell [139,8]
+                // lat 46.9-47.0, lon 272.8-272.9
+                println!("\nGrid points in tile cell [139,8] (lat 46.9-47.0, lon 272.8-272.9):");
+                let mut cell_vals = Vec::new();
+                for j in 0..decoded.ny {
+                    for i in 0..decoded.nx {
+                        let lat = lats[[j,i]];
+                        let lon = lons[[j,i]];
+                        if lat >= 46.9 && lat < 47.0 && lon >= 272.8 && lon < 272.9 {
+                            let val = v[[j,i]];
+                            let val_f = val as f64 * 9.0/5.0 - 459.67;
+                            println!("  [{},{}]: lat={:.4} lon={:.4} val={:.2}K = {:.2}°F",
+                                j, i, lat, lon, val, val_f);
+                            cell_vals.push(val_f);
+                        }
+                    }
+                }
+                if !cell_vals.is_empty() {
+                    let mean: f64 = cell_vals.iter().sum::<f64>() / cell_vals.len() as f64;
+                    println!("  Count: {}, Mean: {:.2}°F", cell_vals.len(), mean);
+                }
+
+                // Reference point
+                println!("\nReference [1095,1515]: lat={:.4} lon={:.4} val={:.2}K",
+                    lats[[1095,1515]], lons[[1095,1515]], v[[1095,1515]]);
+                println!("[0,0]: lat={:.4} lon={:.4} val={:.2}K = {:.2}°F",
+                    lats[[0,0]], lons[[0,0]], v[[0,0]], v[[0,0]] as f64 * 9.0/5.0 - 459.67);
+            }
+        }
     }
 }
