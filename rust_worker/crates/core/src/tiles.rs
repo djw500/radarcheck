@@ -115,9 +115,13 @@ pub fn build_tile_stats(
     }
 
     // Nearest-neighbor fill: replace NaN cells with nearest valid neighbor.
-    // This fixes edge gaps in Lambert projected grids (HRRR/NAM right edge)
-    // and any grid-alignment gaps in regular grids.
-    nn_fill_nan(&mut means_out, &mut mins_out, &mut maxs_out, ny_tile, nx_tile);
+    // Only for edge gaps in Lambert projected grids (HRRR/NAM) where NaN is <50%.
+    // Skip for resolution mismatches like GFS 0.25° tiled at 0.1° (84% NaN).
+    let nan_count = means_out.iter().filter(|v| v.is_nan()).count();
+    let nan_pct = nan_count as f64 / n_cells as f64;
+    if nan_pct > 0.0 && nan_pct < 0.5 {
+        nn_fill_nan(&mut means_out, &mut mins_out, &mut maxs_out, ny_tile, nx_tile);
+    }
 
     let mins = Array2::from_shape_vec((ny_tile, nx_tile), mins_out)?;
     let maxs = Array2::from_shape_vec((ny_tile, nx_tile), maxs_out)?;
