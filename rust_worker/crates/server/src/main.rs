@@ -1,7 +1,7 @@
 //! Radarcheck API server — Axum replacement for Flask app.
 //!
 //! Serves the forecast UI, status dashboard, and all API endpoints.
-//! Uses NPZ tile files for point queries (same format as worker output).
+//! Uses mmap'd .rctile files for zero-copy point queries.
 
 mod status;
 
@@ -471,7 +471,6 @@ fn multirun_blocking(
                 None => continue,
             };
 
-            // Try mmap cache (.rctile) first, fall back to NPZ
             let rctile_path = tiles_dir
                 .join(region_id)
                 .join(&config::format_res_dir(res))
@@ -479,18 +478,9 @@ fn multirun_blocking(
                 .join(run_id)
                 .join(format!("{}.rctile", variable_id));
 
-            let (hours, values) = if rctile_path.exists() {
-                match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
-                    Some(r) => r,
-                    None => continue,
-                }
-            } else {
-                match tile_query::load_timeseries_for_point(
-                    tiles_dir, region_id, res, model_id, run_id, variable_id, lat, lon,
-                ) {
-                    Ok(r) => r,
-                    Err(_) => continue,
-                }
+            let (hours, values) = match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
+                Some(r) => r,
+                None => continue,
             };
 
             let accum_values: Vec<f64> = if is_accumulation {
@@ -504,7 +494,6 @@ fn multirun_blocking(
                 if v.is_nan() {
                     continue;
                 }
-                // Compute valid_time = init + h hours
                 let valid_unix = init_unix + (h as i64) * 3600;
                 let valid_time = unix_to_iso(valid_unix);
                 series.push(serde_json::json!({
@@ -652,7 +641,6 @@ fn stitched_blocking(
             continue;
         }
 
-        // Try mmap cache (.rctile) first, fall back to NPZ
         let rctile_path = tiles_dir
             .join(region_id)
             .join(&config::format_res_dir(res))
@@ -660,18 +648,9 @@ fn stitched_blocking(
             .join(run_id)
             .join(format!("{}.rctile", variable_id));
 
-        let (hours, values) = if rctile_path.exists() {
-            match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
-                Some(r) => r,
-                None => continue,
-            }
-        } else {
-            match tile_query::load_timeseries_for_point(
-                tiles_dir, region_id, res, model_id, run_id, variable_id, lat, lon,
-            ) {
-                Ok(r) => r,
-                Err(_) => continue,
-            }
+        let (hours, values) = match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
+            Some(r) => r,
+            None => continue,
         };
 
         let accum_values: Vec<f64> = if is_accumulation {

@@ -433,6 +433,24 @@ pub fn read_header(path: &Path) -> Result<RcTileHeader> {
     RcTileHeader::from_bytes(&buf)
 }
 
+/// Read just the written hours from a .rctile file (header + hours table only).
+pub fn read_hours(path: &Path) -> Result<Vec<i32>> {
+    let mut f = File::open(path).context("Failed to open .rctile")?;
+    let mut hdr_buf = [0u8; HEADER_SIZE as usize];
+    f.read_exact(&mut hdr_buf)?;
+    let hdr = RcTileHeader::from_bytes(&hdr_buf)?;
+
+    let n = hdr.n_hours_written as usize;
+    if n == 0 {
+        return Ok(vec![]);
+    }
+
+    let mut hours_buf = vec![0u8; n * 4];
+    f.read_exact(&mut hours_buf)?;
+    let hours: &[i32] = bytemuck::cast_slice(&hours_buf);
+    Ok(hours.to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

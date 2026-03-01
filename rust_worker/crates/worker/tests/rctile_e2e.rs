@@ -1,14 +1,11 @@
 //! E2E tests for the .rctile format.
 //!
-//! Tests the full pipeline: create → write hours → read via tile_query
-//! and verifies parity between NPZ and .rctile reads.
+//! Tests the full pipeline: create → write hours → read via tile_query.
 
 use std::path::Path;
-
 use tempfile::TempDir;
 
 use radarcheck_core::config;
-use radarcheck_core::npz::{self, TileNpz};
 use radarcheck_core::rctile;
 use radarcheck_core::tile_query;
 use radarcheck_core::tiles::TileStats;
@@ -60,9 +57,9 @@ fn setup_tile_dir(
     dir
 }
 
-/// Write tile stats to both NPZ and .rctile, then verify both reads match.
+/// Write .rctile, then verify tile_query reads match at multiple points.
 #[test]
-fn test_rctile_npz_parity_single_hour() {
+fn test_rctile_write_read_single_hour() {
     let tmp = TempDir::new().unwrap();
     let tiles_dir = tmp.path();
     let region = &config::NE_REGION;
@@ -76,32 +73,6 @@ fn test_rctile_npz_parity_single_hour() {
     let stats = make_tile_stats(140, 220, 3);
     let ny = stats.ny;
     let nx = stats.nx;
-
-    // Write NPZ (single hour)
-    let npz_path = run_dir.join(format!("{}.npz", variable));
-    let tile_npz = TileNpz {
-        hours: vec![3],
-        means: Some(stats.means.clone().into_shape_with_order((1, ny, nx)).unwrap()),
-        mins: None,
-        maxs: None,
-    };
-    npz::write_tile_npz(&npz_path, &tile_npz).unwrap();
-
-    // Write meta.json (required by NPZ reader)
-    let meta = serde_json::json!({
-        "lat_min": region.lat_min,
-        "lon_min": region.lon_min,
-        "lon_max": region.lon_max,
-        "lat_max": region.lat_max,
-        "resolution_deg": resolution,
-        "lon_0_360": false,
-        "index_lon_min": stats.index_lon_min,
-    });
-    std::fs::write(
-        run_dir.join(format!("{}.meta.json", variable)),
-        serde_json::to_string_pretty(&meta).unwrap(),
-    )
-    .unwrap();
 
     // Write .rctile
     let rctile_path = run_dir.join(format!("{}.rctile", variable));
@@ -120,7 +91,7 @@ fn test_rctile_npz_parity_single_hour() {
     let means_slice = stats.means.as_slice().unwrap();
     rctile::write_hour(&rctile_path, 3, means_slice).unwrap();
 
-    // Query multiple points and compare NPZ vs rctile
+    // Query multiple points via tile_query and verify against direct rctile read
     let test_points = vec![
         (40.0, -74.0, "NYC area"),
         (42.5, -73.5, "Albany area"),
@@ -130,41 +101,35 @@ fn test_rctile_npz_parity_single_hour() {
     ];
 
     for (lat, lon, label) in &test_points {
-        // Read via NPZ path (delete rctile temporarily)
-        let rctile_bak = run_dir.join(format!("{}.rctile.bak", variable));
-        std::fs::rename(&rctile_path, &rctile_bak).unwrap();
-
-        let (npz_hours, npz_vals) = tile_query::load_timeseries_for_point(
+        // Read via tile_query (production path)
+        let (tq_hours, tq_vals) = tile_query::load_timeseries_for_point(
             tiles_dir, region.id, resolution, model_id, run_id, variable, *lat, *lon,
         )
-        .unwrap_or_else(|e| panic!("NPZ read failed at {}: {}", label, e));
+        .unwrap_or_else(|e| panic!("tile_query read failed at {}: {}", label, e));
 
-        // Restore rctile
-        std::fs::rename(&rctile_bak, &rctile_path).unwrap();
-
-        // Read via rctile path
+        // Read via direct rctile reader
         let (rc_hours, rc_vals) = rctile::read_timeseries(&rctile_path, *lat, *lon).unwrap();
 
         assert_eq!(
-            npz_hours, rc_hours,
-            "Hours mismatch at {}: NPZ={:?} vs rctile={:?}",
-            label, npz_hours, rc_hours
+            tq_hours, rc_hours,
+            "Hours mismatch at {}: tile_query={:?} vs rctile={:?}",
+            label, tq_hours, rc_hours
         );
         assert_eq!(
-            npz_vals.len(),
+            tq_vals.len(),
             rc_vals.len(),
             "Values length mismatch at {}",
             label
         );
 
-        for (i, (nv, rv)) in npz_vals.iter().zip(rc_vals.iter()).enumerate() {
-            if nv.is_nan() && rv.is_nan() {
+        for (i, (tv, rv)) in tq_vals.iter().zip(rc_vals.iter()).enumerate() {
+            if tv.is_nan() && rv.is_nan() {
                 continue;
             }
             assert!(
-                (nv - rv).abs() < 1e-4,
-                "Value mismatch at {} hour_idx={}: NPZ={} vs rctile={}",
-                label, i, nv, rv
+                (tv - rv).abs() < 1e-4,
+                "Value mismatch at {} hour_idx={}: tile_query={} vs rctile={}",
+                label, i, tv, rv
             );
         }
     }
@@ -262,9 +227,9 @@ fn test_rctile_mmap_matches_file_io() {
     }
 }
 
-/// Test tile_query prefers .rctile over NPZ when both exist.
+/// Test tile_query reads .rctile files and errors when missing.
 #[test]
-fn test_tile_query_prefers_rctile() {
+fn test_tile_query_reads_rctile() {
     let tmp = TempDir::new().unwrap();
     let tiles_dir = tmp.path();
     let region = &config::NE_REGION;
@@ -279,32 +244,7 @@ fn test_tile_query_prefers_rctile() {
     let nx = 220usize;
     let n_cells = ny * nx;
 
-    // Write NPZ with value=1.0 everywhere
-    let npz_vals = vec![1.0f32; n_cells];
-    let npz_path = run_dir.join(format!("{}.npz", variable));
-    let tile_npz = TileNpz {
-        hours: vec![0],
-        means: Some(
-            ndarray::Array3::from_shape_vec((1, ny, nx), npz_vals).unwrap(),
-        ),
-        mins: None,
-        maxs: None,
-    };
-    npz::write_tile_npz(&npz_path, &tile_npz).unwrap();
-    std::fs::write(
-        run_dir.join(format!("{}.meta.json", variable)),
-        serde_json::json!({
-            "lat_min": region.lat_min,
-            "lon_min": region.lon_min,
-            "resolution_deg": resolution,
-            "lon_0_360": false,
-            "index_lon_min": region.lon_min,
-        })
-        .to_string(),
-    )
-    .unwrap();
-
-    // Write .rctile with value=99.0 everywhere (different to distinguish)
+    // Write .rctile with value=99.0 everywhere
     let rctile_path = run_dir.join(format!("{}.rctile", variable));
     rctile::create_rctile(
         &rctile_path,
@@ -320,7 +260,7 @@ fn test_tile_query_prefers_rctile() {
     let rc_vals = vec![99.0f32; n_cells];
     rctile::write_hour(&rctile_path, 0, &rc_vals).unwrap();
 
-    // Query through tile_query — should get 99.0 (rctile) not 1.0 (npz)
+    // Query through tile_query — should get 99.0
     let lat = 40.0;
     let lon = -74.0;
     let (hours, values) = tile_query::load_timeseries_for_point(
@@ -331,23 +271,16 @@ fn test_tile_query_prefers_rctile() {
     assert_eq!(hours, vec![0]);
     assert!(
         (values[0] - 99.0).abs() < 1e-4,
-        "Expected rctile value 99.0, got {} — tile_query didn't prefer .rctile",
+        "Expected rctile value 99.0, got {}",
         values[0]
     );
 
-    // Delete rctile, verify NPZ fallback works
+    // Delete rctile — tile_query should error (no fallback)
     std::fs::remove_file(&rctile_path).unwrap();
-    let (hours2, values2) = tile_query::load_timeseries_for_point(
+    let result = tile_query::load_timeseries_for_point(
         tiles_dir, region.id, resolution, model_id, run_id, variable, lat, lon,
-    )
-    .unwrap();
-
-    assert_eq!(hours2, vec![0]);
-    assert!(
-        (values2[0] - 1.0).abs() < 1e-4,
-        "Expected NPZ fallback value 1.0, got {}",
-        values2[0]
     );
+    assert!(result.is_err(), "Should error when .rctile is missing");
 }
 
 /// Test the full GFS scenario: 0.25° resolution (fewer cells), rctile write and read.

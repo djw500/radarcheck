@@ -3,6 +3,10 @@ name = "radarcheck-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+npz = ["dep:zip", "dep:flate2", "dep:ndarray-npy"]
+
 [dependencies]
 # Pure Rust GRIB2 parser (no C dependencies except openjpeg for JPEG2000)
 # gridpoints-proj disabled to avoid proj-sys/cmake dependency — we compute Lambert coords ourselves
@@ -20,11 +24,6 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# NPZ file format (numpy compressed arrays)
-ndarray-npy = "0.9"
-flate2 = "1"
-zip = "2"
-
 # File locking for concurrent tile writes (matches Python filelock)
 fs2 = "0.4"
 
@@ -40,6 +39,11 @@ thiserror = "2"
 
 # Regex for idx parsing
 regex = "1"
+
+# NPZ format — only used for reading test reference fixtures (behind "npz" feature)
+ndarray-npy = { version = "0.9", optional = true }
+flate2 = { version = "1", optional = true }
+zip = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

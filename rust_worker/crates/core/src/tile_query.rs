@@ -1,7 +1,7 @@
-//! NPZ point extraction and accumulation logic for the API server.
+//! Point extraction and accumulation logic for the API server.
 //!
-//! Provides functions to query timeseries data from tile NPZ files at a given lat/lon point.
-//! Mirrors Python tiles.py load_timeseries_for_point() and routes/forecast.py accumulation logic.
+//! Provides functions to query timeseries data from .rctile files at a given lat/lon point.
+//! Uses mmap for zero-copy reads (~300 bytes per query).
 
 use std::path::Path;
 
@@ -9,11 +9,9 @@ use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
 
 use crate::config;
-use crate::npz;
 use crate::rctile;
 
-/// Load timeseries for the tile cell containing (lat, lon).
-/// Prefers .rctile (fast mmap path) when available, falls back to NPZ.
+/// Load timeseries for the tile cell containing (lat, lon) from .rctile.
 /// Returns (hours, values) vectors.
 pub fn load_timeseries_for_point(
     tiles_dir: &Path,
@@ -26,21 +24,19 @@ pub fn load_timeseries_for_point(
     lon: f64,
 ) -> Result<(Vec<i32>, Vec<f32>)> {
     let res_dir = config::format_res_dir(resolution_deg);
-    let run_dir = tiles_dir
+    let rctile_path = tiles_dir
         .join(region_id)
         .join(&res_dir)
         .join(model_id)
-        .join(run_id);
+        .join(run_id)
+        .join(format!("{}.rctile", variable_id));
 
-    // Try .rctile first (fast path)
-    let rctile_path = run_dir.join(format!("{}.rctile", variable_id));
-    if rctile_path.exists() {
-        return rctile::read_timeseries(&rctile_path, lat, lon)
-            .context("Failed to read .rctile");
+    if !rctile_path.exists() {
+        bail!("Tile not found for {} at {:?}", variable_id, rctile_path);
     }
 
-    // Fall back to NPZ
-    load_timeseries_npz(&run_dir, variable_id, resolution_deg, lat, lon)
+    rctile::read_timeseries(&rctile_path, lat, lon)
+        .context("Failed to read .rctile")
 }
 
 /// Load timeseries from a .rctile file via mmap (zero-copy).
@@ -51,95 +47,6 @@ pub fn load_timeseries_rctile_mmap(
     lon: f64,
 ) -> Result<(Vec<i32>, Vec<f32>)> {
     rctile::read_timeseries_mmap(data, lat, lon)
-}
-
-/// NPZ fallback path for load_timeseries_for_point.
-fn load_timeseries_npz(
-    run_dir: &Path,
-    variable_id: &str,
-    resolution_deg: f64,
-    lat: f64,
-    lon: f64,
-) -> Result<(Vec<i32>, Vec<f32>)> {
-    let npz_path = run_dir.join(format!("{}.npz", variable_id));
-    let meta_path = run_dir.join(format!("{}.meta.json", variable_id));
-
-    if !npz_path.exists() || !meta_path.exists() {
-        bail!("Tiles not found for {} at {:?}", variable_id, npz_path);
-    }
-
-    // Read meta.json
-    let meta_str = std::fs::read_to_string(&meta_path)
-        .context("Failed to read meta.json")?;
-    let meta: serde_json::Value = serde_json::from_str(&meta_str)
-        .context("Failed to parse meta.json")?;
-
-    let lat_min = meta["lat_min"].as_f64().unwrap_or(0.0);
-    let lon_min_index = meta
-        .get("index_lon_min")
-        .and_then(|v| v.as_f64())
-        .unwrap_or_else(|| meta["lon_min"].as_f64().unwrap_or(0.0));
-    let lon_0_360 = meta
-        .get("lon_0_360")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let res = meta["resolution_deg"].as_f64().unwrap_or(resolution_deg);
-
-    // Read NPZ
-    let tile = npz::read_tile_npz(&npz_path)
-        .context("Failed to read tile NPZ")?;
-
-    let means = tile.means.as_ref()
-        .context("No means array in NPZ")?;
-
-    let shape = means.shape();
-    let ny = shape[1];
-    let nx = shape[2];
-
-    // Compute cell indices
-    let iy = ((lat - lat_min) / res).floor() as isize;
-    let target_lon = if lon_0_360 && lon < 0.0 { lon + 360.0 } else { lon };
-    let ix = ((target_lon - lon_min_index) / res).floor() as isize;
-
-    let iy = iy.max(0).min(ny as isize - 1) as usize;
-    let ix = ix.max(0).min(nx as isize - 1) as usize;
-
-    // Extract values at (iy, ix) for all hours
-    let mut values: Vec<f32> = (0..shape[0])
-        .map(|t| means[[t, iy, ix]])
-        .collect();
-
-    // Nearest-neighbor fallback: if all NaN, search 3-cell radius
-    if values.iter().all(|v| v.is_nan()) {
-        let search_radius: isize = 3;
-        let mut best_dist_sq = i64::MAX;
-
-        let y_min = (iy as isize - search_radius).max(0) as usize;
-        let y_max = (iy as isize + search_radius).min(ny as isize - 1) as usize;
-        let x_min = (ix as isize - search_radius).max(0) as usize;
-        let x_max = (ix as isize + search_radius).min(nx as isize - 1) as usize;
-
-        for cy in y_min..=y_max {
-            for cx in x_min..=x_max {
-                if cy == iy && cx == ix {
-                    continue;
-                }
-                let cand: Vec<f32> = (0..shape[0])
-                    .map(|t| means[[t, cy, cx]])
-                    .collect();
-                if !cand.iter().all(|v| v.is_nan()) {
-                    let dist_sq = ((cy as i64 - iy as i64).pow(2)
-                        + (cx as i64 - ix as i64).pow(2)) as i64;
-                    if dist_sq < best_dist_sq {
-                        best_dist_sq = dist_sq;
-                        values = cand;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok((tile.hours, values))
 }
 
 /// List tile runs from the database for a given region/model.
@@ -280,7 +187,6 @@ pub fn parse_run_id_to_unix(run_id: &str) -> Option<i64> {
     let hour: i64 = h.parse().ok()?;
 
     // Simple epoch calculation (good enough for 2020-2030 range)
-    // Days from 1970-01-01 to YYYY-MM-DD
     let mut total_days: i64 = 0;
     for y in 1970..year {
         total_days += if is_leap(y) { 366 } else { 365 };

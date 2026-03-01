@@ -1,19 +1,16 @@
-//! Job processing pipeline: fetch GRIB → decode → build tiles → save NPZ → record in DB.
+//! Job processing pipeline: fetch GRIB → decode → build tiles → save .rctile → record in DB.
 //!
 //! Mirrors Python job_worker.py process_build_tile_hour().
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use ndarray::Array3;
 use serde::Serialize;
 
 use crate::config;
 use crate::db::{self, BuildTileHourArgs, Job};
 use crate::fetch;
 use crate::grib;
-use crate::npz::{self, TileNpz};
 use crate::rctile;
 use crate::tiles;
 
@@ -119,8 +116,8 @@ pub fn process_build_tile_hour(
         Some(&init_time_utc),
     )?;
 
-    // Upsert NPZ (merge with existing hours)
-    let (npz_path, merged_hours) = upsert_tiles_npz(
+    // Write .rctile (mmap-friendly cell-major format)
+    let (rctile_path, hours) = upsert_rctile(
         tiles_dir,
         region,
         resolution_deg,
@@ -131,30 +128,16 @@ pub fn process_build_tile_hour(
         &tile_stats,
     )?;
 
-    // Dual-write: also upsert .rctile (mmap-friendly format)
-    if let Err(e) = upsert_rctile(
-        tiles_dir,
-        region,
-        resolution_deg,
-        &args.model_id,
-        &args.run_id,
-        &args.variable_id,
-        args.forecast_hour as i32,
-        &tile_stats,
-    ) {
-        log::warn!("Failed to write .rctile (non-fatal): {:#}", e);
-    }
-
     // Write meta.json
-    let meta_path = npz_path.with_extension("meta.json");
+    let meta_path = rctile_path.with_extension("meta.json");
     let meta_json = serde_json::to_string_pretty(&meta)?;
     std::fs::write(&meta_path, meta_json).context("Failed to write meta.json")?;
 
     // Get file size
-    let size_bytes = std::fs::metadata(&npz_path).map(|m| m.len()).ok();
+    let size_bytes = std::fs::metadata(&rctile_path).map(|m| m.len()).ok();
 
     // Record in tile DB
-    let npz_str = npz_path.to_string_lossy().to_string();
+    let tile_str = rctile_path.to_string_lossy().to_string();
     let meta_str = meta_path.to_string_lossy().to_string();
 
     db::record_tile_variable(
@@ -164,9 +147,9 @@ pub fn process_build_tile_hour(
         &args.model_id,
         &args.run_id,
         &args.variable_id,
-        &npz_str,
+        &tile_str,
         &meta_str,
-        &merged_hours,
+        &hours,
         size_bytes,
         job.id,
     )?;
@@ -179,7 +162,7 @@ pub fn process_build_tile_hour(
         &args.run_id,
         &args.variable_id,
         args.forecast_hour,
-        &npz_str,
+        &tile_str,
         job.id,
     )?;
 
@@ -198,8 +181,9 @@ fn parse_run_id(run_id: &str) -> Result<(String, String)> {
     Ok((parts[1].to_string(), parts[2].to_string()))
 }
 
-/// Upsert tile NPZ: merge new hour into existing file, or create new.
-fn upsert_tiles_npz(
+/// Upsert .rctile: create if needed, then write the forecast hour.
+/// Returns (rctile_path, written_hours).
+fn upsert_rctile(
     base_dir: &Path,
     region: &config::TilingRegion,
     resolution_deg: f64,
@@ -217,144 +201,6 @@ fn upsert_tiles_npz(
         .join(run_id);
     std::fs::create_dir_all(&out_dir).context("Failed to create tile output directory")?;
 
-    let npz_path = out_dir.join(format!("{}.npz", variable_id));
-    let lock_path = out_dir.join(format!("{}.npz.lock", variable_id));
-
-    let save_means = region.stats.contains(&"mean");
-    let save_mins = region.stats.contains(&"min");
-    let save_maxs = region.stats.contains(&"max");
-
-    // Acquire file lock
-    use fs2::FileExt;
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
-    lock_file.lock_exclusive()?;
-
-    let result = do_upsert(
-        &npz_path,
-        forecast_hour,
-        tile_stats,
-        save_means,
-        save_mins,
-        save_maxs,
-    );
-
-    lock_file.unlock()?;
-
-    let merged_hours = result?;
-    Ok((npz_path, merged_hours))
-}
-
-/// Inner upsert logic (called under file lock).
-fn do_upsert(
-    npz_path: &Path,
-    forecast_hour: i32,
-    tile_stats: &tiles::TileStats,
-    save_means: bool,
-    save_mins: bool,
-    save_maxs: bool,
-) -> Result<Vec<i32>> {
-    let ny = tile_stats.ny;
-    let nx = tile_stats.nx;
-
-    if npz_path.exists() {
-        // Read existing NPZ, merge
-        let existing = match npz::read_tile_npz(npz_path) {
-            Ok(e) => e,
-            Err(e) => {
-                log::warn!("Corrupt NPZ at {:?} ({}), overwriting", npz_path, e);
-                let hours = vec![forecast_hour];
-                write_fresh_npz(npz_path, &hours, tile_stats, ny, nx, save_means, save_mins, save_maxs)?;
-                return Ok(hours);
-            }
-        };
-
-        let mut all_hours: BTreeSet<i32> = existing.hours.iter().cloned().collect();
-        all_hours.insert(forecast_hour);
-        let merged_hours: Vec<i32> = all_hours.into_iter().collect();
-        let time_len = merged_hours.len();
-
-        let hour_to_idx: std::collections::HashMap<i32, usize> = merged_hours
-            .iter()
-            .enumerate()
-            .map(|(i, &h)| (h, i))
-            .collect();
-
-        let merge = |existing_arr: Option<&Array3<f32>>,
-                     new_2d: &ndarray::Array2<f32>|
-                     -> Array3<f32> {
-            let mut out = Array3::<f32>::from_elem((time_len, ny, nx), f32::NAN);
-
-            // Copy existing hour slices
-            if let Some(ex) = existing_arr {
-                for (old_idx, &hour) in existing.hours.iter().enumerate() {
-                    if let Some(&new_idx) = hour_to_idx.get(&hour) {
-                        if old_idx < ex.shape()[0] {
-                            out.slice_mut(ndarray::s![new_idx, .., ..])
-                                .assign(&ex.slice(ndarray::s![old_idx, .., ..]));
-                        }
-                    }
-                }
-            }
-
-            // Write new hour
-            let new_idx = hour_to_idx[&forecast_hour];
-            out.slice_mut(ndarray::s![new_idx, .., ..])
-                .assign(new_2d);
-
-            out
-        };
-
-        let tile_npz = TileNpz {
-            hours: merged_hours.clone(),
-            means: if save_means {
-                Some(merge(existing.means.as_ref(), &tile_stats.means))
-            } else {
-                None
-            },
-            mins: if save_mins {
-                Some(merge(existing.mins.as_ref(), &tile_stats.mins))
-            } else {
-                None
-            },
-            maxs: if save_maxs {
-                Some(merge(existing.maxs.as_ref(), &tile_stats.maxs))
-            } else {
-                None
-            },
-        };
-
-        npz::write_tile_npz(npz_path, &tile_npz)?;
-        Ok(merged_hours)
-    } else {
-        let hours = vec![forecast_hour];
-        write_fresh_npz(npz_path, &hours, tile_stats, ny, nx, save_means, save_mins, save_maxs)?;
-        Ok(hours)
-    }
-}
-
-/// Upsert .rctile: create if needed, then write the forecast hour.
-fn upsert_rctile(
-    base_dir: &Path,
-    region: &config::TilingRegion,
-    resolution_deg: f64,
-    model_id: &str,
-    run_id: &str,
-    variable_id: &str,
-    forecast_hour: i32,
-    tile_stats: &tiles::TileStats,
-) -> Result<()> {
-    let res_dir = config::format_res_dir(resolution_deg);
-    let out_dir = base_dir
-        .join(region.id)
-        .join(&res_dir)
-        .join(model_id)
-        .join(run_id);
-    std::fs::create_dir_all(&out_dir)?;
-
     let rctile_path = out_dir.join(format!("{}.rctile", variable_id));
     let lock_path = out_dir.join(format!("{}.rctile.lock", variable_id));
 
@@ -367,7 +213,7 @@ fn upsert_rctile(
         .open(&lock_path)?;
     lock_file.lock_exclusive()?;
 
-    let result = (|| -> Result<()> {
+    let result = (|| -> Result<Vec<i32>> {
         let ny = tile_stats.ny as u16;
         let nx = tile_stats.nx as u16;
 
@@ -386,45 +232,15 @@ fn upsert_rctile(
             )?;
         }
 
-        // Extract means as flat row-major slice (that's what the tile grid is)
+        // Extract means as flat row-major slice
         let values = tile_stats.means.as_slice().unwrap();
         rctile::write_hour(&rctile_path, forecast_hour, values)?;
 
-        Ok(())
+        // Read back written hours for DB recording
+        rctile::read_hours(&rctile_path)
     })();
 
     lock_file.unlock()?;
-    result
-}
-
-/// Write a brand-new NPZ with a single forecast hour.
-fn write_fresh_npz(
-    path: &Path,
-    hours: &[i32],
-    stats: &tiles::TileStats,
-    ny: usize,
-    nx: usize,
-    save_means: bool,
-    save_mins: bool,
-    save_maxs: bool,
-) -> Result<()> {
-    let tile_npz = TileNpz {
-        hours: hours.to_vec(),
-        means: if save_means {
-            Some(stats.means.clone().into_shape_with_order((1, ny, nx))?)
-        } else {
-            None
-        },
-        mins: if save_mins {
-            Some(stats.mins.clone().into_shape_with_order((1, ny, nx))?)
-        } else {
-            None
-        },
-        maxs: if save_maxs {
-            Some(stats.maxs.clone().into_shape_with_order((1, ny, nx))?)
-        } else {
-            None
-        },
-    };
-    npz::write_tile_npz(path, &tile_npz)
+    let hours = result?;
+    Ok((rctile_path, hours))
 }
