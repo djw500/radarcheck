@@ -205,13 +205,19 @@ fn get_job_queue_status(db_path: &Path) -> anyhow::Result<serde_json::Value> {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
     })?;
 
-    let mut counts = serde_json::Map::new();
+    // Always include all 4 statuses so JS doesn't get undefined
+    let mut counts = HashMap::from([
+        ("pending".to_string(), 0i64),
+        ("processing".to_string(), 0i64),
+        ("completed".to_string(), 0i64),
+        ("failed".to_string(), 0i64),
+    ]);
     for row in rows {
         if let Ok((status, count)) = row {
-            counts.insert(status, serde_json::json!(count));
+            counts.insert(status, count);
         }
     }
-    Ok(serde_json::Value::Object(counts))
+    Ok(serde_json::json!(counts))
 }
 
 fn get_rebuild_eta(db_path: &Path) -> Option<serde_json::Value> {
