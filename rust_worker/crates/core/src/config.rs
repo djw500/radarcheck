@@ -156,7 +156,7 @@ pub fn get_model(model_id: &str) -> Option<ModelConfig> {
             grib_url_template: "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{date}/{hh}/atmos/gfs.t{hh}z.pgrb2.0p25.f{fxx}",
             idx_url_template: "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{date}/{hh}/atmos/gfs.t{hh}z.pgrb2.0p25.f{fxx}.idx",
             forecast_hour_digits: 3,
-            tile_resolution_deg: 0.25,
+            tile_resolution_deg: 0.1,
         },
         "nbm" => ModelConfig {
             name: "National Blend (NBM)",

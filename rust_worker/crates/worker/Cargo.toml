@@ -11,9 +11,14 @@ path = "src/main.rs"
 name = "e2e-tile-worker"
 path = "src/bin/e2e_tile_worker.rs"
 
+[[bin]]
+name = "npz-to-rctile"
+path = "src/bin/npz_to_rctile.rs"
+
 [dependencies]
 radarcheck-core = { path = "../core", features = ["npz"] }
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"

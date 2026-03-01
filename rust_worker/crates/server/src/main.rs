@@ -324,6 +324,9 @@ async fn health_check(State(state): State<Arc<AppState>>) -> Json<serde_json::Va
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
     Json(serde_json::json!({
         "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "build_time": option_env!("BUILD_TIME").unwrap_or("dev"),
+        "git_sha": option_env!("GIT_SHA").unwrap_or("dev"),
         "timestamp": now,
         "tile_runs": tile_runs,
     }))
@@ -456,6 +459,7 @@ fn multirun_blocking(
         let res = config::get_tile_resolution_by_id(region_id, model_id);
         let all_runs = tile_query::list_tile_runs(db_path, region_id, res, model_id)
             .unwrap_or_default();
+        log::debug!("multirun: model={} res={} runs={}", model_id, res, all_runs.len());
 
         for run_id in &all_runs {
             let init_unix = match tile_query::parse_run_id_to_unix(run_id) {
@@ -480,7 +484,10 @@ fn multirun_blocking(
 
             let (hours, values) = match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
                 Some(r) => r,
-                None => continue,
+                None => {
+                    log::debug!("multirun: miss rctile {:?}", rctile_path);
+                    continue;
+                }
             };
 
             let accum_values: Vec<f64> = if is_accumulation {

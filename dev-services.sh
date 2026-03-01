@@ -99,9 +99,9 @@ start_server() {
     nohup "$SCRIPT_DIR/$RUST_SERVER_BINARY" \
         --port "$SERVER_PORT" \
         --app-root "$SCRIPT_DIR" \
-        --db-path cache/jobs.db \
-        --tiles-dir cache/tiles \
-        --cache-dir cache \
+        --db-path "$SCRIPT_DIR/cache/jobs.db" \
+        --tiles-dir "$SCRIPT_DIR/cache/tiles" \
+        --cache-dir "$SCRIPT_DIR/cache" \
         > "$SERVER_LOG" 2>&1 &
     echo $! > "$SERVER_PID"
     echo "Started Rust server (pid $!), port: $SERVER_PORT, log: $SERVER_LOG"
@@ -146,7 +146,7 @@ start_workers() {
             nohup bash -c '
                 source "'"$SCRIPT_DIR/$RUST_BUILD_ENV"'"
                 while true; do
-                    "'"$SCRIPT_DIR/$RUST_WORKER_BINARY"'" --model "'"$model"'" --poll-interval 10 --max-jobs '"$MAX_JOBS_PER_CYCLE"' --db-path cache/jobs.db --tiles-dir cache/tiles 2>&1
+                    "'"$SCRIPT_DIR/$RUST_WORKER_BINARY"'" --model "'"$model"'" --poll-interval 10 --max-jobs '"$MAX_JOBS_PER_CYCLE"' --db-path '"$SCRIPT_DIR"'/cache/jobs.db --tiles-dir '"$SCRIPT_DIR"'/cache/tiles 2>&1
                     echo "$(date) Worker['"$model"'] (rust) restarting after max-jobs cycle..."
                     sleep 2
                 done
