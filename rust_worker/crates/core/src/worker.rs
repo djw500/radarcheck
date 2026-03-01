@@ -14,6 +14,7 @@ use crate::db::{self, BuildTileHourArgs, Job};
 use crate::fetch;
 use crate::grib;
 use crate::npz::{self, TileNpz};
+use crate::rctile;
 use crate::tiles;
 
 #[derive(Debug, Serialize)]
@@ -44,13 +45,6 @@ pub fn process_build_tile_hour(
 
     let model = config::get_model(&args.model_id)
         .context(format!("Unknown model: {}", args.model_id))?;
-
-    if model.grib_url_template.is_empty() {
-        bail!(
-            "Model {} not supported by Rust worker (no URL template — use Python worker)",
-            args.model_id
-        );
-    }
 
     let region = config::get_region(&args.region_id)
         .context(format!("Unknown region: {}", args.region_id))?;
@@ -136,6 +130,20 @@ pub fn process_build_tile_hour(
         args.forecast_hour as i32,
         &tile_stats,
     )?;
+
+    // Dual-write: also upsert .rctile (mmap-friendly format)
+    if let Err(e) = upsert_rctile(
+        tiles_dir,
+        region,
+        resolution_deg,
+        &args.model_id,
+        &args.run_id,
+        &args.variable_id,
+        args.forecast_hour as i32,
+        &tile_stats,
+    ) {
+        log::warn!("Failed to write .rctile (non-fatal): {:#}", e);
+    }
 
     // Write meta.json
     let meta_path = npz_path.with_extension("meta.json");
@@ -326,6 +334,67 @@ fn do_upsert(
         write_fresh_npz(npz_path, &hours, tile_stats, ny, nx, save_means, save_mins, save_maxs)?;
         Ok(hours)
     }
+}
+
+/// Upsert .rctile: create if needed, then write the forecast hour.
+fn upsert_rctile(
+    base_dir: &Path,
+    region: &config::TilingRegion,
+    resolution_deg: f64,
+    model_id: &str,
+    run_id: &str,
+    variable_id: &str,
+    forecast_hour: i32,
+    tile_stats: &tiles::TileStats,
+) -> Result<()> {
+    let res_dir = config::format_res_dir(resolution_deg);
+    let out_dir = base_dir
+        .join(region.id)
+        .join(&res_dir)
+        .join(model_id)
+        .join(run_id);
+    std::fs::create_dir_all(&out_dir)?;
+
+    let rctile_path = out_dir.join(format!("{}.rctile", variable_id));
+    let lock_path = out_dir.join(format!("{}.rctile.lock", variable_id));
+
+    // Acquire file lock
+    use fs2::FileExt;
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    lock_file.lock_exclusive()?;
+
+    let result = (|| -> Result<()> {
+        let ny = tile_stats.ny as u16;
+        let nx = tile_stats.nx as u16;
+
+        // Create file if it doesn't exist
+        if !rctile_path.exists() {
+            let max_hours = rctile::max_hours_for_model(model_id);
+            rctile::create_rctile(
+                &rctile_path,
+                ny,
+                nx,
+                max_hours,
+                region.lat_min as f32,
+                tile_stats.index_lon_min as f32,
+                resolution_deg as f32,
+                tile_stats.lon_0_360,
+            )?;
+        }
+
+        // Extract means as flat row-major slice (that's what the tile grid is)
+        let values = tile_stats.means.as_slice().unwrap();
+        rctile::write_hour(&rctile_path, forecast_hour, values)?;
+
+        Ok(())
+    })();
+
+    lock_file.unlock()?;
+    result
 }
 
 /// Write a brand-new NPZ with a single forecast hour.

@@ -57,18 +57,43 @@ pub fn fetch_grib_range(url: &str, byte_start: u64, byte_end: Option<u64>) -> Re
     Ok(bytes)
 }
 
-/// Full pipeline: fetch idx → find variable → download GRIB subset → return raw bytes
+/// Full pipeline: fetch idx → find variable → download GRIB subset → return raw bytes.
+///
+/// Automatically detects ECMWF JSON-lines `.index` format vs standard NOAA `.idx`.
 pub fn fetch_variable_grib(
     grib_url: &str,
     idx_url: &str,
     search: &str,
 ) -> Result<Vec<u8>> {
-    let entries = fetch_idx(idx_url)?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .build()?;
 
-    let m = idx::find_first(&entries, search).context(format!(
-        "Variable '{}' not found in IDX",
-        search
-    ))?;
+    let resp = client
+        .get(idx_url)
+        .send()
+        .context(format!("Failed to fetch index: {}", idx_url))?;
+
+    if !resp.status().is_success() {
+        bail!("Index fetch failed: {} {}", resp.status().as_u16(), idx_url);
+    }
+
+    let content = resp.text()?;
+
+    // Auto-detect format and find the variable
+    let m = if content.trim_start().starts_with('{') {
+        // ECMWF JSON-lines format — use precise byte lengths
+        let (entries, lengths) = idx::parse_ecmwf_index_with_lengths(&content);
+        idx::find_matches_with_length(&entries, search, &lengths)
+            .into_iter()
+            .next()
+    } else {
+        // Standard NOAA idx format
+        let entries = idx::parse_idx(&content);
+        idx::find_first(&entries, search)
+    };
+
+    let m = m.context(format!("Variable '{}' not found in index", search))?;
 
     fetch_grib_range(grib_url, m.byte_start, m.byte_end)
 }

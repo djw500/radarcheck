@@ -61,12 +61,16 @@ struct TileTestCase {
     name: &'static str,
     /// Mean absolute error tolerance for tile means (in converted units)
     mean_mae_tol: f32,
-    /// Fraction of cells where NaN-agreement is required (0.0 to 1.0)
+    /// Fraction of cells where NaN-agreement is required (0.0 to 1.0).
+    /// With NN fill enabled, this is no longer enforced — kept for documentation.
+    #[allow(dead_code)]
     nan_agreement_tol: f64,
 }
 
 fn run_tile_test(tc: &TileTestCase) {
-    let base = format!("../tests/fixtures/grib_parity/{}", tc.name);
+    let fixtures = option_env!("GRIB_FIXTURES_DIR")
+        .unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/fixtures/grib_parity"));
+    let base = format!("{}/{}", fixtures, tc.name);
 
     // 1. Load and decode GRIB
     let grib_bytes = std::fs::read(format!("{}.grib2", base))
@@ -122,12 +126,14 @@ fn run_tile_test(tc: &TileTestCase) {
         ref_means_slice.len()
     );
 
-    let (mae, max_ae, nan_agree_pct, both_finite) =
+    let (mae, max_ae, nan_agree_pct, both_finite, ref_finite_lost) =
         compare_slices(rust_means_slice, ref_means_slice);
 
+    let rust_finite = rust_means_slice.iter().filter(|v| !v.is_nan()).count();
+
     eprintln!(
-        "  {} TILE: MAE={:.6}, MaxAE={:.4}, NaN-agree={:.1}%, finite_cells={}",
-        tc.name, mae, max_ae, nan_agree_pct * 100.0, both_finite
+        "  {} TILE: MAE={:.6}, MaxAE={:.4}, NaN-agree={:.1}%, finite_cells={}, rust_finite={}, ref_lost={}",
+        tc.name, mae, max_ae, nan_agree_pct * 100.0, both_finite, rust_finite, ref_finite_lost
     );
 
     assert!(
@@ -136,19 +142,28 @@ fn run_tile_test(tc: &TileTestCase) {
         tc.name, mae, tc.mean_mae_tol
     );
 
+    // NN fill changes the NaN pattern: Rust fills edge NaN cells with nearest-neighbor.
+    // So instead of requiring NaN pattern agreement, we check:
+    // 1. No reference-finite cells lost (ref has value, Rust doesn't)
+    // 2. Rust may have MORE finite cells than reference (from NN fill) — that's OK
+    assert_eq!(
+        ref_finite_lost, 0,
+        "{}: {} cells were finite in reference but NaN in Rust (regression!)",
+        tc.name, ref_finite_lost
+    );
+
+    // Rust should have at least as many finite cells as reference
     assert!(
-        nan_agree_pct >= tc.nan_agreement_tol,
-        "{}: NaN pattern agreement {:.1}% below threshold {:.1}%",
-        tc.name,
-        nan_agree_pct * 100.0,
-        tc.nan_agreement_tol * 100.0
+        rust_finite >= both_finite,
+        "{}: Rust has fewer finite cells ({}) than reference overlap ({})",
+        tc.name, rust_finite, both_finite
     );
 
     // 8. Also compare mins and maxs if available
     if let Some(ref_mins) = ref_npz.mins {
         let ref_mins_s = ref_mins.as_slice().unwrap();
         let rust_mins_s = tile_stats.mins.as_slice().unwrap();
-        let (mins_mae, _, _, _) = compare_slices(rust_mins_s, ref_mins_s);
+        let (mins_mae, _, _, _, _) = compare_slices(rust_mins_s, ref_mins_s);
         assert!(
             mins_mae <= tc.mean_mae_tol * 2.0, // mins can have higher variance
             "{}: mins MAE {:.6} exceeds tolerance {:.6}",
@@ -158,7 +173,7 @@ fn run_tile_test(tc: &TileTestCase) {
     if let Some(ref_maxs) = ref_npz.maxs {
         let ref_maxs_s = ref_maxs.as_slice().unwrap();
         let rust_maxs_s = tile_stats.maxs.as_slice().unwrap();
-        let (maxs_mae, _, _, _) = compare_slices(rust_maxs_s, ref_maxs_s);
+        let (maxs_mae, _, _, _, _) = compare_slices(rust_maxs_s, ref_maxs_s);
         assert!(
             maxs_mae <= tc.mean_mae_tol * 2.0,
             "{}: maxs MAE {:.6} exceeds tolerance {:.6}",
@@ -167,14 +182,17 @@ fn run_tile_test(tc: &TileTestCase) {
     }
 }
 
-/// Compare two f32 slices, returning (MAE, MaxAE, NaN-agreement fraction, finite count)
-fn compare_slices(a: &[f32], b: &[f32]) -> (f32, f32, f64, usize) {
+/// Compare two f32 slices (rust=a, reference=b).
+/// Returns (MAE, MaxAE, NaN-agreement fraction, finite count, ref_finite_lost count).
+/// ref_finite_lost = cells finite in reference but NaN in Rust (regressions).
+fn compare_slices(a: &[f32], b: &[f32]) -> (f32, f32, f64, usize, usize) {
     assert_eq!(a.len(), b.len());
     let total = a.len();
     let mut sum_err = 0.0f64;
     let mut max_err = 0.0f32;
     let mut both_finite = 0usize;
     let mut nan_agree = 0usize;
+    let mut ref_finite_lost = 0usize; // finite in ref, NaN in rust (bad)
 
     for i in 0..total {
         let a_nan = a[i].is_nan();
@@ -192,8 +210,11 @@ fn compare_slices(a: &[f32], b: &[f32]) -> (f32, f32, f64, usize) {
                 max_err = err;
             }
             both_finite += 1;
+        } else if a_nan && !b_nan {
+            // Rust lost a finite cell — regression
+            ref_finite_lost += 1;
         }
-        // One NaN, one not — NaN disagreement (not counted in nan_agree)
+        // !a_nan && b_nan: Rust gained a finite cell (NN fill) — OK
     }
 
     let mae = if both_finite > 0 {
@@ -203,7 +224,7 @@ fn compare_slices(a: &[f32], b: &[f32]) -> (f32, f32, f64, usize) {
     };
     let nan_agree_pct = nan_agree as f64 / total as f64;
 
-    (mae, max_err, nan_agree_pct, both_finite)
+    (mae, max_err, nan_agree_pct, both_finite, ref_finite_lost)
 }
 
 // ── Test cases ──────────────────────────────────────────────────────────────

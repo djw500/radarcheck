@@ -38,8 +38,8 @@ SERVER_PORT="${RADARCHECK_PORT:-5001}"
 MODELS=(hrrr nam_nest gfs nbm ecmwf_hres)
 
 # Rust worker for NOAA models, Python for ECMWF (needs Herbie STAC API)
-RUST_MODELS=(hrrr nam_nest gfs nbm)
-PYTHON_MODELS=(ecmwf_hres)
+RUST_MODELS=(hrrr nam_nest gfs nbm ecmwf_hres)
+PYTHON_MODELS=()
 RUST_WORKER_BINARY="rust_worker/target/release/radarcheck-worker"
 RUST_SERVER_BINARY="rust_worker/target/release/radarcheck-server"
 RUST_BUILD_ENV="rust_worker/build-env.sh"

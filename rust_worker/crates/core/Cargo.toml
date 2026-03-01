@@ -25,8 +25,11 @@ ndarray-npy = "0.9"
 flate2 = "1"
 zip = "2"
 
-# File locking for concurrent NPZ writes (matches Python filelock)
+# File locking for concurrent tile writes (matches Python filelock)
 fs2 = "0.4"
+
+# Memory-mapped file I/O for .rctile point queries
+memmap2 = "0.9"
 
 # Logging
 log = "0.4"
@@ -37,3 +40,6 @@ thiserror = "2"
 
 # Regex for idx parsing
 regex = "1"
+
+[dev-dependencies]
+tempfile = "3"

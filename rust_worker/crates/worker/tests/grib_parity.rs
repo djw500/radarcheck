@@ -45,7 +45,9 @@ struct Checkpoint {
 }
 
 fn load_fixture(name: &str) -> (DecodedGrib, FixtureMeta) {
-    let base = format!("../tests/fixtures/grib_parity/{}", name);
+    let fixtures = option_env!("GRIB_FIXTURES_DIR")
+        .unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/fixtures/grib_parity"));
+    let base = format!("{}/{}", fixtures, name);
     let grib_path = format!("{}.grib2", base);
     let json_path = format!("{}.json", base);
 

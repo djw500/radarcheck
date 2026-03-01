@@ -10,8 +10,10 @@ use rusqlite::Connection;
 
 use crate::config;
 use crate::npz;
+use crate::rctile;
 
 /// Load timeseries for the tile cell containing (lat, lon).
+/// Prefers .rctile (fast mmap path) when available, falls back to NPZ.
 /// Returns (hours, values) vectors.
 pub fn load_timeseries_for_point(
     tiles_dir: &Path,
@@ -24,18 +26,43 @@ pub fn load_timeseries_for_point(
     lon: f64,
 ) -> Result<(Vec<i32>, Vec<f32>)> {
     let res_dir = config::format_res_dir(resolution_deg);
-    let npz_path = tiles_dir
+    let run_dir = tiles_dir
         .join(region_id)
         .join(&res_dir)
         .join(model_id)
-        .join(run_id)
-        .join(format!("{}.npz", variable_id));
-    let meta_path = tiles_dir
-        .join(region_id)
-        .join(&res_dir)
-        .join(model_id)
-        .join(run_id)
-        .join(format!("{}.meta.json", variable_id));
+        .join(run_id);
+
+    // Try .rctile first (fast path)
+    let rctile_path = run_dir.join(format!("{}.rctile", variable_id));
+    if rctile_path.exists() {
+        return rctile::read_timeseries(&rctile_path, lat, lon)
+            .context("Failed to read .rctile");
+    }
+
+    // Fall back to NPZ
+    load_timeseries_npz(&run_dir, variable_id, resolution_deg, lat, lon)
+}
+
+/// Load timeseries from a .rctile file via mmap (zero-copy).
+/// The caller provides the mmap'd bytes.
+pub fn load_timeseries_rctile_mmap(
+    data: &[u8],
+    lat: f64,
+    lon: f64,
+) -> Result<(Vec<i32>, Vec<f32>)> {
+    rctile::read_timeseries_mmap(data, lat, lon)
+}
+
+/// NPZ fallback path for load_timeseries_for_point.
+fn load_timeseries_npz(
+    run_dir: &Path,
+    variable_id: &str,
+    resolution_deg: f64,
+    lat: f64,
+    lon: f64,
+) -> Result<(Vec<i32>, Vec<f32>)> {
+    let npz_path = run_dir.join(format!("{}.npz", variable_id));
+    let meta_path = run_dir.join(format!("{}.meta.json", variable_id));
 
     if !npz_path.exists() || !meta_path.exists() {
         bail!("Tiles not found for {} at {:?}", variable_id, npz_path);

@@ -156,7 +156,7 @@ pub fn get_model(model_id: &str) -> Option<ModelConfig> {
             grib_url_template: "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{date}/{hh}/atmos/gfs.t{hh}z.pgrb2.0p25.f{fxx}",
             idx_url_template: "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{date}/{hh}/atmos/gfs.t{hh}z.pgrb2.0p25.f{fxx}.idx",
             forecast_hour_digits: 3,
-            tile_resolution_deg: 0.1,
+            tile_resolution_deg: 0.25,
         },
         "nbm" => ModelConfig {
             name: "National Blend (NBM)",
@@ -169,10 +169,9 @@ pub fn get_model(model_id: &str) -> Option<ModelConfig> {
         "ecmwf_hres" => ModelConfig {
             name: "ECMWF HRES",
             herbie_model: "ifs",
-            // ECMWF uses opendata; Herbie resolves via STAC API so we need a different approach
-            grib_url_template: "",
-            idx_url_template: "",
-            forecast_hour_digits: 3,
+            grib_url_template: "https://data.ecmwf.int/forecasts/{date}/{hh}z/ifs/0p25/oper/{date}{hh}0000-{fxx}h-oper-fc.grib2",
+            idx_url_template: "https://data.ecmwf.int/forecasts/{date}/{hh}z/ifs/0p25/oper/{date}{hh}0000-{fxx}h-oper-fc.index",
+            forecast_hour_digits: 1,
             tile_resolution_deg: 0.1,
         },
         _ => return None,

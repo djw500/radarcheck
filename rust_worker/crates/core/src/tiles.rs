@@ -114,6 +114,11 @@ pub fn build_tile_stats(
         }
     }
 
+    // Nearest-neighbor fill: replace NaN cells with nearest valid neighbor.
+    // This fixes edge gaps in Lambert projected grids (HRRR/NAM right edge)
+    // and any grid-alignment gaps in regular grids.
+    nn_fill_nan(&mut means_out, &mut mins_out, &mut maxs_out, ny_tile, nx_tile);
+
     let mins = Array2::from_shape_vec((ny_tile, nx_tile), mins_out)?;
     let maxs = Array2::from_shape_vec((ny_tile, nx_tile), maxs_out)?;
     let means = Array2::from_shape_vec((ny_tile, nx_tile), means_out)?;
@@ -127,6 +132,75 @@ pub fn build_tile_stats(
         lon_0_360,
         index_lon_min: lon_min_adj,
     })
+}
+
+/// Fill NaN cells with nearest non-NaN neighbor value.
+/// Uses expanding search radius up to 5 cells. Fills all three stat arrays in lockstep.
+fn nn_fill_nan(
+    means: &mut [f32],
+    mins: &mut [f32],
+    maxs: &mut [f32],
+    ny: usize,
+    nx: usize,
+) {
+    // Collect indices of NaN cells
+    let nan_cells: Vec<usize> = means
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.is_nan())
+        .map(|(i, _)| i)
+        .collect();
+
+    if nan_cells.is_empty() {
+        return;
+    }
+
+    let max_radius: isize = 5;
+
+    for &cell in &nan_cells {
+        let cy = (cell / nx) as isize;
+        let cx = (cell % nx) as isize;
+        let mut best_dist_sq = i64::MAX;
+        let mut best_mean = f32::NAN;
+        let mut best_min = f32::NAN;
+        let mut best_max = f32::NAN;
+
+        'search: for r in 1..=max_radius {
+            // Search the ring at distance r (chebyshev)
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    // Only look at cells on the edge of this ring
+                    if dy.abs() != r && dx.abs() != r {
+                        continue;
+                    }
+                    let ny2 = cy + dy;
+                    let nx2 = cx + dx;
+                    if ny2 < 0 || ny2 >= ny as isize || nx2 < 0 || nx2 >= nx as isize {
+                        continue;
+                    }
+                    let idx = ny2 as usize * nx + nx2 as usize;
+                    if !means[idx].is_nan() {
+                        let dist_sq = (dy as i64) * (dy as i64) + (dx as i64) * (dx as i64);
+                        if dist_sq < best_dist_sq {
+                            best_dist_sq = dist_sq;
+                            best_mean = means[idx];
+                            best_min = mins[idx];
+                            best_max = maxs[idx];
+                        }
+                    }
+                }
+            }
+            if best_dist_sq < i64::MAX {
+                break 'search;
+            }
+        }
+
+        if !best_mean.is_nan() {
+            means[cell] = best_mean;
+            mins[cell] = best_min;
+            maxs[cell] = best_max;
+        }
+    }
 }
 
 /// Flatten coordinate arrays to 1D vecs for iteration

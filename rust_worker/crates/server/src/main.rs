@@ -5,9 +5,10 @@
 
 mod status;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, RwLock};
+use std::time::{Instant, SystemTime};
 
 use axum::body::Body;
 use axum::extract::{Query, State};
@@ -21,10 +22,100 @@ use log::info;
 use serde::Deserialize;
 use tower_http::services::ServeDir;
 
+use memmap2::Mmap;
+
 use radarcheck_core::config;
 use radarcheck_core::tile_query;
 
 // ── App state ────────────────────────────────────────────────────────────────
+
+/// Cache of memory-mapped .rctile files, keyed by path with mtime invalidation.
+pub struct MmapCache {
+    entries: RwLock<HashMap<PathBuf, (SystemTime, Mmap)>>,
+}
+
+impl MmapCache {
+    pub fn new() -> Self {
+        Self {
+            entries: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Get or open a memory-mapped file. Invalidates on mtime change.
+    pub fn get_or_open(&self, path: &Path) -> Option<Arc<Mmap>> {
+        let mtime = std::fs::metadata(path).ok()?.modified().ok()?;
+
+        // Check read cache first
+        {
+            let cache = self.entries.read().ok()?;
+            if let Some((cached_mtime, mmap)) = cache.get(path) {
+                if *cached_mtime == mtime {
+                    // SAFETY: Mmap lives as long as the cache entry.
+                    // We return a reference that borrows from the RwLock guard,
+                    // but we need to return owned data. Copy the pointer into Arc.
+                    // Actually, we can't easily return a borrow here. Let's just
+                    // return the data we need via a closure pattern instead.
+                    // For now, return None to fall through to the write path.
+                    // This is fine — the write path also serves cache hits after
+                    // upgrading the lock.
+                    let _ = (cached_mtime, mmap);
+                }
+            }
+        }
+
+        // Open/reopen under write lock
+        let mut cache = self.entries.write().ok()?;
+
+        // Double-check after acquiring write lock
+        if let Some((cached_mtime, _)) = cache.get(path) {
+            if *cached_mtime == mtime {
+                // Already cached and valid — caller should use get_timeseries instead
+                return None;
+            }
+        }
+
+        let file = std::fs::File::open(path).ok()?;
+        let mmap = unsafe { Mmap::map(&file).ok()? };
+        cache.insert(path.to_path_buf(), (mtime, mmap));
+        None // Caller uses get_timeseries
+    }
+
+    /// Read timeseries from a cached .rctile file. Opens and caches if needed.
+    pub fn read_timeseries(
+        &self,
+        path: &Path,
+        lat: f64,
+        lon: f64,
+    ) -> Option<(Vec<i32>, Vec<f32>)> {
+        let mtime = std::fs::metadata(path).ok()?.modified().ok()?;
+
+        // Try read cache
+        {
+            let cache = self.entries.read().ok()?;
+            if let Some((cached_mtime, mmap)) = cache.get(path) {
+                if *cached_mtime == mtime {
+                    return tile_query::load_timeseries_rctile_mmap(mmap.as_ref(), lat, lon).ok();
+                }
+            }
+        }
+
+        // Cache miss or stale — open under write lock
+        let mut cache = self.entries.write().ok()?;
+
+        // Double-check
+        if let Some((cached_mtime, mmap)) = cache.get(path) {
+            if *cached_mtime == mtime {
+                return tile_query::load_timeseries_rctile_mmap(mmap.as_ref(), lat, lon).ok();
+            }
+        }
+
+        let file = std::fs::File::open(path).ok()?;
+        let mmap = unsafe { Mmap::map(&file).ok()? };
+        let result = tile_query::load_timeseries_rctile_mmap(mmap.as_ref(), lat, lon).ok();
+        cache.insert(path.to_path_buf(), (mtime, mmap));
+        result
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -33,6 +124,7 @@ pub struct AppState {
     pub api_key: Option<String>,
     pub app_root: PathBuf,
     pub cache_dir: PathBuf,
+    pub mmap_cache: Arc<MmapCache>,
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -76,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
         api_key: std::env::var("RADARCHECK_API_KEY").ok(),
         app_root: app_root.clone(),
         cache_dir: PathBuf::from(&args.cache_dir),
+        mmap_cache: Arc::new(MmapCache::new()),
     });
 
     let static_dir = app_root.join("static");
@@ -292,6 +385,7 @@ async fn api_timeseries_multirun(
         let region_id = region_id.clone();
         let variable_id = variable_id.clone();
         let requested_model = requested_model.clone();
+        let mmap_cache = state.mmap_cache.clone();
         move || {
             multirun_blocking(
                 &db_path,
@@ -303,6 +397,7 @@ async fn api_timeseries_multirun(
                 lon,
                 days_back,
                 is_accumulation,
+                &mmap_cache,
             )
         }
     })
@@ -332,6 +427,7 @@ fn multirun_blocking(
     lon: f64,
     days_back: f64,
     is_accumulation: bool,
+    mmap_cache: &MmapCache,
 ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
     let cutoff_seconds = (days_back * 86400.0) as i64;
     let now_unix = chrono::Utc::now().timestamp();
@@ -375,11 +471,26 @@ fn multirun_blocking(
                 None => continue,
             };
 
-            let (hours, values) = match tile_query::load_timeseries_for_point(
-                tiles_dir, region_id, res, model_id, run_id, variable_id, lat, lon,
-            ) {
-                Ok(r) => r,
-                Err(_) => continue,
+            // Try mmap cache (.rctile) first, fall back to NPZ
+            let rctile_path = tiles_dir
+                .join(region_id)
+                .join(&config::format_res_dir(res))
+                .join(model_id)
+                .join(run_id)
+                .join(format!("{}.rctile", variable_id));
+
+            let (hours, values) = if rctile_path.exists() {
+                match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
+                    Some(r) => r,
+                    None => continue,
+                }
+            } else {
+                match tile_query::load_timeseries_for_point(
+                    tiles_dir, region_id, res, model_id, run_id, variable_id, lat, lon,
+                ) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                }
             };
 
             let accum_values: Vec<f64> = if is_accumulation {
@@ -471,6 +582,7 @@ async fn api_timeseries_stitched(
         let region_id = region_id.clone();
         let variable_id = variable_id.clone();
         let model_id = model_id.clone();
+        let mmap_cache = state.mmap_cache.clone();
         move || {
             stitched_blocking(
                 &db_path,
@@ -482,6 +594,7 @@ async fn api_timeseries_stitched(
                 lon,
                 days_back,
                 is_accumulation,
+                &mmap_cache,
             )
         }
     })
@@ -511,6 +624,7 @@ fn stitched_blocking(
     lon: f64,
     days_back: f64,
     is_accumulation: bool,
+    mmap_cache: &MmapCache,
 ) -> anyhow::Result<serde_json::Value> {
     let cutoff_seconds = (days_back * 86400.0) as i64;
     let now_unix = chrono::Utc::now().timestamp();
@@ -538,11 +652,26 @@ fn stitched_blocking(
             continue;
         }
 
-        let (hours, values) = match tile_query::load_timeseries_for_point(
-            tiles_dir, region_id, res, model_id, run_id, variable_id, lat, lon,
-        ) {
-            Ok(r) => r,
-            Err(_) => continue,
+        // Try mmap cache (.rctile) first, fall back to NPZ
+        let rctile_path = tiles_dir
+            .join(region_id)
+            .join(&config::format_res_dir(res))
+            .join(model_id)
+            .join(run_id)
+            .join(format!("{}.rctile", variable_id));
+
+        let (hours, values) = if rctile_path.exists() {
+            match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
+                Some(r) => r,
+                None => continue,
+            }
+        } else {
+            match tile_query::load_timeseries_for_point(
+                tiles_dir, region_id, res, model_id, run_id, variable_id, lat, lon,
+            ) {
+                Ok(r) => r,
+                Err(_) => continue,
+            }
         };
 
         let accum_values: Vec<f64> = if is_accumulation {
