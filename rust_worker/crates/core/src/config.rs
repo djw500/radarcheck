@@ -72,6 +72,10 @@ pub struct VariableConfig {
     pub search: VariableSearch,
     /// Map from source units string to conversion
     pub unit_conversions_by_units: &'static [(&'static str, Conversion)],
+    /// Whether this variable is an accumulation (apcp, asnow)
+    pub is_accumulation: bool,
+    /// Models that don't have this variable
+    pub model_exclusions: &'static [&'static str],
 }
 
 impl VariableConfig {
@@ -191,6 +195,8 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
                 ("degC", Conversion::CToF),
                 ("°C", Conversion::CToF),
             ],
+            is_accumulation: false,
+            model_exclusions: &[],
         },
         "apcp" => VariableConfig {
             id: "apcp",
@@ -209,6 +215,8 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
                 ("kg m-2", Conversion::KgM2ToIn),
                 ("kg m**-2", Conversion::KgM2ToIn),
             ],
+            is_accumulation: true,
+            model_exclusions: &[],
         },
         "asnow" => VariableConfig {
             id: "asnow",
@@ -220,6 +228,8 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
                 overrides: &[],
             },
             unit_conversions_by_units: &[],
+            is_accumulation: true,
+            model_exclusions: &["gfs", "nam_nest", "ecmwf_hres"],
         },
         "snod" => VariableConfig {
             id: "snod",
@@ -231,6 +241,8 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
                 overrides: &[("ifs", ":sd:")],
             },
             unit_conversions_by_units: &[],
+            is_accumulation: false,
+            model_exclusions: &["nbm"],
         },
         _ => return None,
     })
@@ -262,4 +274,32 @@ pub fn build_idx_url(model: &ModelConfig, date: &str, init_hour: &str, forecast_
         .replace("{date}", date)
         .replace("{hh}", init_hour)
         .replace("{fxx}", &fxx)
+}
+
+/// All known model IDs
+pub static ALL_MODEL_IDS: &[&str] = &["hrrr", "nam_nest", "gfs", "nbm", "ecmwf_hres"];
+
+/// All tile build variable IDs (the 4 variables built by the scheduler)
+pub static TILE_BUILD_VARIABLE_IDS: &[&str] = &["t2m", "apcp", "asnow", "snod"];
+
+/// Get tile resolution for model+region by region_id string
+pub fn get_tile_resolution_by_id(region_id: &str, model_id: &str) -> f64 {
+    if let Some(region) = get_region(region_id) {
+        get_tile_resolution(region, model_id)
+    } else {
+        0.1
+    }
+}
+
+/// Infer region for a lat/lon point
+pub fn infer_region_for_latlon(lat: f64, lon: f64) -> Option<&'static str> {
+    // Check NE region
+    if lat >= NE_REGION.lat_min
+        && lat <= NE_REGION.lat_max
+        && lon >= NE_REGION.lon_min
+        && lon <= NE_REGION.lon_max
+    {
+        return Some(NE_REGION.id);
+    }
+    None
 }

@@ -2,14 +2,7 @@
 //!
 //! Drop-in replacement for Python job_worker.py (for NOAA models).
 
-mod config;
-mod db;
-mod fetch;
-mod grib;
-mod idx;
-mod npz;
-mod tiles;
-mod worker;
+use radarcheck_core::{config, db, worker};
 
 use anyhow::Result;
 use clap::Parser;

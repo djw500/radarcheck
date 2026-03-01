@@ -8,10 +8,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use radarcheck_worker::config::{Conversion, NE_REGION};
-use radarcheck_worker::grib;
-use radarcheck_worker::npz::{self, TileNpz};
-use radarcheck_worker::tiles;
+use radarcheck_core::config::{Conversion, NE_REGION};
+use radarcheck_core::grib;
+use radarcheck_core::npz::{self, TileNpz};
+use radarcheck_core::tiles;
 
 #[derive(Parser)]
 #[command(name = "e2e-tile-worker")]

@@ -1,0 +1,39 @@
+[package]
+name = "radarcheck-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Pure Rust GRIB2 parser (no C dependencies except openjpeg for JPEG2000)
+# gridpoints-proj disabled to avoid proj-sys/cmake dependency — we compute Lambert coords ourselves
+grib = { version = "0.13", default-features = false, features = ["jpeg2000-unpack-with-openjpeg", "png-unpack-with-png-crate", "ccsds-unpack-with-libaec"] }
+ndarray = "0.16"
+bytemuck = { version = "1", features = ["derive"] }
+
+# HTTP client for GRIB downloads (rustls = no openssl dependency)
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+# SQLite job queue
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# NPZ file format (numpy compressed arrays)
+ndarray-npy = "0.9"
+flate2 = "1"
+zip = "2"
+
+# File locking for concurrent NPZ writes (matches Python filelock)
+fs2 = "0.4"
+
+# Logging
+log = "0.4"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Regex for idx parsing
+regex = "1"

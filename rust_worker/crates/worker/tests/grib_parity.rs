@@ -17,7 +17,7 @@
 
 use serde::Deserialize;
 
-use radarcheck_worker::grib::{self, DecodedGrib, GribCoords};
+use radarcheck_core::grib::{self, DecodedGrib, GribCoords};
 
 #[derive(Deserialize)]
 struct FixtureMeta {

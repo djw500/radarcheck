@@ -17,10 +17,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use radarcheck_worker::config::{Conversion, NE_REGION};
-use radarcheck_worker::grib;
-use radarcheck_worker::npz;
-use radarcheck_worker::tiles;
+use radarcheck_core::config::{Conversion, NE_REGION};
+use radarcheck_core::grib;
+use radarcheck_core::npz;
+use radarcheck_core::tiles;
 
 #[derive(Deserialize)]
 struct TileFixtureMeta {

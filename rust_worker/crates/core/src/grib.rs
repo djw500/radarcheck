@@ -290,6 +290,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Requires fixture file
     fn test_decode_hrrr_apcp() {
         let grib_bytes = std::fs::read("../tests/fixtures/grib_parity/hrrr_apcp_f1.grib2")
             .expect("Missing fixture file");
