@@ -1,3 +1,4 @@
+pub mod bucket_mapping;
 pub mod config;
 pub mod db;
 pub mod fetch;
@@ -8,6 +9,7 @@ pub mod idx;
 #[cfg(feature = "npz")]
 pub mod npz;
 pub mod rctile;
+pub mod rctile_v2;
 pub mod tile_query;
 pub mod tiles;
 pub mod worker;

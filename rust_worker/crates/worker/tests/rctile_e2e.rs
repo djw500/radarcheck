@@ -7,7 +7,6 @@ use tempfile::TempDir;
 
 use radarcheck_core::config;
 use radarcheck_core::rctile;
-use radarcheck_core::tile_query;
 use radarcheck_core::tiles::TileStats;
 
 /// Create synthetic tile stats for testing.
@@ -91,7 +90,7 @@ fn test_rctile_write_read_single_hour() {
     let means_slice = stats.means.as_slice().unwrap();
     rctile::write_hour(&rctile_path, 3, means_slice).unwrap();
 
-    // Query multiple points via tile_query and verify against direct rctile read
+    // Query multiple points via direct rctile reader and verify values
     let test_points = vec![
         (40.0, -74.0, "NYC area"),
         (42.5, -73.5, "Albany area"),
@@ -101,37 +100,21 @@ fn test_rctile_write_read_single_hour() {
     ];
 
     for (lat, lon, label) in &test_points {
-        // Read via tile_query (production path)
-        let (tq_hours, tq_vals) = tile_query::load_timeseries_for_point(
-            tiles_dir, region.id, resolution, model_id, run_id, variable, *lat, *lon,
-        )
-        .unwrap_or_else(|e| panic!("tile_query read failed at {}: {}", label, e));
-
-        // Read via direct rctile reader
         let (rc_hours, rc_vals) = rctile::read_timeseries(&rctile_path, *lat, *lon).unwrap();
 
         assert_eq!(
-            tq_hours, rc_hours,
-            "Hours mismatch at {}: tile_query={:?} vs rctile={:?}",
-            label, tq_hours, rc_hours
+            rc_hours,
+            vec![3],
+            "Hours mismatch at {}: {:?}",
+            label,
+            rc_hours
         );
-        assert_eq!(
-            tq_vals.len(),
-            rc_vals.len(),
-            "Values length mismatch at {}",
+        assert_eq!(rc_vals.len(), 1, "Values length mismatch at {}", label);
+        assert!(
+            !rc_vals[0].is_nan(),
+            "Got NaN at {}",
             label
         );
-
-        for (i, (tv, rv)) in tq_vals.iter().zip(rc_vals.iter()).enumerate() {
-            if tv.is_nan() && rv.is_nan() {
-                continue;
-            }
-            assert!(
-                (tv - rv).abs() < 1e-4,
-                "Value mismatch at {} hour_idx={}: tile_query={} vs rctile={}",
-                label, i, tv, rv
-            );
-        }
     }
 }
 
@@ -225,62 +208,6 @@ fn test_rctile_mmap_matches_file_io() {
             );
         }
     }
-}
-
-/// Test tile_query reads .rctile files and errors when missing.
-#[test]
-fn test_tile_query_reads_rctile() {
-    let tmp = TempDir::new().unwrap();
-    let tiles_dir = tmp.path();
-    let region = &config::NE_REGION;
-    let resolution = 0.1;
-    let model_id = "nbm";
-    let run_id = "run_20260301_06";
-    let variable = "t2m";
-
-    let run_dir = setup_tile_dir(tiles_dir, region, resolution, model_id, run_id);
-
-    let ny = 140usize;
-    let nx = 220usize;
-    let n_cells = ny * nx;
-
-    // Write .rctile with value=99.0 everywhere
-    let rctile_path = run_dir.join(format!("{}.rctile", variable));
-    rctile::create_rctile(
-        &rctile_path,
-        ny as u16,
-        nx as u16,
-        80,
-        region.lat_min as f32,
-        region.lon_min as f32,
-        resolution as f32,
-        false,
-    )
-    .unwrap();
-    let rc_vals = vec![99.0f32; n_cells];
-    rctile::write_hour(&rctile_path, 0, &rc_vals).unwrap();
-
-    // Query through tile_query — should get 99.0
-    let lat = 40.0;
-    let lon = -74.0;
-    let (hours, values) = tile_query::load_timeseries_for_point(
-        tiles_dir, region.id, resolution, model_id, run_id, variable, lat, lon,
-    )
-    .unwrap();
-
-    assert_eq!(hours, vec![0]);
-    assert!(
-        (values[0] - 99.0).abs() < 1e-4,
-        "Expected rctile value 99.0, got {}",
-        values[0]
-    );
-
-    // Delete rctile — tile_query should error (no fallback)
-    std::fs::remove_file(&rctile_path).unwrap();
-    let result = tile_query::load_timeseries_for_point(
-        tiles_dir, region.id, resolution, model_id, run_id, variable, lat, lon,
-    );
-    assert!(result.is_err(), "Should error when .rctile is missing");
 }
 
 /// Test the full GFS scenario: 0.25° resolution (fewer cells), rctile write and read.

@@ -1,8 +1,13 @@
 //! Radarcheck tile worker — fetches GRIB data and builds statistical tiles.
 //!
-//! Drop-in replacement for Python job_worker.py (for NOAA models).
+//! Uses v2 rctile format: accumulates hours in memory, then finalizes
+//! a compressed multi-run file per (region, model, variable).
 
-use radarcheck_core::{config, db, worker};
+use std::collections::HashMap;
+
+use radarcheck_core::bucket_mapping::BucketMapping;
+use radarcheck_core::worker::{self, RunAccumulator};
+use radarcheck_core::{config, db};
 
 use anyhow::Result;
 use clap::Parser;
@@ -68,13 +73,17 @@ fn main() -> Result<()> {
     let mut processed: u32 = 0;
 
     // Throttle NOMADS-backed models to avoid rate limiting (302 "Over Rate Limit")
-    // S3-backed models (HRRR, GFS) don't need this
     let nomads_throttle = args
         .model
         .as_deref()
         .and_then(config::get_model)
         .map(|m| m.grib_url_template.contains("nomads.ncep.noaa.gov"))
         .unwrap_or(false);
+
+    // v2 state: mapping cache and run accumulators
+    let mut mapping_cache: HashMap<String, BucketMapping> = HashMap::new();
+    let mut accumulators: HashMap<(String, String), RunAccumulator> = HashMap::new();
+    let mut current_run_id: Option<String> = None;
 
     loop {
         let job = db::claim(&conn, &worker_id, args.model.as_deref())?;
@@ -88,6 +97,12 @@ fn main() -> Result<()> {
                         processed
                     );
                     break;
+                }
+                // No jobs — finalize any pending accumulators before sleeping
+                if !accumulators.is_empty() {
+                    info!("No pending jobs, finalizing {} accumulators", accumulators.len());
+                    worker::finalize_all(&mut accumulators, tiles_dir, &conn);
+                    current_run_id = None;
                 }
                 std::thread::sleep(poll_duration);
                 continue;
@@ -109,8 +124,59 @@ fn main() -> Result<()> {
 
         match job.job_type.as_str() {
             "build_tile_hour" => {
-                match worker::process_build_tile_hour(&conn, &job, tiles_dir) {
-                    Ok(()) => {
+                match worker::process_hour_v2(&job, &mut mapping_cache) {
+                    Ok(hour_result) => {
+                        // Check if we're starting a new run — finalize old accumulators
+                        if let Some(ref cur_run) = current_run_id {
+                            if *cur_run != hour_result.run_id && !accumulators.is_empty() {
+                                info!(
+                                    "Run changed {} → {}, finalizing {} accumulators",
+                                    cur_run,
+                                    hour_result.run_id,
+                                    accumulators.len()
+                                );
+                                worker::finalize_all(&mut accumulators, tiles_dir, &conn);
+                            }
+                        }
+                        current_run_id = Some(hour_result.run_id.clone());
+
+                        // Record tile run (idempotent, shows run in status dashboard early)
+                        let _ = db::record_tile_run(
+                            &conn,
+                            &hour_result.region_id,
+                            hour_result.resolution_deg,
+                            &hour_result.model_id,
+                            &hour_result.run_id,
+                            Some(&hour_result.init_time_utc),
+                        );
+
+                        // Get or create accumulator for this (run, variable)
+                        let key = (
+                            hour_result.run_id.clone(),
+                            hour_result.variable_id.clone(),
+                        );
+                        let acc = accumulators.entry(key).or_insert_with(|| {
+                            RunAccumulator::new(&hour_result)
+                        });
+
+                        // Record individual hour for progress tracking
+                        let rctile_path = acc.rctile_path(tiles_dir);
+                        let tile_str = rctile_path.to_string_lossy().to_string();
+                        let _ = db::record_tile_hour(
+                            &conn,
+                            &hour_result.region_id,
+                            hour_result.resolution_deg,
+                            &hour_result.model_id,
+                            &hour_result.run_id,
+                            &hour_result.variable_id,
+                            hour_result.forecast_hour as u32,
+                            &tile_str,
+                            job.id,
+                        );
+
+                        // Accumulate
+                        acc.add_hour(hour_result.forecast_hour, hour_result.cell_values);
+
                         db::complete(&conn, job.id)?;
                         processed += 1;
                         let elapsed = t0.elapsed().as_secs_f64();
@@ -157,7 +223,6 @@ fn main() -> Result<()> {
         }
 
         // Throttle NOMADS requests to avoid rate limiting.
-        // Back off longer on rate-limit (302) errors.
         if nomads_throttle {
             let delay_ms = if job_failed_rate_limit { 5000 } else { 500 };
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
@@ -173,6 +238,15 @@ fn main() -> Result<()> {
             );
             break;
         }
+    }
+
+    // Finalize any remaining accumulators before exit
+    if !accumulators.is_empty() {
+        info!(
+            "Shutdown: finalizing {} remaining accumulators",
+            accumulators.len()
+        );
+        worker::finalize_all(&mut accumulators, tiles_dir, &conn);
     }
 
     info!("{} shut down. Processed {} jobs.", worker_id, processed);

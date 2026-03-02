@@ -76,20 +76,9 @@ def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:
         ON tile_variables (region_id, resolution_deg, model_id, run_id, variable_id)
         """
     )
-    conn.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_tile_vars_job_id
-        ON tile_variables (job_id)
-        WHERE job_id IS NOT NULL
-        """
-    )
-    conn.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_tile_hours_job_id
-        ON tile_hours (job_id)
-        WHERE job_id IS NOT NULL
-        """
-    )
+    # Drop legacy unique indexes that conflict with v2 worker (job_id=0 for finalize)
+    conn.execute("DROP INDEX IF EXISTS idx_tile_vars_job_id")
+    conn.execute("DROP INDEX IF EXISTS idx_tile_hours_job_id")
     return conn
 
 

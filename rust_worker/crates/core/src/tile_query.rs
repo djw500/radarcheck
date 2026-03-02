@@ -1,53 +1,12 @@
-//! Point extraction and accumulation logic for the API server.
+//! Query helpers and accumulation logic for the API server.
 //!
-//! Provides functions to query timeseries data from .rctile files at a given lat/lon point.
-//! Uses mmap for zero-copy reads (~300 bytes per query).
+//! Provides accumulation, run-id parsing, and tile-run listing for the
+//! v2 rctile pipeline. Point queries use `rctile_v2::query_point_v2` directly.
 
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use rusqlite::Connection;
-
-use crate::config;
-use crate::rctile;
-
-/// Load timeseries for the tile cell containing (lat, lon) from .rctile.
-/// Returns (hours, values) vectors.
-pub fn load_timeseries_for_point(
-    tiles_dir: &Path,
-    region_id: &str,
-    resolution_deg: f64,
-    model_id: &str,
-    run_id: &str,
-    variable_id: &str,
-    lat: f64,
-    lon: f64,
-) -> Result<(Vec<i32>, Vec<f32>)> {
-    let res_dir = config::format_res_dir(resolution_deg);
-    let rctile_path = tiles_dir
-        .join(region_id)
-        .join(&res_dir)
-        .join(model_id)
-        .join(run_id)
-        .join(format!("{}.rctile", variable_id));
-
-    if !rctile_path.exists() {
-        bail!("Tile not found for {} at {:?}", variable_id, rctile_path);
-    }
-
-    rctile::read_timeseries(&rctile_path, lat, lon)
-        .context("Failed to read .rctile")
-}
-
-/// Load timeseries from a .rctile file via mmap (zero-copy).
-/// The caller provides the mmap'd bytes.
-pub fn load_timeseries_rctile_mmap(
-    data: &[u8],
-    lat: f64,
-    lon: f64,
-) -> Result<(Vec<i32>, Vec<f32>)> {
-    rctile::read_timeseries_mmap(data, lat, lon)
-}
 
 /// List tile runs from the database for a given region/model.
 pub fn list_tile_runs(

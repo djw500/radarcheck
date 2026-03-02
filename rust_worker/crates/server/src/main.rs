@@ -25,6 +25,7 @@ use tower_http::services::ServeDir;
 use memmap2::Mmap;
 
 use radarcheck_core::config;
+use radarcheck_core::rctile_v2;
 use radarcheck_core::tile_query;
 
 // ── App state ────────────────────────────────────────────────────────────────
@@ -41,52 +42,13 @@ impl MmapCache {
         }
     }
 
-    /// Get or open a memory-mapped file. Invalidates on mtime change.
-    pub fn get_or_open(&self, path: &Path) -> Option<Arc<Mmap>> {
-        let mtime = std::fs::metadata(path).ok()?.modified().ok()?;
-
-        // Check read cache first
-        {
-            let cache = self.entries.read().ok()?;
-            if let Some((cached_mtime, mmap)) = cache.get(path) {
-                if *cached_mtime == mtime {
-                    // SAFETY: Mmap lives as long as the cache entry.
-                    // We return a reference that borrows from the RwLock guard,
-                    // but we need to return owned data. Copy the pointer into Arc.
-                    // Actually, we can't easily return a borrow here. Let's just
-                    // return the data we need via a closure pattern instead.
-                    // For now, return None to fall through to the write path.
-                    // This is fine — the write path also serves cache hits after
-                    // upgrading the lock.
-                    let _ = (cached_mtime, mmap);
-                }
-            }
-        }
-
-        // Open/reopen under write lock
-        let mut cache = self.entries.write().ok()?;
-
-        // Double-check after acquiring write lock
-        if let Some((cached_mtime, _)) = cache.get(path) {
-            if *cached_mtime == mtime {
-                // Already cached and valid — caller should use get_timeseries instead
-                return None;
-            }
-        }
-
-        let file = std::fs::File::open(path).ok()?;
-        let mmap = unsafe { Mmap::map(&file).ok()? };
-        cache.insert(path.to_path_buf(), (mtime, mmap));
-        None // Caller uses get_timeseries
-    }
-
-    /// Read timeseries from a cached .rctile file. Opens and caches if needed.
-    pub fn read_timeseries(
+    /// Query a v2 rctile file for all runs at a point. Opens and caches mmap if needed.
+    pub fn query_point_v2(
         &self,
         path: &Path,
         lat: f64,
         lon: f64,
-    ) -> Option<(Vec<i32>, Vec<f32>)> {
+    ) -> Option<rctile_v2::PointResult> {
         let mtime = std::fs::metadata(path).ok()?.modified().ok()?;
 
         // Try read cache
@@ -94,7 +56,7 @@ impl MmapCache {
             let cache = self.entries.read().ok()?;
             if let Some((cached_mtime, mmap)) = cache.get(path) {
                 if *cached_mtime == mtime {
-                    return tile_query::load_timeseries_rctile_mmap(mmap.as_ref(), lat, lon).ok();
+                    return rctile_v2::query_point_v2(mmap.as_ref(), lat, lon).ok();
                 }
             }
         }
@@ -105,13 +67,13 @@ impl MmapCache {
         // Double-check
         if let Some((cached_mtime, mmap)) = cache.get(path) {
             if *cached_mtime == mtime {
-                return tile_query::load_timeseries_rctile_mmap(mmap.as_ref(), lat, lon).ok();
+                return rctile_v2::query_point_v2(mmap.as_ref(), lat, lon).ok();
             }
         }
 
         let file = std::fs::File::open(path).ok()?;
         let mmap = unsafe { Mmap::map(&file).ok()? };
-        let result = tile_query::load_timeseries_rctile_mmap(mmap.as_ref(), lat, lon).ok();
+        let result = rctile_v2::query_point_v2(mmap.as_ref(), lat, lon).ok();
         cache.insert(path.to_path_buf(), (mtime, mmap));
         result
     }
@@ -421,7 +383,7 @@ async fn api_timeseries_multirun(
 }
 
 fn multirun_blocking(
-    db_path: &Path,
+    _db_path: &Path,
     tiles_dir: &Path,
     region_id: &str,
     requested_model: &str,
@@ -437,16 +399,7 @@ fn multirun_blocking(
     let cutoff_unix = now_unix - cutoff_seconds;
 
     let models_to_query: Vec<&str> = if requested_model == "all" {
-        config::ALL_MODEL_IDS
-            .iter()
-            .filter(|&&mid| {
-                let res = config::get_tile_resolution_by_id(region_id, mid);
-                tile_query::list_tile_runs(db_path, region_id, res, mid)
-                    .map(|r| !r.is_empty())
-                    .unwrap_or(false)
-            })
-            .copied()
-            .collect()
+        config::ALL_MODEL_IDS.to_vec()
     } else if config::get_model(requested_model).is_some() {
         vec![requested_model]
     } else {
@@ -457,51 +410,42 @@ fn multirun_blocking(
 
     for model_id in models_to_query {
         let res = config::get_tile_resolution_by_id(region_id, model_id);
-        let all_runs = tile_query::list_tile_runs(db_path, region_id, res, model_id)
-            .unwrap_or_default();
-        log::debug!("multirun: model={} res={} runs={}", model_id, res, all_runs.len());
+        // v2: one file per (model, variable) — all runs inside
+        let rctile_path = tiles_dir
+            .join(region_id)
+            .join(&config::format_res_dir(res))
+            .join(model_id)
+            .join(format!("{}.rctile", variable_id));
 
-        for run_id in &all_runs {
-            let init_unix = match tile_query::parse_run_id_to_unix(run_id) {
-                Some(u) => u,
-                None => continue,
-            };
-            if init_unix < cutoff_unix {
+        let point_result = match mmap_cache.query_point_v2(&rctile_path, lat, lon) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        for run_data in &point_result.runs {
+            if run_data.init_unix < cutoff_unix {
                 continue;
             }
 
-            let init_time = match tile_query::parse_run_id_to_init_iso(run_id) {
-                Some(t) => t,
-                None => continue,
-            };
-
-            let rctile_path = tiles_dir
-                .join(region_id)
-                .join(&config::format_res_dir(res))
-                .join(model_id)
-                .join(run_id)
-                .join(format!("{}.rctile", variable_id));
-
-            let (hours, values) = match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
-                Some(r) => r,
-                None => {
-                    log::debug!("multirun: miss rctile {:?}", rctile_path);
-                    continue;
-                }
-            };
+            let init_time = tile_query::parse_run_id_to_init_iso(&run_data.run_id)
+                .unwrap_or_else(|| unix_to_iso(run_data.init_unix));
 
             let accum_values: Vec<f64> = if is_accumulation {
-                tile_query::accumulate_timeseries(&values)
+                tile_query::accumulate_timeseries(&run_data.values)
             } else {
-                values.iter().map(|&v| v as f64).collect()
+                run_data.values.iter().map(|&v| v as f64).collect()
             };
 
             let mut series = Vec::new();
-            for (&h, &v) in hours.iter().zip(accum_values.iter()) {
+            for (i, &h) in run_data.hours.iter().enumerate() {
+                if i >= accum_values.len() {
+                    break;
+                }
+                let v = accum_values[i];
                 if v.is_nan() {
                     continue;
                 }
-                let valid_unix = init_unix + (h as i64) * 3600;
+                let valid_unix = run_data.init_unix + (h as i64) * 3600;
                 let valid_time = unix_to_iso(valid_unix);
                 series.push(serde_json::json!({
                     "valid_time": valid_time,
@@ -511,12 +455,12 @@ fn multirun_blocking(
             }
 
             if !series.is_empty() {
-                let key = format!("{}/{}", model_id, run_id);
+                let key = format!("{}/{}", model_id, run_data.run_id);
                 results.insert(
                     key,
                     serde_json::json!({
                         "model_id": model_id,
-                        "run_id": run_id,
+                        "run_id": run_data.run_id,
                         "init_time": init_time,
                         "series": series,
                     }),
@@ -611,7 +555,7 @@ async fn api_timeseries_stitched(
 }
 
 fn stitched_blocking(
-    db_path: &Path,
+    _db_path: &Path,
     tiles_dir: &Path,
     region_id: &str,
     model_id: &str,
@@ -627,7 +571,17 @@ fn stitched_blocking(
     let cutoff_unix = now_unix - cutoff_seconds;
 
     let res = config::get_tile_resolution_by_id(region_id, model_id);
-    let all_runs = tile_query::list_tile_runs(db_path, region_id, res, model_id)?;
+
+    // v2: one file per (model, variable) — all runs inside
+    let rctile_path = tiles_dir
+        .join(region_id)
+        .join(&config::format_res_dir(res))
+        .join(model_id)
+        .join(format!("{}.rctile", variable_id));
+
+    let point_result = mmap_cache
+        .query_point_v2(&rctile_path, lat, lon)
+        .ok_or_else(|| anyhow::anyhow!("No data available"))?;
 
     // Collect all runs with their data
     struct RunInfo {
@@ -639,46 +593,34 @@ fn stitched_blocking(
 
     let mut run_data: Vec<RunInfo> = Vec::new();
 
-    for run_id in &all_runs {
-        let init_unix = match tile_query::parse_run_id_to_unix(run_id) {
-            Some(u) => u,
-            None => continue,
-        };
-        if init_unix < cutoff_unix {
+    for rd in &point_result.runs {
+        if rd.init_unix < cutoff_unix {
             continue;
         }
 
-        let rctile_path = tiles_dir
-            .join(region_id)
-            .join(&config::format_res_dir(res))
-            .join(model_id)
-            .join(run_id)
-            .join(format!("{}.rctile", variable_id));
-
-        let (hours, values) = match mmap_cache.read_timeseries(&rctile_path, lat, lon) {
-            Some(r) => r,
-            None => continue,
-        };
-
         let accum_values: Vec<f64> = if is_accumulation {
-            tile_query::accumulate_timeseries(&values)
+            tile_query::accumulate_timeseries(&rd.values)
         } else {
-            values.iter().map(|&v| v as f64).collect()
+            rd.values.iter().map(|&v| v as f64).collect()
         };
 
         let mut point_map = std::collections::BTreeMap::new();
-        for (&h, &v) in hours.iter().zip(accum_values.iter()) {
+        for (i, &h) in rd.hours.iter().enumerate() {
+            if i >= accum_values.len() {
+                break;
+            }
+            let v = accum_values[i];
             if v.is_nan() {
                 continue;
             }
-            let vt = init_unix + (h as i64) * 3600;
+            let vt = rd.init_unix + (h as i64) * 3600;
             point_map.insert(vt, v);
         }
 
         if !point_map.is_empty() {
             run_data.push(RunInfo {
-                init_unix,
-                run_id: run_id.clone(),
+                init_unix: rd.init_unix,
+                run_id: rd.run_id.clone(),
                 point_map,
             });
         }

@@ -280,6 +280,7 @@ MODELS = {
             {"start": 3, "end": 240, "step": 3},
             {"start": 246, "end": 384, "step": 6},
         ],
+        "tile_resolution_deg": 0.25,
     },
     "nbm": {
         "name": "National Blend (NBM)",

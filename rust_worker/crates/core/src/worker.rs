@@ -1,42 +1,220 @@
-//! Job processing pipeline: fetch GRIB → decode → build tiles → save .rctile → record in DB.
+//! Job processing pipeline v2: fetch GRIB → decode → gather mapping → accumulate → finalize.
 //!
-//! Mirrors Python job_worker.py process_build_tile_hour().
+//! Replaces v1 scatter-based tile building with gather-based bucket mapping.
+//! Data accumulates in memory during a run, then finalizes to a compressed
+//! multi-run .rctile v2 file.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
 
+use crate::bucket_mapping::{self, BucketMapping};
 use crate::config;
-use crate::db::{self, BuildTileHourArgs, Job};
+use crate::db::{BuildTileHourArgs, Job};
 use crate::fetch;
 use crate::grib;
-use crate::rctile;
-use crate::tiles;
+use crate::rctile_v2::{self, RunData};
+use crate::tile_query;
+use crate::db;
 
-#[derive(Debug, Serialize)]
-struct TileMeta {
-    region_id: String,
-    model_id: String,
-    run_id: String,
-    variable_id: String,
-    lat_min: f64,
-    lat_max: f64,
-    lon_min: f64,
-    lon_max: f64,
-    resolution_deg: f64,
-    units: String,
-    lon_0_360: bool,
-    index_lon_min: f64,
-    init_time_utc: Option<String>,
+/// Result of processing a single forecast hour (before accumulation).
+pub struct HourResult {
+    pub model_id: String,
+    pub run_id: String,
+    pub variable_id: String,
+    pub region_id: String,
+    pub forecast_hour: i32,
+    pub cell_values: Vec<f32>,
+    pub init_time_utc: String,
+    pub init_unix: i64,
+    pub ny: u16,
+    pub nx: u16,
+    pub resolution_deg: f64,
+    pub lat_min: f32,
+    pub lat_max: f32,
+    pub lon_min: f32,
+    pub lon_max: f32,
 }
 
-/// Process a single build_tile_hour job.
-pub fn process_build_tile_hour(
-    conn: &rusqlite::Connection,
+/// Accumulates hourly data for one (run, variable) combination.
+/// Finalize writes a compressed multi-run v2 rctile file.
+pub struct RunAccumulator {
+    pub model_id: String,
+    pub run_id: String,
+    pub variable_id: String,
+    pub region_id: String,
+    pub resolution_deg: f64,
+    pub init_time_utc: String,
+    pub init_unix: i64,
+    pub hours: Vec<i32>,
+    /// cell_values[cell_idx] holds all accumulated hour values for that cell
+    pub cell_values: Vec<Vec<f32>>,
+    pub ny: u16,
+    pub nx: u16,
+    pub lat_min: f32,
+    pub lat_max: f32,
+    pub lon_min: f32,
+    pub lon_max: f32,
+}
+
+impl RunAccumulator {
+    pub fn new(hr: &HourResult) -> Self {
+        let n_cells = hr.ny as usize * hr.nx as usize;
+        Self {
+            model_id: hr.model_id.clone(),
+            run_id: hr.run_id.clone(),
+            variable_id: hr.variable_id.clone(),
+            region_id: hr.region_id.clone(),
+            resolution_deg: hr.resolution_deg,
+            init_time_utc: hr.init_time_utc.clone(),
+            init_unix: hr.init_unix,
+            hours: Vec::new(),
+            cell_values: vec![Vec::new(); n_cells],
+            ny: hr.ny,
+            nx: hr.nx,
+            lat_min: hr.lat_min,
+            lat_max: hr.lat_max,
+            lon_min: hr.lon_min,
+            lon_max: hr.lon_max,
+        }
+    }
+
+    /// Add one forecast hour's mapped cell values.
+    pub fn add_hour(&mut self, hour: i32, values: Vec<f32>) {
+        self.hours.push(hour);
+        for (cell_idx, &val) in values.iter().enumerate() {
+            if cell_idx < self.cell_values.len() {
+                self.cell_values[cell_idx].push(val);
+            }
+        }
+    }
+
+    /// V2 rctile file path for this accumulator.
+    pub fn rctile_path(&self, tiles_dir: &Path) -> PathBuf {
+        let res_dir = config::format_res_dir(self.resolution_deg);
+        tiles_dir
+            .join(&self.region_id)
+            .join(&res_dir)
+            .join(&self.model_id)
+            .join(format!("{}.rctile", self.variable_id))
+    }
+
+    /// Finalize: merge with existing v2 file, write atomically.
+    /// Returns the path to the written rctile file.
+    pub fn finalize(
+        self,
+        tiles_dir: &Path,
+        conn: &rusqlite::Connection,
+    ) -> Result<PathBuf> {
+        let rctile_path = self.rctile_path(tiles_dir);
+
+        // Ensure output directory exists
+        if let Some(parent) = rctile_path.parent() {
+            std::fs::create_dir_all(parent)
+                .context("Failed to create v2 tile output directory")?;
+        }
+
+        // Load existing runs from v2 file
+        let mut all_runs: Vec<RunData> = if rctile_path.exists() {
+            let data = std::fs::read(&rctile_path)
+                .context("Failed to read existing v2 rctile")?;
+            if data.len() >= 4 && &data[0..4] == b"RCT2" {
+                rctile_v2::load_all_runs(&data).unwrap_or_else(|e| {
+                    log::warn!("Failed to load existing v2 runs: {}, starting fresh", e);
+                    vec![]
+                })
+            } else {
+                // Old v1 file at this path — ignore, start fresh
+                log::info!(
+                    "Ignoring v1 rctile at {:?}, starting fresh v2",
+                    rctile_path
+                );
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        // Remove any existing entry for this run (in case of re-processing)
+        all_runs.retain(|r| r.run_id != self.run_id);
+
+        // Add new run
+        all_runs.push(RunData {
+            run_id: self.run_id.clone(),
+            init_unix: self.init_unix,
+            hours: self.hours.clone(),
+            cell_values: self.cell_values,
+        });
+
+        // Sort by init_unix, keep only newest runs
+        all_runs.sort_by_key(|r| r.init_unix);
+        const MAX_RETAINED_RUNS: usize = 5;
+        if all_runs.len() > MAX_RETAINED_RUNS {
+            all_runs = all_runs.split_off(all_runs.len() - MAX_RETAINED_RUNS);
+        }
+
+        // Write v2 file atomically
+        rctile_v2::write_v2(
+            &rctile_path,
+            &all_runs,
+            self.ny,
+            self.nx,
+            self.lat_min,
+            self.lat_max,
+            self.lon_min,
+            self.lon_max,
+            self.resolution_deg as f32,
+        )?;
+
+        // Record in DB
+        db::record_tile_run(
+            conn,
+            &self.region_id,
+            self.resolution_deg,
+            &self.model_id,
+            &self.run_id,
+            Some(&self.init_time_utc),
+        )?;
+
+        let tile_str = rctile_path.to_string_lossy().to_string();
+        let size_bytes = std::fs::metadata(&rctile_path).map(|m| m.len()).ok();
+
+        db::record_tile_variable(
+            conn,
+            &self.region_id,
+            self.resolution_deg,
+            &self.model_id,
+            &self.run_id,
+            &self.variable_id,
+            &tile_str,
+            &tile_str, // no separate meta file for v2
+            &self.hours,
+            size_bytes,
+            0, // no single job_id for finalize
+        )?;
+
+        log::info!(
+            "Finalized v2: {}/{}/{} ({} runs, {} hours, {:.1} MB)",
+            self.model_id,
+            self.run_id,
+            self.variable_id,
+            all_runs.len(),
+            self.hours.len(),
+            size_bytes.unwrap_or(0) as f64 / 1_048_576.0,
+        );
+
+        Ok(rctile_path)
+    }
+}
+
+/// Process a single build_tile_hour job for the v2 pipeline.
+/// Fetches GRIB, decodes, applies gather-based mapping with conversion + snap.
+/// Returns hour data to be accumulated (does not write to disk).
+pub fn process_hour_v2(
     job: &Job,
-    tiles_dir: &Path,
-) -> Result<()> {
+    mapping_cache: &mut HashMap<String, BucketMapping>,
+) -> Result<HourResult> {
     let args: BuildTileHourArgs = serde_json::from_str(&job.args_json)
         .context("Failed to parse job args_json")?;
 
@@ -55,7 +233,7 @@ pub fn process_build_tile_hour(
 
     let (date_str, init_hour) = parse_run_id(&args.run_id)?;
 
-    // Build URLs and fetch GRIB
+    // Fetch GRIB
     let grib_url = config::build_grib_url(&model, &date_str, &init_hour, args.forecast_hour);
     let idx_url = config::build_idx_url(&model, &date_str, &init_hour, args.forecast_hour);
     let search = var_config.search.get_search(model.herbie_model);
@@ -69,19 +247,38 @@ pub fn process_build_tile_hour(
     let decoded = grib::decode_grib_message(&grib_bytes)
         .context("Failed to decode GRIB message")?;
 
-    // Determine unit conversion
+    // Build or reuse BucketMapping (cached per model)
+    if !mapping_cache.contains_key(&args.model_id) {
+        let mapping = BucketMapping::build(
+            &decoded.latitudes,
+            &decoded.longitudes,
+            region,
+            resolution_deg,
+        );
+        let empty_cells = mapping.cells.iter().filter(|c| c.sources.is_empty()).count();
+        log::info!(
+            "Built bucket mapping for {}: {}x{} ({} cells, {} empty)",
+            args.model_id,
+            mapping.ny,
+            mapping.nx,
+            mapping.cells.len(),
+            empty_cells,
+        );
+        mapping_cache.insert(args.model_id.clone(), mapping);
+    }
+    let mapping = mapping_cache.get(&args.model_id).unwrap();
+
+    // Apply mapping: gather + convert + snap
     let src_units = if decoded.units != "unknown" {
         Some(decoded.units.as_str())
     } else {
         None
     };
     let conversion = var_config.conversion_for_units(src_units);
+    let threshold = bucket_mapping::snap_threshold(&args.variable_id);
+    let grib_values = decoded.values.as_slice().unwrap();
+    let cell_values = mapping.apply(grib_values, conversion, threshold);
 
-    // Build tile statistics
-    let tile_stats = tiles::build_tile_stats(&decoded, region, resolution_deg, conversion)
-        .context("Failed to build tile stats")?;
-
-    // Build init_time_utc
     let init_time_utc = format!(
         "{}-{}-{}T{}:00:00Z",
         &date_str[..4],
@@ -90,83 +287,39 @@ pub fn process_build_tile_hour(
         &init_hour
     );
 
-    let meta = TileMeta {
-        region_id: args.region_id.clone(),
-        model_id: args.model_id.clone(),
-        run_id: args.run_id.clone(),
-        variable_id: args.variable_id.clone(),
-        lat_min: region.lat_min,
-        lat_max: region.lat_max,
-        lon_min: region.lon_min,
-        lon_max: region.lon_max,
+    let init_unix = tile_query::parse_run_id_to_unix(&args.run_id).unwrap_or(0);
+
+    Ok(HourResult {
+        model_id: args.model_id,
+        run_id: args.run_id,
+        variable_id: args.variable_id,
+        region_id: args.region_id,
+        forecast_hour: args.forecast_hour as i32,
+        cell_values,
+        init_time_utc,
+        init_unix,
+        ny: mapping.ny as u16,
+        nx: mapping.nx as u16,
         resolution_deg,
-        units: var_config.units.to_string(),
-        lon_0_360: tile_stats.lon_0_360,
-        index_lon_min: tile_stats.index_lon_min,
-        init_time_utc: Some(init_time_utc.clone()),
-    };
+        lat_min: region.lat_min as f32,
+        lat_max: region.lat_max as f32,
+        lon_min: region.lon_min as f32,
+        lon_max: region.lon_max as f32,
+    })
+}
 
-    // Record tile run
-    db::record_tile_run(
-        conn,
-        &args.region_id,
-        resolution_deg,
-        &args.model_id,
-        &args.run_id,
-        Some(&init_time_utc),
-    )?;
-
-    // Write .rctile (mmap-friendly cell-major format)
-    let (rctile_path, hours) = upsert_rctile(
-        tiles_dir,
-        region,
-        resolution_deg,
-        &args.model_id,
-        &args.run_id,
-        &args.variable_id,
-        args.forecast_hour as i32,
-        &tile_stats,
-    )?;
-
-    // Write meta.json
-    let meta_path = rctile_path.with_extension("meta.json");
-    let meta_json = serde_json::to_string_pretty(&meta)?;
-    std::fs::write(&meta_path, meta_json).context("Failed to write meta.json")?;
-
-    // Get file size
-    let size_bytes = std::fs::metadata(&rctile_path).map(|m| m.len()).ok();
-
-    // Record in tile DB
-    let tile_str = rctile_path.to_string_lossy().to_string();
-    let meta_str = meta_path.to_string_lossy().to_string();
-
-    db::record_tile_variable(
-        conn,
-        &args.region_id,
-        resolution_deg,
-        &args.model_id,
-        &args.run_id,
-        &args.variable_id,
-        &tile_str,
-        &meta_str,
-        &hours,
-        size_bytes,
-        job.id,
-    )?;
-
-    db::record_tile_hour(
-        conn,
-        &args.region_id,
-        resolution_deg,
-        &args.model_id,
-        &args.run_id,
-        &args.variable_id,
-        args.forecast_hour,
-        &tile_str,
-        job.id,
-    )?;
-
-    Ok(())
+/// Finalize all pending accumulators (called on run change or shutdown).
+pub fn finalize_all(
+    accumulators: &mut HashMap<(String, String), RunAccumulator>,
+    tiles_dir: &Path,
+    conn: &rusqlite::Connection,
+) {
+    for ((run_id, var_id), acc) in accumulators.drain() {
+        log::info!("Finalizing accumulator: {}/{}", run_id, var_id);
+        if let Err(e) = acc.finalize(tiles_dir, conn) {
+            log::error!("Failed to finalize {}/{}: {:#}", run_id, var_id, e);
+        }
+    }
 }
 
 /// Parse "run_YYYYMMDD_HH" → (YYYYMMDD, HH)
@@ -179,68 +332,4 @@ fn parse_run_id(run_id: &str) -> Result<(String, String)> {
         );
     }
     Ok((parts[1].to_string(), parts[2].to_string()))
-}
-
-/// Upsert .rctile: create if needed, then write the forecast hour.
-/// Returns (rctile_path, written_hours).
-fn upsert_rctile(
-    base_dir: &Path,
-    region: &config::TilingRegion,
-    resolution_deg: f64,
-    model_id: &str,
-    run_id: &str,
-    variable_id: &str,
-    forecast_hour: i32,
-    tile_stats: &tiles::TileStats,
-) -> Result<(PathBuf, Vec<i32>)> {
-    let res_dir = config::format_res_dir(resolution_deg);
-    let out_dir = base_dir
-        .join(region.id)
-        .join(&res_dir)
-        .join(model_id)
-        .join(run_id);
-    std::fs::create_dir_all(&out_dir).context("Failed to create tile output directory")?;
-
-    let rctile_path = out_dir.join(format!("{}.rctile", variable_id));
-    let lock_path = out_dir.join(format!("{}.rctile.lock", variable_id));
-
-    // Acquire file lock
-    use fs2::FileExt;
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
-    lock_file.lock_exclusive()?;
-
-    let result = (|| -> Result<Vec<i32>> {
-        let ny = tile_stats.ny as u16;
-        let nx = tile_stats.nx as u16;
-
-        // Create file if it doesn't exist
-        if !rctile_path.exists() {
-            let max_hours = rctile::max_hours_for_model(model_id);
-            rctile::create_rctile(
-                &rctile_path,
-                ny,
-                nx,
-                max_hours,
-                region.lat_min as f32,
-                tile_stats.index_lon_min as f32,
-                resolution_deg as f32,
-                tile_stats.lon_0_360,
-            )?;
-        }
-
-        // Extract means as flat row-major slice
-        let values = tile_stats.means.as_slice().unwrap();
-        rctile::write_hour(&rctile_path, forecast_hour, values)?;
-
-        // Read back written hours for DB recording
-        rctile::read_hours(&rctile_path)
-    })();
-
-    lock_file.unlock()?;
-    let hours = result?;
-    Ok((rctile_path, hours))
 }
