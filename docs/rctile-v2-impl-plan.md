@@ -280,13 +280,24 @@ Currently queries `tile_runs` to discover run_ids, then builds per-run file path
 
 ## Testing Strategy
 
-### Key Invariant
+### Key Invariants
 
-**No model that currently returns data should stop returning data after the migration.** The main risks are GFS (resolution change 0.1° → 0.25°) and HRRR/NAM (scatter → gather mapping), so those get extra scrutiny.
+1. **No regression**: Models that return data today (HRRR, NAM, NBM) must still return data after migration. Values within tolerance.
+2. **Fix broken models**: GFS and ECMWF are **currently broken** on the rctile v1 path — they only worked with NPZ. GFS has 84% NaN cells (0.25° native tiled at 0.1°, NN fill disabled). ECMWF has similar gaps. The v2 gather-based mapping fixes both by construction. **These models returning data is a success criterion, not a regression test.**
+
+### Current Model Status (rctile v1)
+
+| Model | Status | Issue |
+|-------|--------|-------|
+| HRRR | Working | ~16% edge NaN (NN fill handles it at <50% threshold) |
+| NAM | Working | ~2% edge NaN (NN fill handles it) |
+| NBM | Working | ~0% NaN |
+| **GFS** | **Broken** | 84% NaN, NN fill skipped (>50%), no query-time NN fallback |
+| **ECMWF** | **Broken** | Similar resolution mismatch gaps, no query-time NN fallback |
 
 ### Pre-Migration Snapshot (before any code changes)
 
-Capture current API responses as the ground truth baseline. These are saved to `tests/fixtures/v1_baseline/` and used for regression comparison.
+Capture current API responses for **working models only** as the regression baseline. GFS and ECMWF are expected to be empty/missing — their presence in v2 responses is a new feature, not a regression.
 
 ```bash
 # 3 test points: Philadelphia, Boston, rural WV
@@ -299,7 +310,7 @@ for lat_lon in "40.0,-75.4" "42.36,-71.06" "38.5,-80.5"; do
 done
 ```
 
-This gives us 12 files (4 vars × 3 locations) with every model's response. These become the regression oracle.
+This gives us 12 files (4 vars × 3 locations). The baseline will have HRRR, NAM, NBM data. GFS/ECMWF will be empty or absent — that's expected.
 
 ### Unit Tests — Step 2 (BucketMapping)
 
@@ -342,27 +353,47 @@ This gives us 12 files (4 vars × 3 locations) with every model's response. Thes
 
 Run with `dev-services.sh` against real GRIB data.
 
+**Regression (working models must stay working):**
+
 | Test | What it verifies |
 |------|-----------------|
-| `test_api_all_models` | `GET /api/timeseries/multirun?lat=40.0&lon=-75.4&variable=t2m&model=all`. Every model that had data in the v1 baseline still returns data. |
-| `test_api_gfs_not_empty` | GFS specifically returns series (was 84% NaN before). |
-| `test_api_sparse_vars` | `variable=apcp`, `variable=asnow`, `variable=snod` all return data for models that support them. |
-| `test_api_values_regression` | Compare response at 3 test points against v1 baseline snapshots. t2m: values within ±0.5°F (f32 rounding + gather vs scatter). apcp/asnow/snod: values within ±snap_threshold (0.005 in). |
+| `test_regression_hrrr_nam_nbm` | HRRR, NAM, NBM return t2m data at 3 test points. Compare against v1 baseline. Values within tolerance. |
+| `test_regression_sparse_vars` | `variable=apcp`, `variable=asnow`, `variable=snod` return data for HRRR/NAM/NBM (same models as v1 baseline). |
+| `test_regression_values` | Compare v2 response values at 3 test points against v1 baseline for HRRR/NAM/NBM. Within tolerance. |
 | `test_api_stitched` | `/api/timeseries/stitched` endpoint still works with v2 files. |
+
+**New functionality (GFS and ECMWF must now work):**
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_gfs_now_works` | GFS returns t2m series at all 3 test points. Was broken (empty) in v1. Values in sane range (0-120°F). |
+| `test_ecmwf_now_works` | ECMWF returns t2m series at all 3 test points. Was broken in v1. Values in sane range. |
+| `test_gfs_all_vars` | GFS returns data for t2m, apcp, snod (the 3 vars it supports). No empty series. |
+| `test_ecmwf_all_vars` | ECMWF returns data for t2m, apcp, snod. No empty series. |
+| `test_all_5_models` | `model=all` returns data for all 5 models (HRRR, NAM, NBM, GFS, ECMWF). This is the first time all 5 work simultaneously on the rctile path. |
+
+**Format verification:**
+
+| Test | What it verifies |
+|------|-----------------|
 | `test_file_layout` | `ls cache/tiles/ne/*/` shows model-level files (`hrrr/t2m.rctile`) not per-run dirs (`hrrr/run_*/t2m.rctile`). |
+| `test_disk_budget` | Total size of all rctile files < 500 MB (for 5 retained runs). |
+| `test_sparse_file_sizes` | For HRRR: apcp.rctile < 25% of t2m.rctile (sparsity working). |
 
 ### Regression Comparison Rules
 
-When comparing v2 responses against v1 baseline:
+When comparing v2 responses against v1 baseline **for HRRR, NAM, NBM only** (GFS/ECMWF have no v1 baseline — they were broken):
 
 | Variable | Tolerance | Why |
 |----------|-----------|-----|
-| t2m | ±0.5°F | Gather (nearest GRIB point) vs scatter (which bucket GRIB point lands in) may pick a slightly different source point. For GFS at 0.25° → 0.25° the mapping is identical; for HRRR at 0.03° the difference is sub-grid-cell. |
+| t2m | ±0.5°F | Gather (nearest GRIB point) vs scatter (which bucket GRIB point lands in) may pick a slightly different source point. For HRRR at 0.03° the difference is sub-grid-cell. |
 | apcp | ±0.005 in | Threshold snap removes sub-0.005" values. This is intentional and physically correct. |
 | asnow | ±0.005 in | Same. |
 | snod | ±0.01 in | Slightly larger snap threshold for snow depth. |
 
 Values outside tolerance → test failure → investigate before proceeding.
+
+For **GFS and ECMWF**: no v1 baseline to compare against. Instead, sanity check that values are physically reasonable (t2m between -40°F and 130°F, precip ≥ 0, snow depth ≥ 0) and cross-check against HRRR/NAM values at the same point (should be in the same ballpark — within 10°F for temperature).
 
 ### Smoke Test Checklist (manual, after full deployment)
 
