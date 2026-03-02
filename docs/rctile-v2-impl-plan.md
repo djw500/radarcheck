@@ -280,30 +280,104 @@ Currently queries `tile_runs` to discover run_ids, then builds per-run file path
 
 ## Testing Strategy
 
-### Unit tests (steps 2, 3)
-- BucketMapping: correctness of nearest-point search, no NaN, snap thresholds
-- rctile v2: round-trip write/read, elision, multi-run merge
+### Key Invariant
 
-### Integration tests (step 4)
-- Full pipeline: synthetic GRIB → mapping → accumulate → finalize → query
-- Verify values match expected (known GRIB input → known tile output)
+**No model that currently returns data should stop returning data after the migration.** The main risks are GFS (resolution change 0.1° → 0.25°) and HRRR/NAM (scatter → gather mapping), so those get extra scrutiny.
 
-### E2E test (after step 5)
-- Start workers, let them process real GRIB data
-- Query API, verify responses have all models with reasonable values
-- Compare t2m values at known location with raw GRIB values
-- Verify sparse variables have elided chunks (check file sizes)
+### Pre-Migration Snapshot (before any code changes)
 
-### Smoke test checklist
-- [ ] `cargo test -p radarcheck-core` passes
-- [ ] `cargo test -p radarcheck-worker` passes
+Capture current API responses as the ground truth baseline. These are saved to `tests/fixtures/v1_baseline/` and used for regression comparison.
+
+```bash
+# 3 test points: Philadelphia, Boston, rural WV
+for lat_lon in "40.0,-75.4" "42.36,-71.06" "38.5,-80.5"; do
+  IFS=',' read lat lon <<< "$lat_lon"
+  for var in t2m apcp asnow snod; do
+    curl -s "localhost:5001/api/timeseries/multirun?lat=$lat&lon=$lon&variable=$var&model=all" \
+      > "tests/fixtures/v1_baseline/${var}_${lat}_${lon}.json"
+  done
+done
+```
+
+This gives us 12 files (4 vars × 3 locations) with every model's response. These become the regression oracle.
+
+### Unit Tests — Step 2 (BucketMapping)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_regular_grid_1to1` | 0.25° GRIB → 0.25° tiles: each bucket maps to exactly one GRIB point. Zero NaN. |
+| `test_regular_grid_coarse_to_fine` | 0.25° GRIB → 0.1° tiles: multiple buckets map to same GRIB point. Every bucket filled. Zero NaN. |
+| `test_projected_grid_all_filled` | Synthetic Lambert 2D coords: every bucket gets a value. Zero NaN. |
+| `test_projected_grid_edge_cells` | Buckets at region boundary where Lambert cone has gaps: still filled via nearest GRIB point. |
+| `test_snap_threshold` | Inject values [0.0, 0.003, 0.006, 0.01, 0.1]. Verify 0.003 → 0.0, 0.006 → 0.01 (above threshold), 0.1 → 0.1. |
+| `test_snap_no_effect_on_t2m` | t2m snap threshold = 0.0. Values like 32.001°F pass through unchanged. |
+| `test_mapping_deterministic` | Build mapping twice from same coords → identical result. |
+| `test_apply_with_conversion` | GRIB values in Kelvin, conversion KToF. Verify output in °F. |
+
+### Unit Tests — Step 3 (rctile v2 format)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_write_read_single_run` | Write 1 run (48 hours, dense). Query 5 points. Values match exactly. |
+| `test_write_read_multi_run` | Write 3 runs with different hour counts (48, 60, 110). Query → verify run split correct, hour counts match, values match. |
+| `test_zero_chunk_elision` | Write run where 60% of cells are all-zero. Verify: chunk_size = 0 for those cells. Query returns zero-filled timeseries. Non-zero cells unaffected. |
+| `test_merge_runs` | Write file with 2 runs. Load, add 1 new run, write again. Read back → 3 runs, all values intact. |
+| `test_merge_with_expiry` | Write file with 5 runs. Merge with 1 new run, retention = 5. Verify oldest run dropped, newest 5 present. |
+| `test_atomic_write` | Write v2 file. Verify no partial file exists (temp file cleaned up, final file valid). |
+| `test_header_fields` | Write file, read header. All fields (ny, nx, n_cells, lat/lon bounds, n_runs, total_values_per_cell) correct. |
+| `test_empty_file` | Zero runs → valid file with empty runs table, all-zero index. |
+
+### Integration Tests — Step 4 (Worker Pipeline)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_full_pipeline_synthetic` | Synthetic GRIB (known values) → BucketMapping → accumulate 3 hours → finalize → query 5 points → values match expected (within f32 precision). |
+| `test_full_pipeline_gfs` | If real GFS GRIB available in cache: decode → mapping → finalize → query Philadelphia (40.0, -75.4). Verify t2m is in reasonable range (0-120°F). Verify no NaN. |
+| `test_full_pipeline_hrrr` | If real HRRR GRIB available: same as above. Verify no NaN for any of 5 test points (including edge cells). |
+| `test_sparse_var_smaller` | Process same GRIB for t2m and apcp. Verify apcp rctile file size < 50% of t2m file size (sparsity working). |
+| `test_accumulator_run_switch` | Process hour for run A, then hour for run B (different run_id). Verify run A finalized, run B accumulating. |
+| `test_finalize_merges_existing` | Process run A → finalize. Process run B → finalize. Read file → both runs present. |
+
+### E2E Tests — Step 5 (Server)
+
+Run with `dev-services.sh` against real GRIB data.
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_api_all_models` | `GET /api/timeseries/multirun?lat=40.0&lon=-75.4&variable=t2m&model=all`. Every model that had data in the v1 baseline still returns data. |
+| `test_api_gfs_not_empty` | GFS specifically returns series (was 84% NaN before). |
+| `test_api_sparse_vars` | `variable=apcp`, `variable=asnow`, `variable=snod` all return data for models that support them. |
+| `test_api_values_regression` | Compare response at 3 test points against v1 baseline snapshots. t2m: values within ±0.5°F (f32 rounding + gather vs scatter). apcp/asnow/snod: values within ±snap_threshold (0.005 in). |
+| `test_api_stitched` | `/api/timeseries/stitched` endpoint still works with v2 files. |
+| `test_file_layout` | `ls cache/tiles/ne/*/` shows model-level files (`hrrr/t2m.rctile`) not per-run dirs (`hrrr/run_*/t2m.rctile`). |
+
+### Regression Comparison Rules
+
+When comparing v2 responses against v1 baseline:
+
+| Variable | Tolerance | Why |
+|----------|-----------|-----|
+| t2m | ±0.5°F | Gather (nearest GRIB point) vs scatter (which bucket GRIB point lands in) may pick a slightly different source point. For GFS at 0.25° → 0.25° the mapping is identical; for HRRR at 0.03° the difference is sub-grid-cell. |
+| apcp | ±0.005 in | Threshold snap removes sub-0.005" values. This is intentional and physically correct. |
+| asnow | ±0.005 in | Same. |
+| snod | ±0.01 in | Slightly larger snap threshold for snow depth. |
+
+Values outside tolerance → test failure → investigate before proceeding.
+
+### Smoke Test Checklist (manual, after full deployment)
+
+- [ ] `cargo test -p radarcheck-core` — all unit tests pass
+- [ ] `cargo test -p radarcheck-worker` — all integration tests pass
 - [ ] Workers start, process jobs, produce v2 rctile files
 - [ ] `ls -la cache/tiles/ne/*/` shows model-level files (not per-run dirs)
-- [ ] API returns data for all models at test lat/lon
+- [ ] API returns data for all 5 models at Philadelphia (40.0, -75.4)
 - [ ] GFS returns data (0.25° grid, no NaN)
-- [ ] HRRR returns data (mapping fills all cells)
-- [ ] Sparse variable file sizes << t2m file sizes
+- [ ] HRRR returns data at all 3 test points (mapping fills all cells)
+- [ ] Sparse variable file sizes << t2m file sizes (check with `ls -la`)
 - [ ] Total disk usage < 500 MB for 5 retained runs
+- [ ] `/health` endpoint returns `version` confirming new binary
+- [ ] Status dashboard shows runs populating normally
+- [ ] No `chunk_size = 0 WARNING` in worker logs (would indicate mapping gap)
 
 ---
 
