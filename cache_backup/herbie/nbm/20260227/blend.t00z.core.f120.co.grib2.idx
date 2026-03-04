@@ -1,0 +1,68 @@
+1:0:d=2026022700:APTMP:2 m above ground:120 hour fcst:
+2:1553761:d=2026022700:CAPE:surface:120 hour fcst:
+3:2621155:d=2026022700:CAPE:surface:120 hour fcst:ens std dev
+4:5401424:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:5% level
+5:6267774:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:10% level
+6:7133681:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:25% level
+7:7999037:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:50% level
+8:8869756:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:75% level
+9:9750437:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:90% level
+10:10644284:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:95% level
+11:11538616:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:unknown derived fcst
+12:12706602:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:prob >50:prob fcst 255/255
+13:13260815:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:prob >65:prob fcst 255/255
+14:13745048:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:prob >70:prob fcst 255/255
+15:14224113:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:prob >75:prob fcst 255/255
+16:14699276:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:120 hour fcst:prob >85:prob fcst 255/255
+17:15169486:d=2026022700:DPT:2 m above ground:120 hour fcst:
+18:16537084:d=2026022700:DPT:2 m above ground:120 hour fcst:ens std dev
+19:18239154:d=2026022700:DSWRF:surface:120 hour fcst:
+20:19612787:d=2026022700:ELLINX:400-300 mb:120 hour fcst:
+21:20813018:d=2026022700:FICEAC:surface:114-120 hour acc fcst:
+22:21385156:d=2026022700:var discipline=10 center=7 local_table=1 parmcat=3 parm=204:surface:120 hour fcst:
+23:21571265:d=2026022700:TURB:surface - 1372 m above ground:120 hour fcst:
+24:22204532:d=2026022700:FOSINDX:surface:114-120 hour max fcst:
+25:24146480:d=2026022700:HINDEX:entire atmosphere (considered as a single layer):114-120 hour max fcst:
+26:24777716:d=2026022700:TMAX:2 m above ground:108-120 hour max fcst:
+27:26215981:d=2026022700:TMAX:2 m above ground:108-120 hour max fcst:ens std dev
+28:28058505:d=2026022700:MIXHT:entire atmosphere (considered as a single layer):120 hour fcst:
+29:30214666:d=2026022700:PCPDUR:surface:108-120 hour acc fcst:
+30:30792493:d=2026022700:APCP:surface:114-120 hour acc fcst:prob >0.254:prob fcst 255/255
+31:31755702:d=2026022700:APCP:surface:108-120 hour acc fcst:prob >0.254:prob fcst 255/255
+32:32750815:d=2026022700:TSRWE:surface:4-5 day acc fcst:prob >7.35e-05:prob fcst 255/255
+33:33343659:d=2026022700:PWTHER:surface - reserved:120 hour fcst:
+34:33914550:d=2026022700:PTYPE:surface:120 hour fcst:prob >=3 <4:prob fcst 1/1
+35:34496952:d=2026022700:PTYPE:surface:120 hour fcst:prob >=1 <2:prob fcst 1/1
+36:36541891:d=2026022700:PTYPE:surface:120 hour fcst:prob >=8 <9:prob fcst 1/1
+37:37039353:d=2026022700:PTYPE:surface:120 hour fcst:prob >=5 <7:prob fcst 1/1
+38:38433821:d=2026022700:TSTM:surface:114-120 hour acc fcst:probability forecast
+39:39110135:d=2026022700:TSTM:surface:108-120 hour acc fcst:probability forecast
+40:39802182:d=2026022700:APCP:surface:119-120 hour acc fcst:
+41:40474981:d=2026022700:APCP:surface:114-120 hour acc fcst:
+42:41597321:d=2026022700:RH:2 m above ground:120 hour fcst:
+43:43021382:d=2026022700:HTSGW:surface:120 hour fcst:10% level
+44:43683811:d=2026022700:HTSGW:surface:120 hour fcst:50% level
+45:44362560:d=2026022700:HTSGW:surface:120 hour fcst:90% level
+46:45065171:d=2026022700:HTSGW:surface:120 hour fcst:
+47:45776693:d=2026022700:HTSGW:surface:120 hour fcst:ens std dev
+48:46403234:d=2026022700:TCDC:surface:120 hour fcst:
+49:47727883:d=2026022700:TCDC:surface:120 hour fcst:ens std dev
+50:48972741:d=2026022700:SNOWLR:surface:120 hour fcst:
+51:50059309:d=2026022700:ASNOW:surface:114-120 hour acc fcst:
+52:50675841:d=2026022700:SNOWLVL:0 m above mean sea level:120 hour fcst:
+53:51591111:d=2026022700:TMP:surface:120 hour fcst:
+54:51967127:d=2026022700:TMP:2 m above ground:120 hour fcst:
+55:53364201:d=2026022700:TMP:2 m above ground:120 hour fcst:ens std dev
+56:55071472:d=2026022700:TRWDIR:entire atmosphere (considered as a single layer):120 hour fcst:
+57:56247290:d=2026022700:TRWSPD:entire atmosphere (considered as a single layer):120 hour fcst:
+58:57655424:d=2026022700:VRATE:entire atmosphere (considered as a single layer):120 hour fcst:
+59:61030497:d=2026022700:var discipline=0 center=7 local_table=1 parmcat=0 parm=206:surface:120 hour fcst:
+60:62378642:d=2026022700:WDIR:30 m above ground:120 hour fcst:
+61:63442392:d=2026022700:WDIR:80 m above ground:120 hour fcst:
+62:64506142:d=2026022700:WDIR:10 m above ground:120 hour fcst:
+63:65569892:d=2026022700:GUST:10 m above ground:120 hour fcst:
+64:66718206:d=2026022700:GUST:10 m above ground:120 hour fcst:ens std dev
+65:68460085:d=2026022700:WIND:30 m above ground:120 hour fcst:
+66:69861507:d=2026022700:WIND:80 m above ground:120 hour fcst:
+67:71322574:d=2026022700:WIND:10 m above ground:120 hour fcst:
+68:72689833:d=2026022700:WIND:10 m above ground:120 hour fcst:ens std dev

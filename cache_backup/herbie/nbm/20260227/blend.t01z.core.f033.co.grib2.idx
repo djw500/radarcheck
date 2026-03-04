@@ -1,0 +1,116 @@
+1:0:d=2026022701:APTMP:2 m above ground:33 hour fcst:
+2:1546862:d=2026022701:CDCB:reserved:33 hour fcst:
+3:2882584:d=2026022701:TCDC:reserved:33 hour fcst:
+4:3574577:d=2026022701:CDCTOP:reserved:33 hour fcst:
+5:5449872:d=2026022701:CDCB:reserved:33 hour fcst:
+6:6911533:d=2026022701:TCDC:reserved:33 hour fcst:
+7:7595780:d=2026022701:CDCTOP:reserved:33 hour fcst:
+8:9132101:d=2026022701:CDCB:reserved:33 hour fcst:
+9:9286459:d=2026022701:TCDC:reserved:33 hour fcst:
+10:9591797:d=2026022701:CDCTOP:reserved:33 hour fcst:
+11:9759273:d=2026022701:CDCB:high cloud layer:33 hour fcst:
+12:10437999:d=2026022701:TCDC:high cloud layer:33 hour fcst:
+13:10772023:d=2026022701:CAPE:surface:33 hour fcst:
+14:12030243:d=2026022701:CAPE:surface:33 hour fcst:ens std dev
+15:14693891:d=2026022701:CEIL:cloud ceiling:33 hour fcst:
+16:16482914:d=2026022701:CEIL:cloud ceiling:33 hour fcst:prob <304.8:prob fcst 3/7:probability forecast
+17:19162053:d=2026022701:CEIL:cloud ceiling:33 hour fcst:prob <609.6:prob fcst 4/7:probability forecast
+18:21841192:d=2026022701:CEIL:cloud ceiling:33 hour fcst:prob <152.4:prob fcst 2/7:probability forecast
+19:24204500:d=2026022701:CEIL:cloud ceiling:33 hour fcst:prob <914.5:prob fcst 5/7:probability forecast
+20:26883639:d=2026022701:CEIL:cloud ceiling:33 hour fcst:prob <2011.68:prob fcst 6/7:probability forecast
+21:29562778:d=2026022701:CEIL:cloud base:33 hour fcst:
+22:32635299:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:5% level
+23:33556905:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:10% level
+24:34469887:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:25% level
+25:35369756:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:50% level
+26:36266029:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:75% level
+27:37174961:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:90% level
+28:38100440:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:95% level
+29:39038986:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:unknown derived fcst
+30:40486049:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:prob >50:prob fcst 255/255
+31:41042094:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:prob >65:prob fcst 255/255
+32:41540771:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:prob >70:prob fcst 255/255
+33:42020844:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:prob >75:prob fcst 255/255
+34:42490657:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:33 hour fcst:prob >85:prob fcst 255/255
+35:42959012:d=2026022701:DPT:2 m above ground:33 hour fcst:
+36:44267669:d=2026022701:DPT:2 m above ground:33 hour fcst:ens std dev
+37:46072509:d=2026022701:DSWRF:surface:33 hour fcst:
+38:46540851:d=2026022701:RETOP:cloud top:33 hour fcst:
+39:47994108:d=2026022701:ELLINX:400-300 mb:33 hour fcst:
+40:49135718:d=2026022701:FICEAC:surface:32-33 hour acc fcst:
+41:49630085:d=2026022701:TURB:surface - 1372 m above ground:33 hour fcst:
+42:50244069:d=2026022701:WDIR:surface - 610 m above ground:33 hour fcst:
+43:50839681:d=2026022701:DIST:surface - 610 m above ground:33 hour fcst:
+44:51448245:d=2026022701:WIND:surface - 610 m above ground:33 hour fcst:
+45:52092063:d=2026022701:MAXREF:1000 m above ground:32-33 hour max fcst:
+46:53588218:d=2026022701:MIXHT:entire atmosphere (considered as a single layer):33 hour fcst:
+47:55782060:d=2026022701:APCP:surface:32-33 hour acc fcst:prob >0.254:prob fcst 255/255
+48:56570627:d=2026022701:PWTHER:surface - reserved:33 hour fcst:
+49:57155119:d=2026022701:PTYPE:surface:33 hour fcst:prob >=3 <4:prob fcst 1/1
+50:57688541:d=2026022701:PTYPE:surface:33 hour fcst:prob >=1 <2:prob fcst 1/1
+51:59440203:d=2026022701:PTYPE:surface:33 hour fcst:prob >=8 <9:prob fcst 1/1
+52:59912113:d=2026022701:PTYPE:surface:33 hour fcst:prob >=5 <7:prob fcst 1/1
+53:61147010:d=2026022701:TSTM:surface:32-33 hour acc fcst:probability forecast
+54:61712142:d=2026022701:APCP:surface:32-33 hour acc fcst:
+55:62721063:d=2026022701:RH:2 m above ground:33 hour fcst:
+56:64212008:d=2026022701:TCDC:surface:33 hour fcst:
+57:65939616:d=2026022701:TCDC:surface:33 hour fcst:ens std dev
+58:67577828:d=2026022701:SNOWLR:surface:33 hour fcst:5% level
+59:68667131:d=2026022701:SNOWLR:surface:33 hour fcst:10% level
+60:69788830:d=2026022701:SNOWLR:surface:33 hour fcst:25% level
+61:70902827:d=2026022701:SNOWLR:surface:33 hour fcst:50% level
+62:72018170:d=2026022701:SNOWLR:surface:33 hour fcst:75% level
+63:73138667:d=2026022701:SNOWLR:surface:33 hour fcst:90% level
+64:74304810:d=2026022701:SNOWLR:surface:33 hour fcst:95% level
+65:75489077:d=2026022701:SNOWLR:surface:33 hour fcst:
+66:76548692:d=2026022701:ASNOW:surface:32-33 hour acc@(fcst,dt=1 hour),missing=0:5% level
+67:77028924:d=2026022701:ASNOW:surface:32-33 hour acc@(fcst,dt=1 hour),missing=0:10% level
+68:77516612:d=2026022701:ASNOW:surface:32-33 hour acc@(fcst,dt=1 hour),missing=0:25% level
+69:78018718:d=2026022701:ASNOW:surface:32-33 hour acc@(fcst,dt=1 hour),missing=0:50% level
+70:78536074:d=2026022701:ASNOW:surface:32-33 hour acc@(fcst,dt=1 hour),missing=0:75% level
+71:79073322:d=2026022701:ASNOW:surface:32-33 hour acc@(fcst,dt=1 hour),missing=0:90% level
+72:79632690:d=2026022701:ASNOW:surface:32-33 hour acc@(fcst,dt=1 hour),missing=0:95% level
+73:80213611:d=2026022701:ASNOW:surface:32-33 hour acc fcst:
+74:80758410:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.00254:prob fcst 255/255
+75:81375217:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.00762:prob fcst 255/255
+76:81941197:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.0127:prob fcst 255/255
+77:82475968:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.01778:prob fcst 255/255
+78:82988961:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.0254:prob fcst 255/255
+79:83477800:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.0381:prob fcst 255/255
+80:83952180:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.0508:prob fcst 255/255
+81:84422116:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.0635:prob fcst 255/255
+82:84890787:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.0762:prob fcst 255/255
+83:85359242:d=2026022701:ASNOW:surface:32-33 hour acc fcst:prob >0.1016:prob fcst 255/255
+84:85827621:d=2026022701:SNOWLVL:surface:33 hour fcst:5% level
+85:86892005:d=2026022701:SNOWLVL:surface:33 hour fcst:10% level
+86:87944432:d=2026022701:SNOWLVL:surface:33 hour fcst:25% level
+87:89031352:d=2026022701:SNOWLVL:surface:33 hour fcst:50% level
+88:90120042:d=2026022701:SNOWLVL:surface:33 hour fcst:75% level
+89:91223830:d=2026022701:SNOWLVL:surface:33 hour fcst:90% level
+90:92300839:d=2026022701:SNOWLVL:surface:33 hour fcst:95% level
+91:93418928:d=2026022701:SNOWLVL:0 m above mean sea level:33 hour fcst:
+92:94438562:d=2026022701:TMP:surface:33 hour fcst:
+93:94853878:d=2026022701:TMP:2 m above ground:33 hour fcst:
+94:96208956:d=2026022701:TMP:2 m above ground:33 hour fcst:ens std dev
+95:98086370:d=2026022701:TRWDIR:entire atmosphere (considered as a single layer):33 hour fcst:
+96:99500972:d=2026022701:TRWSPD:entire atmosphere (considered as a single layer):33 hour fcst:
+97:100937555:d=2026022701:THUNC:entire atmosphere:33-34 hour missing fcst:
+98:101434262:d=2026022701:VIL:entire atmosphere:33 hour fcst:
+99:104371734:d=2026022701:VIS:surface:33 hour fcst:
+100:105455672:d=2026022701:VIS:surface:33 hour fcst:prob <1609.34:prob fcst 2/6:probability forecast
+101:108134811:d=2026022701:VIS:surface:33 hour fcst:prob <3218.69:prob fcst 3/6:probability forecast
+102:110813950:d=2026022701:VIS:surface:33 hour fcst:prob <4828.03:prob fcst 4/6:probability forecast
+103:113493089:d=2026022701:VIS:surface:33 hour fcst:prob <8046.73:prob fcst 5/6:probability forecast
+104:116172228:d=2026022701:VRATE:entire atmosphere (considered as a single layer):33 hour fcst:
+105:119207814:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=0 parm=206:surface:33 hour fcst:
+106:120482920:d=2026022701:WDIR:30 m above ground:33 hour fcst:
+107:121833699:d=2026022701:WDIR:80 m above ground:33 hour fcst:
+108:123184478:d=2026022701:WDIR:10 m above ground:33 hour fcst:
+109:124535257:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=2 parm=231:10 m above ground:33 hour fcst:
+110:125886036:d=2026022701:GUST:10 m above ground:33 hour fcst:
+111:127110360:d=2026022701:GUST:10 m above ground:33 hour fcst:ens std dev
+112:128739143:d=2026022701:WIND:30 m above ground:33 hour fcst:
+113:130158334:d=2026022701:WIND:80 m above ground:33 hour fcst:
+114:131608714:d=2026022701:WIND:10 m above ground:33 hour fcst:
+115:132989445:d=2026022701:WIND:10 m above ground:33 hour fcst:ens std dev
+116:134863009:d=2026022701:var discipline=0 center=7 local_table=1 parmcat=2 parm=232:10 m above ground:33 hour fcst:

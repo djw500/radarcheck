@@ -12,7 +12,8 @@ use radarcheck_core::{config, db};
 use anyhow::Result;
 use clap::Parser;
 use log::{error, info, warn};
-use std::path::Path;
+use rusqlite::Connection;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 #[derive(Parser, Debug)]
@@ -41,6 +42,132 @@ struct Args {
     /// Path to tiles output directory
     #[arg(long, default_value = "cache/tiles")]
     tiles_dir: String,
+
+    /// Project root (for forecast trigger script)
+    #[arg(long, default_value = "/app")]
+    project_root: String,
+}
+
+/// Models that must all be loaded before triggering auto-forecast
+const SYNOPTIC_MODELS: &[&str] = &["gfs", "nam_nest", "ecmwf_hres"];
+
+/// Check if all synoptic models are loaded for a cycle and trigger forecast.
+///
+/// Called after a synoptic model's job completes. Checks:
+/// 1. Was this the last job for this model+run?
+/// 2. Do all 3 synoptic models have complete runs at the same init hour?
+/// 3. Haven't we already triggered for this cycle?
+fn check_and_trigger_forecast(
+    conn: &Connection,
+    completed_model: &str,
+    completed_run_id: &str,
+    project_root: &Path,
+) {
+    if !SYNOPTIC_MODELS.contains(&completed_model) {
+        return;
+    }
+
+    // 1. Check if this model+run is fully loaded
+    let remaining = match db::remaining_jobs_for_run(conn, completed_model, completed_run_id) {
+        Ok(n) => n,
+        Err(e) => {
+            warn!("Failed to check remaining jobs: {}", e);
+            return;
+        }
+    };
+    if remaining > 0 {
+        return;
+    }
+
+    // Extract init hour from run_id (e.g., "run_20260224_12" → "12")
+    let parts: Vec<&str> = completed_run_id.split('_').collect();
+    let init_hour = match parts.get(2) {
+        Some(h) => *h,
+        None => return,
+    };
+
+    info!(
+        "Synoptic run complete: {}/{} -- checking other models",
+        completed_model, completed_run_id
+    );
+
+    // 2. Check all 3 synoptic models have complete runs at this init hour
+    let mut cycle_runs: Vec<String> = Vec::new();
+    for model in SYNOPTIC_MODELS {
+        match db::latest_complete_run_at_hour(conn, model, init_hour) {
+            Ok(Some(run)) => {
+                cycle_runs.push(run);
+            }
+            Ok(None) => {
+                info!("  {} has no complete {}Z run yet -- not triggering", model, init_hour);
+                return;
+            }
+            Err(e) => {
+                warn!("  Failed to check {}: {}", model, e);
+                return;
+            }
+        }
+    }
+
+    // 3. Dedup: build a cycle ID from the run IDs
+    let mut sorted_runs = cycle_runs.clone();
+    sorted_runs.sort();
+    let cycle_id = format!("{}Z_{}", init_hour, sorted_runs.join("_"));
+
+    let trigger_file = project_root.join("cache/last_forecast_trigger.txt");
+    if let Ok(last) = std::fs::read_to_string(&trigger_file) {
+        if last.trim() == cycle_id {
+            info!("  Already triggered forecast for cycle {}", cycle_id);
+            return;
+        }
+    }
+
+    // All conditions met — trigger forecast
+    info!("All synoptic models loaded for {}Z cycle: {:?}", init_hour, cycle_runs);
+    info!("Triggering auto-forecast...");
+
+    // Write trigger file BEFORE spawning to prevent double-trigger
+    if let Some(parent) = trigger_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) = std::fs::write(&trigger_file, &cycle_id) {
+        error!("Failed to write trigger file: {}", e);
+    }
+
+    // Spawn forecast in background (fire and forget)
+    let script = project_root.join("scripts/run-forecast.sh");
+    let log_path = project_root.join("cache/forecast_run.log");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(log_file) => {
+            // Strip CLAUDECODE env var so nested claude -p works
+            let env: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os()
+                .filter(|(k, _)| k != "CLAUDECODE")
+                .collect();
+            match std::process::Command::new("bash")
+                .arg(&script)
+                .stdout(log_file.try_clone().unwrap_or_else(|_| log_file))
+                .stderr(std::process::Stdio::from(
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                        .expect("reopen log"),
+                ))
+                .env_clear()
+                .envs(env)
+                .current_dir(project_root)
+                .spawn()
+            {
+                Ok(_) => info!("Forecast script spawned in background"),
+                Err(e) => error!("Failed to spawn forecast script: {}", e),
+            }
+        }
+        Err(e) => error!("Failed to open forecast log file: {}", e),
+    }
 }
 
 fn main() -> Result<()> {
@@ -67,6 +194,7 @@ fn main() -> Result<()> {
 
     let db_path = Path::new(&args.db_path);
     let tiles_dir = Path::new(&args.tiles_dir);
+    let project_root = PathBuf::from(&args.project_root);
     let conn = db::open_db(db_path)?;
 
     let poll_duration = std::time::Duration::from_secs_f64(args.poll_interval);
@@ -183,6 +311,14 @@ fn main() -> Result<()> {
                         info!(
                             "Job {} done in {:.1}s ({} total)",
                             job.id, elapsed, processed
+                        );
+
+                        // Check if this completes a synoptic model's run
+                        check_and_trigger_forecast(
+                            &conn,
+                            &hour_result.model_id,
+                            &hour_result.run_id,
+                            &project_root,
                         );
                     }
                     Err(e) => {

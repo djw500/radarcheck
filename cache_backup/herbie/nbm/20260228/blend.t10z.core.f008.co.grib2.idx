@@ -1,0 +1,338 @@
+1:0:d=2026022810:APTMP:2 m above ground:8 hour fcst:
+2:1576740:d=2026022810:CDCB:reserved:8 hour fcst:
+3:2878896:d=2026022810:TCDC:reserved:8 hour fcst:
+4:3566917:d=2026022810:CDCTOP:reserved:8 hour fcst:
+5:5278438:d=2026022810:CDCB:reserved:8 hour fcst:
+6:6639081:d=2026022810:TCDC:reserved:8 hour fcst:
+7:7257270:d=2026022810:CDCTOP:reserved:8 hour fcst:
+8:8665154:d=2026022810:CDCB:reserved:8 hour fcst:
+9:8782701:d=2026022810:TCDC:reserved:8 hour fcst:
+10:8981525:d=2026022810:CDCTOP:reserved:8 hour fcst:
+11:9110779:d=2026022810:CDCB:high cloud layer:8 hour fcst:
+12:9663601:d=2026022810:TCDC:high cloud layer:8 hour fcst:
+13:9943864:d=2026022810:ICPRB:152.4 m above mean sea level:8 hour fcst:
+14:9970003:d=2026022810:ICPRB:304.8 m above mean sea level:8 hour fcst:
+15:10009401:d=2026022810:ICPRB:457.2 m above mean sea level:8 hour fcst:
+16:10089800:d=2026022810:ICPRB:609.6 m above mean sea level:8 hour fcst:
+17:10210529:d=2026022810:ICPRB:762 m above mean sea level:8 hour fcst:
+18:10363064:d=2026022810:ICPRB:914.4 m above mean sea level:8 hour fcst:
+19:10528869:d=2026022810:ICPRB:1066.8 m above mean sea level:8 hour fcst:
+20:10697017:d=2026022810:ICPRB:1219.2 m above mean sea level:8 hour fcst:
+21:10862234:d=2026022810:ICPRB:1371.6 m above mean sea level:8 hour fcst:
+22:11026224:d=2026022810:ICPRB:1524 m above mean sea level:8 hour fcst:
+23:11184295:d=2026022810:ICPRB:1676.4 m above mean sea level:8 hour fcst:
+24:11333358:d=2026022810:ICPRB:1828.8 m above mean sea level:8 hour fcst:
+25:11476767:d=2026022810:ICPRB:1981.2 m above mean sea level:8 hour fcst:
+26:11611169:d=2026022810:ICPRB:2133.6 m above mean sea level:8 hour fcst:
+27:11745410:d=2026022810:ICPRB:2286 m above mean sea level:8 hour fcst:
+28:11883203:d=2026022810:ICPRB:2438.4 m above mean sea level:8 hour fcst:
+29:12020870:d=2026022810:ICPRB:2590.8 m above mean sea level:8 hour fcst:
+30:12168142:d=2026022810:ICPRB:2743.2 m above mean sea level:8 hour fcst:
+31:12318989:d=2026022810:ICPRB:2895.6 m above mean sea level:8 hour fcst:
+32:12488831:d=2026022810:ICPRB:3048 m above mean sea level:8 hour fcst:
+33:12658972:d=2026022810:ICPRB:3200.4 m above mean sea level:8 hour fcst:
+34:12842304:d=2026022810:ICPRB:3352.8 m above mean sea level:8 hour fcst:
+35:13029292:d=2026022810:ICPRB:3505.2 m above mean sea level:8 hour fcst:
+36:13220038:d=2026022810:ICPRB:3657.6 m above mean sea level:8 hour fcst:
+37:13415132:d=2026022810:ICPRB:3810 m above mean sea level:8 hour fcst:
+38:13608547:d=2026022810:ICPRB:3962.4 m above mean sea level:8 hour fcst:
+39:13792670:d=2026022810:ICPRB:4114.8 m above mean sea level:8 hour fcst:
+40:13970664:d=2026022810:ICPRB:4267.2 m above mean sea level:8 hour fcst:
+41:14141067:d=2026022810:ICPRB:4419.6 m above mean sea level:8 hour fcst:
+42:14305571:d=2026022810:ICPRB:4572 m above mean sea level:8 hour fcst:
+43:14459485:d=2026022810:ICPRB:4724.4 m above mean sea level:8 hour fcst:
+44:14597798:d=2026022810:ICPRB:4876.8 m above mean sea level:8 hour fcst:
+45:14728067:d=2026022810:ICPRB:5029.2 m above mean sea level:8 hour fcst:
+46:14843308:d=2026022810:ICPRB:5181.6 m above mean sea level:8 hour fcst:
+47:14953406:d=2026022810:ICPRB:5334 m above mean sea level:8 hour fcst:
+48:15056087:d=2026022810:ICPRB:5486.4 m above mean sea level:8 hour fcst:
+49:15149195:d=2026022810:ICPRB:5638.8 m above mean sea level:8 hour fcst:
+50:15236487:d=2026022810:ICPRB:5791.2 m above mean sea level:8 hour fcst:
+51:15321529:d=2026022810:ICPRB:5943.6 m above mean sea level:8 hour fcst:
+52:15404907:d=2026022810:ICPRB:6096 m above mean sea level:8 hour fcst:
+53:15484976:d=2026022810:ICPRB:6248.4 m above mean sea level:8 hour fcst:
+54:15565446:d=2026022810:ICPRB:6400.8 m above mean sea level:8 hour fcst:
+55:15641423:d=2026022810:ICPRB:6553.2 m above mean sea level:8 hour fcst:
+56:15713589:d=2026022810:ICPRB:6705.6 m above mean sea level:8 hour fcst:
+57:15780656:d=2026022810:ICPRB:6858 m above mean sea level:8 hour fcst:
+58:15836509:d=2026022810:ICPRB:7010.4 m above mean sea level:8 hour fcst:
+59:15887846:d=2026022810:ICPRB:7162.8 m above mean sea level:8 hour fcst:
+60:15933928:d=2026022810:ICPRB:7315.2 m above mean sea level:8 hour fcst:
+61:15962157:d=2026022810:ICPRB:7467.6 m above mean sea level:8 hour fcst:
+62:15980193:d=2026022810:ICPRB:7620 m above mean sea level:8 hour fcst:
+63:15995572:d=2026022810:ICPRB:7772.4 m above mean sea level:8 hour fcst:
+64:16005308:d=2026022810:ICPRB:7924.8 m above mean sea level:8 hour fcst:
+65:16007081:d=2026022810:ICPRB:8077.2 m above mean sea level:8 hour fcst:
+66:16008751:d=2026022810:ICPRB:8229.6 m above mean sea level:8 hour fcst:
+67:16010321:d=2026022810:ICPRB:8382 m above mean sea level:8 hour fcst:
+68:16010822:d=2026022810:ICPRB:8534.4 m above mean sea level:8 hour fcst:
+69:16011138:d=2026022810:ICPRB:8686.8 m above mean sea level:8 hour fcst:
+70:16011422:d=2026022810:ICPRB:8839.2 m above mean sea level:8 hour fcst:
+71:16011636:d=2026022810:ICPRB:8991.6 m above mean sea level:8 hour fcst:
+72:16011850:d=2026022810:ICPRB:9144 m above mean sea level:8 hour fcst:
+73:16012064:d=2026022810:ICSEV:152.4 m above mean sea level:8 hour fcst:
+74:16029768:d=2026022810:ICSEV:304.8 m above mean sea level:8 hour fcst:
+75:16050961:d=2026022810:ICSEV:457.2 m above mean sea level:8 hour fcst:
+76:16084576:d=2026022810:ICSEV:609.6 m above mean sea level:8 hour fcst:
+77:16127183:d=2026022810:ICSEV:762 m above mean sea level:8 hour fcst:
+78:16179808:d=2026022810:ICSEV:914.4 m above mean sea level:8 hour fcst:
+79:16239195:d=2026022810:ICSEV:1066.8 m above mean sea level:8 hour fcst:
+80:16300338:d=2026022810:ICSEV:1219.2 m above mean sea level:8 hour fcst:
+81:16360085:d=2026022810:ICSEV:1371.6 m above mean sea level:8 hour fcst:
+82:16418779:d=2026022810:ICSEV:1524 m above mean sea level:8 hour fcst:
+83:16475189:d=2026022810:ICSEV:1676.4 m above mean sea level:8 hour fcst:
+84:16530476:d=2026022810:ICSEV:1828.8 m above mean sea level:8 hour fcst:
+85:16582794:d=2026022810:ICSEV:1981.2 m above mean sea level:8 hour fcst:
+86:16635968:d=2026022810:ICSEV:2133.6 m above mean sea level:8 hour fcst:
+87:16688266:d=2026022810:ICSEV:2286 m above mean sea level:8 hour fcst:
+88:16743949:d=2026022810:ICSEV:2438.4 m above mean sea level:8 hour fcst:
+89:16802327:d=2026022810:ICSEV:2590.8 m above mean sea level:8 hour fcst:
+90:16864087:d=2026022810:ICSEV:2743.2 m above mean sea level:8 hour fcst:
+91:16928761:d=2026022810:ICSEV:2895.6 m above mean sea level:8 hour fcst:
+92:16998031:d=2026022810:ICSEV:3048 m above mean sea level:8 hour fcst:
+93:17068665:d=2026022810:ICSEV:3200.4 m above mean sea level:8 hour fcst:
+94:17144347:d=2026022810:ICSEV:3352.8 m above mean sea level:8 hour fcst:
+95:17223820:d=2026022810:ICSEV:3505.2 m above mean sea level:8 hour fcst:
+96:17305956:d=2026022810:ICSEV:3657.6 m above mean sea level:8 hour fcst:
+97:17389928:d=2026022810:ICSEV:3810 m above mean sea level:8 hour fcst:
+98:17472792:d=2026022810:ICSEV:3962.4 m above mean sea level:8 hour fcst:
+99:17551917:d=2026022810:ICSEV:4114.8 m above mean sea level:8 hour fcst:
+100:17629480:d=2026022810:ICSEV:4267.2 m above mean sea level:8 hour fcst:
+101:17704425:d=2026022810:ICSEV:4419.6 m above mean sea level:8 hour fcst:
+102:17775703:d=2026022810:ICSEV:4572 m above mean sea level:8 hour fcst:
+103:17843048:d=2026022810:ICSEV:4724.4 m above mean sea level:8 hour fcst:
+104:17905718:d=2026022810:ICSEV:4876.8 m above mean sea level:8 hour fcst:
+105:17964618:d=2026022810:ICSEV:5029.2 m above mean sea level:8 hour fcst:
+106:18017661:d=2026022810:ICSEV:5181.6 m above mean sea level:8 hour fcst:
+107:18067813:d=2026022810:ICSEV:5334 m above mean sea level:8 hour fcst:
+108:18114479:d=2026022810:ICSEV:5486.4 m above mean sea level:8 hour fcst:
+109:18156655:d=2026022810:ICSEV:5638.8 m above mean sea level:8 hour fcst:
+110:18197494:d=2026022810:ICSEV:5791.2 m above mean sea level:8 hour fcst:
+111:18237855:d=2026022810:ICSEV:5943.6 m above mean sea level:8 hour fcst:
+112:18276592:d=2026022810:ICSEV:6096 m above mean sea level:8 hour fcst:
+113:18315077:d=2026022810:ICSEV:6248.4 m above mean sea level:8 hour fcst:
+114:18351793:d=2026022810:ICSEV:6400.8 m above mean sea level:8 hour fcst:
+115:18386519:d=2026022810:ICSEV:6553.2 m above mean sea level:8 hour fcst:
+116:18418338:d=2026022810:ICSEV:6705.6 m above mean sea level:8 hour fcst:
+117:18447420:d=2026022810:ICSEV:6858 m above mean sea level:8 hour fcst:
+118:18473344:d=2026022810:ICSEV:7010.4 m above mean sea level:8 hour fcst:
+119:18497357:d=2026022810:ICSEV:7162.8 m above mean sea level:8 hour fcst:
+120:18517091:d=2026022810:ICSEV:7315.2 m above mean sea level:8 hour fcst:
+121:18533622:d=2026022810:ICSEV:7467.6 m above mean sea level:8 hour fcst:
+122:18544883:d=2026022810:ICSEV:7620 m above mean sea level:8 hour fcst:
+123:18554692:d=2026022810:ICSEV:7772.4 m above mean sea level:8 hour fcst:
+124:18560882:d=2026022810:ICSEV:7924.8 m above mean sea level:8 hour fcst:
+125:18564537:d=2026022810:ICSEV:8077.2 m above mean sea level:8 hour fcst:
+126:18566196:d=2026022810:ICSEV:8229.6 m above mean sea level:8 hour fcst:
+127:18567730:d=2026022810:ICSEV:8382 m above mean sea level:8 hour fcst:
+128:18568473:d=2026022810:ICSEV:8534.4 m above mean sea level:8 hour fcst:
+129:18568816:d=2026022810:ICSEV:8686.8 m above mean sea level:8 hour fcst:
+130:18569159:d=2026022810:ICSEV:8839.2 m above mean sea level:8 hour fcst:
+131:18569502:d=2026022810:ICSEV:8991.6 m above mean sea level:8 hour fcst:
+132:18569716:d=2026022810:ICSEV:9144 m above mean sea level:8 hour fcst:
+133:18569930:d=2026022810:SIPD:152.4 m above mean sea level:8 hour fcst:
+134:18581720:d=2026022810:SIPD:304.8 m above mean sea level:8 hour fcst:
+135:18597129:d=2026022810:SIPD:457.2 m above mean sea level:8 hour fcst:
+136:18620314:d=2026022810:SIPD:609.6 m above mean sea level:8 hour fcst:
+137:18647292:d=2026022810:SIPD:762 m above mean sea level:8 hour fcst:
+138:18675217:d=2026022810:SIPD:914.4 m above mean sea level:8 hour fcst:
+139:18703013:d=2026022810:SIPD:1066.8 m above mean sea level:8 hour fcst:
+140:18731148:d=2026022810:SIPD:1219.2 m above mean sea level:8 hour fcst:
+141:18758949:d=2026022810:SIPD:1371.6 m above mean sea level:8 hour fcst:
+142:18785117:d=2026022810:SIPD:1524 m above mean sea level:8 hour fcst:
+143:18808992:d=2026022810:SIPD:1676.4 m above mean sea level:8 hour fcst:
+144:18832152:d=2026022810:SIPD:1828.8 m above mean sea level:8 hour fcst:
+145:18854386:d=2026022810:SIPD:1981.2 m above mean sea level:8 hour fcst:
+146:18875550:d=2026022810:SIPD:2133.6 m above mean sea level:8 hour fcst:
+147:18897920:d=2026022810:SIPD:2286 m above mean sea level:8 hour fcst:
+148:18921514:d=2026022810:SIPD:2438.4 m above mean sea level:8 hour fcst:
+149:18945382:d=2026022810:SIPD:2590.8 m above mean sea level:8 hour fcst:
+150:18972014:d=2026022810:SIPD:2743.2 m above mean sea level:8 hour fcst:
+151:19002175:d=2026022810:SIPD:2895.6 m above mean sea level:8 hour fcst:
+152:19036878:d=2026022810:SIPD:3048 m above mean sea level:8 hour fcst:
+153:19070671:d=2026022810:SIPD:3200.4 m above mean sea level:8 hour fcst:
+154:19107310:d=2026022810:SIPD:3352.8 m above mean sea level:8 hour fcst:
+155:19143620:d=2026022810:SIPD:3505.2 m above mean sea level:8 hour fcst:
+156:19182353:d=2026022810:SIPD:3657.6 m above mean sea level:8 hour fcst:
+157:19220099:d=2026022810:SIPD:3810 m above mean sea level:8 hour fcst:
+158:19257874:d=2026022810:SIPD:3962.4 m above mean sea level:8 hour fcst:
+159:19293305:d=2026022810:SIPD:4114.8 m above mean sea level:8 hour fcst:
+160:19327826:d=2026022810:SIPD:4267.2 m above mean sea level:8 hour fcst:
+161:19362467:d=2026022810:SIPD:4419.6 m above mean sea level:8 hour fcst:
+162:19396968:d=2026022810:SIPD:4572 m above mean sea level:8 hour fcst:
+163:19430128:d=2026022810:SIPD:4724.4 m above mean sea level:8 hour fcst:
+164:19460284:d=2026022810:SIPD:4876.8 m above mean sea level:8 hour fcst:
+165:19489322:d=2026022810:SIPD:5029.2 m above mean sea level:8 hour fcst:
+166:19514933:d=2026022810:SIPD:5181.6 m above mean sea level:8 hour fcst:
+167:19539706:d=2026022810:SIPD:5334 m above mean sea level:8 hour fcst:
+168:19563469:d=2026022810:SIPD:5486.4 m above mean sea level:8 hour fcst:
+169:19583039:d=2026022810:SIPD:5638.8 m above mean sea level:8 hour fcst:
+170:19600962:d=2026022810:SIPD:5791.2 m above mean sea level:8 hour fcst:
+171:19619254:d=2026022810:SIPD:5943.6 m above mean sea level:8 hour fcst:
+172:19636237:d=2026022810:SIPD:6096 m above mean sea level:8 hour fcst:
+173:19654161:d=2026022810:SIPD:6248.4 m above mean sea level:8 hour fcst:
+174:19672289:d=2026022810:SIPD:6400.8 m above mean sea level:8 hour fcst:
+175:19689358:d=2026022810:SIPD:6553.2 m above mean sea level:8 hour fcst:
+176:19706149:d=2026022810:SIPD:6705.6 m above mean sea level:8 hour fcst:
+177:19723968:d=2026022810:SIPD:6858 m above mean sea level:8 hour fcst:
+178:19739157:d=2026022810:SIPD:7010.4 m above mean sea level:8 hour fcst:
+179:19754906:d=2026022810:SIPD:7162.8 m above mean sea level:8 hour fcst:
+180:19772255:d=2026022810:SIPD:7315.2 m above mean sea level:8 hour fcst:
+181:19787000:d=2026022810:SIPD:7467.6 m above mean sea level:8 hour fcst:
+182:19794967:d=2026022810:SIPD:7620 m above mean sea level:8 hour fcst:
+183:19803243:d=2026022810:SIPD:7772.4 m above mean sea level:8 hour fcst:
+184:19810683:d=2026022810:SIPD:7924.8 m above mean sea level:8 hour fcst:
+185:19812505:d=2026022810:SIPD:8077.2 m above mean sea level:8 hour fcst:
+186:19814252:d=2026022810:SIPD:8229.6 m above mean sea level:8 hour fcst:
+187:19815935:d=2026022810:SIPD:8382 m above mean sea level:8 hour fcst:
+188:19816455:d=2026022810:SIPD:8534.4 m above mean sea level:8 hour fcst:
+189:19816771:d=2026022810:SIPD:8686.8 m above mean sea level:8 hour fcst:
+190:19817058:d=2026022810:SIPD:8839.2 m above mean sea level:8 hour fcst:
+191:19817272:d=2026022810:SIPD:8991.6 m above mean sea level:8 hour fcst:
+192:19817486:d=2026022810:SIPD:9144 m above mean sea level:8 hour fcst:
+193:19817700:d=2026022810:CAPE:surface:8 hour fcst:
+194:21239723:d=2026022810:CAPE:surface:8 hour fcst:ens std dev
+195:24378867:d=2026022810:CEIL:cloud ceiling:8 hour fcst:
+196:25987997:d=2026022810:CEIL:cloud ceiling:8 hour fcst:prob <304.8:prob fcst 3/7:probability forecast
+197:29265043:d=2026022810:CEIL:cloud ceiling:8 hour fcst:prob <609.6:prob fcst 4/7:probability forecast
+198:32542089:d=2026022810:CEIL:cloud ceiling:8 hour fcst:prob <152.4:prob fcst 2/7:probability forecast
+199:35819135:d=2026022810:CEIL:cloud ceiling:8 hour fcst:prob <914.5:prob fcst 5/7:probability forecast
+200:39096181:d=2026022810:CEIL:cloud ceiling:8 hour fcst:prob <2011.68:prob fcst 6/7:probability forecast
+201:42373227:d=2026022810:CEIL:cloud base:8 hour fcst:
+202:45480426:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:5% level
+203:46394914:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:10% level
+204:47303964:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:25% level
+205:48206450:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:50% level
+206:49111941:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:75% level
+207:50027382:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:90% level
+208:50957677:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:95% level
+209:51900842:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:unknown derived fcst
+210:53261561:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:prob >50:prob fcst 255/255
+211:53814595:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:prob >65:prob fcst 255/255
+212:54308962:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:prob >70:prob fcst 255/255
+213:54792568:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:prob >75:prob fcst 255/255
+214:55264692:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=19 parm=239:surface:8 hour fcst:prob >85:prob fcst 255/255
+215:55733047:d=2026022810:DPT:2 m above ground:8 hour fcst:
+216:57217572:d=2026022810:DPT:2 m above ground:8 hour fcst:ens std dev
+217:58919237:d=2026022810:DRYTPROB:surface:5-8 hour acc fcst:prob >0:prob fcst 0/21:probability forecast
+218:60012006:d=2026022810:DSWRF:surface:8 hour fcst:
+219:62455924:d=2026022810:RETOP:cloud top:8 hour fcst:
+220:63928865:d=2026022810:ELLINX:400-300 mb:8 hour fcst:
+221:65027983:d=2026022810:FICEAC:surface:7-8 hour acc fcst:
+222:65502623:d=2026022810:FICEAC:surface:2-8 hour acc fcst:
+223:66003277:d=2026022810:var discipline=10 center=7 local_table=1 parmcat=3 parm=204:surface:8 hour fcst:
+224:66191426:d=2026022810:FICEAC:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:5% level
+225:66659793:d=2026022810:FICEAC:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:10% level
+226:67128160:d=2026022810:FICEAC:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:25% level
+227:67596527:d=2026022810:FICEAC:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:50% level
+228:68064894:d=2026022810:FICEAC:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:75% level
+229:68533261:d=2026022810:FICEAC:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:90% level
+230:69001628:d=2026022810:FICEAC:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:95% level
+231:69470705:d=2026022810:FICEAC:surface:2-8 hour acc fcst:prob >0.254:prob fcst 255/255
+232:69946066:d=2026022810:FICEAC:surface:2-8 hour acc fcst:prob >2.54:prob fcst 255/255
+233:70414457:d=2026022810:FICEAC:surface:2-8 hour acc fcst:prob >6.35:prob fcst 255/255
+234:70882836:d=2026022810:FICEAC:surface:2-8 hour acc fcst:prob >12.7:prob fcst 255/255
+235:71351215:d=2026022810:FICEAC:surface:2-8 hour acc fcst:prob >25.4:prob fcst 255/255
+236:71819594:d=2026022810:TURB:surface - 1372 m above ground:8 hour fcst:
+237:72463748:d=2026022810:WDIR:surface - 610 m above ground:8 hour fcst:
+238:72965657:d=2026022810:DIST:surface - 610 m above ground:8 hour fcst:
+239:73475070:d=2026022810:WIND:surface - 610 m above ground:8 hour fcst:
+240:73993820:d=2026022810:FOSINDX:surface:2-8 hour max fcst:
+241:75917909:d=2026022810:HINDEX:entire atmosphere (considered as a single layer):2-8 hour max fcst:
+242:76566927:d=2026022810:MAXREF:1000 m above ground:7-8 hour max fcst:
+243:78022434:d=2026022810:MIXHT:entire atmosphere (considered as a single layer):8 hour fcst:
+244:80349297:d=2026022810:APCP:surface:7-8 hour acc fcst:prob >0.254:prob fcst 255/255
+245:81094622:d=2026022810:APCP:surface:2-8 hour acc fcst:prob >0.254:prob fcst 255/255
+246:81923716:d=2026022810:PWTHER:surface - reserved:8 hour fcst:
+247:82511362:d=2026022810:PTYPE:surface:8 hour fcst:prob >=3 <4:prob fcst 1/1
+248:83013314:d=2026022810:PTYPE:surface:8 hour fcst:prob >=1 <2:prob fcst 1/1
+249:84640960:d=2026022810:PTYPE:surface:8 hour fcst:prob >=8 <9:prob fcst 1/1
+250:85112455:d=2026022810:PTYPE:surface:8 hour fcst:prob >=5 <7:prob fcst 1/1
+251:86264237:d=2026022810:TSTM:surface:7-8 hour acc fcst:probability forecast
+252:86822801:d=2026022810:TSTM:surface:5-8 hour acc fcst:probability forecast
+253:87409495:d=2026022810:TSTM:surface:2-8 hour acc fcst:probability forecast
+254:88029422:d=2026022810:APCP:surface:7-8 hour acc fcst:
+255:88972761:d=2026022810:APCP:surface:2-8 hour acc fcst:
+256:90181012:d=2026022810:RH:2 m above ground:8 hour fcst:
+257:91673018:d=2026022810:HTSGW:surface:8 hour fcst:10% level
+258:92323174:d=2026022810:HTSGW:surface:8 hour fcst:50% level
+259:92995032:d=2026022810:HTSGW:surface:8 hour fcst:90% level
+260:93654312:d=2026022810:HTSGW:surface:8 hour fcst:
+261:94359335:d=2026022810:HTSGW:surface:8 hour fcst:ens std dev
+262:94987928:d=2026022810:TCDC:surface:8 hour fcst:
+263:96600502:d=2026022810:TCDC:surface:8 hour fcst:ens std dev
+264:98170126:d=2026022810:SNOWLR:surface:8 hour fcst:5% level
+265:99217919:d=2026022810:SNOWLR:surface:8 hour fcst:10% level
+266:100331434:d=2026022810:SNOWLR:surface:8 hour fcst:25% level
+267:101429425:d=2026022810:SNOWLR:surface:8 hour fcst:50% level
+268:102535219:d=2026022810:SNOWLR:surface:8 hour fcst:75% level
+269:103654088:d=2026022810:SNOWLR:surface:8 hour fcst:90% level
+270:104809684:d=2026022810:SNOWLR:surface:8 hour fcst:95% level
+271:105983107:d=2026022810:SNOWLR:surface:8 hour fcst:
+272:107018034:d=2026022810:ASNOW:surface:7-8 hour acc@(fcst,dt=1 hour),missing=0:5% level
+273:107503021:d=2026022810:ASNOW:surface:7-8 hour acc@(fcst,dt=1 hour),missing=0:10% level
+274:107991943:d=2026022810:ASNOW:surface:7-8 hour acc@(fcst,dt=1 hour),missing=0:25% level
+275:108490326:d=2026022810:ASNOW:surface:7-8 hour acc@(fcst,dt=1 hour),missing=0:50% level
+276:108995967:d=2026022810:ASNOW:surface:7-8 hour acc@(fcst,dt=1 hour),missing=0:75% level
+277:109515768:d=2026022810:ASNOW:surface:7-8 hour acc@(fcst,dt=1 hour),missing=0:90% level
+278:110051915:d=2026022810:ASNOW:surface:7-8 hour acc@(fcst,dt=1 hour),missing=0:95% level
+279:110597559:d=2026022810:ASNOW:surface:7-8 hour acc fcst:
+280:111116675:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.00254:prob fcst 255/255
+281:111710044:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.00762:prob fcst 255/255
+282:112245203:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.0127:prob fcst 255/255
+283:112756309:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.01778:prob fcst 255/255
+284:113248077:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.0254:prob fcst 255/255
+285:113723467:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.0381:prob fcst 255/255
+286:114194327:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.0508:prob fcst 255/255
+287:114663551:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.0635:prob fcst 255/255
+288:115132232:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.0762:prob fcst 255/255
+289:115600704:d=2026022810:ASNOW:surface:7-8 hour acc fcst:prob >0.1016:prob fcst 255/255
+290:116069083:d=2026022810:ASNOW:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:5% level
+291:116589812:d=2026022810:ASNOW:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:10% level
+292:117119278:d=2026022810:ASNOW:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:25% level
+293:117663391:d=2026022810:ASNOW:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:50% level
+294:118225506:d=2026022810:ASNOW:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:75% level
+295:118819878:d=2026022810:ASNOW:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:90% level
+296:119446246:d=2026022810:ASNOW:surface:2-8 hour acc@(fcst,dt=6 hour),missing=0:95% level
+297:120093147:d=2026022810:ASNOW:surface:2-8 hour acc fcst:
+298:120687011:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.00254:prob fcst 255/255
+299:121315940:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.0254:prob fcst 255/255
+300:121863391:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.0508:prob fcst 255/255
+301:122390585:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.0762:prob fcst 255/255
+302:122903144:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.1016:prob fcst 255/255
+303:123403537:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.127:prob fcst 255/255
+304:123890584:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.1524:prob fcst 255/255
+305:124369194:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.2032:prob fcst 255/255
+306:124838904:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.254:prob fcst 255/255
+307:125307303:d=2026022810:ASNOW:surface:2-8 hour acc fcst:prob >0.3048:prob fcst 255/255
+308:125775682:d=2026022810:SNOWLVL:surface:8 hour fcst:5% level
+309:126857878:d=2026022810:SNOWLVL:surface:8 hour fcst:10% level
+310:127927729:d=2026022810:SNOWLVL:surface:8 hour fcst:25% level
+311:128965021:d=2026022810:SNOWLVL:surface:8 hour fcst:50% level
+312:130056910:d=2026022810:SNOWLVL:surface:8 hour fcst:75% level
+313:131125069:d=2026022810:SNOWLVL:surface:8 hour fcst:90% level
+314:132234837:d=2026022810:SNOWLVL:surface:8 hour fcst:95% level
+315:133379216:d=2026022810:SNOWLVL:0 m above mean sea level:8 hour fcst:
+316:134340408:d=2026022810:TMP:surface:8 hour fcst:
+317:134771255:d=2026022810:TMP:2 m above ground:8 hour fcst:
+318:136221127:d=2026022810:TMP:2 m above ground:8 hour fcst:ens std dev
+319:137919255:d=2026022810:TRWDIR:entire atmosphere (considered as a single layer):8 hour fcst:
+320:139166190:d=2026022810:TRWSPD:entire atmosphere (considered as a single layer):8 hour fcst:
+321:140503015:d=2026022810:THUNC:entire atmosphere:8-9 hour missing fcst:
+322:140996857:d=2026022810:VIL:entire atmosphere:8 hour fcst:
+323:143871145:d=2026022810:VIS:surface:8 hour fcst:
+324:144732713:d=2026022810:VIS:surface:8 hour fcst:prob <1609.34:prob fcst 2/6:probability forecast
+325:148009759:d=2026022810:VIS:surface:8 hour fcst:prob <3218.69:prob fcst 3/6:probability forecast
+326:151286805:d=2026022810:VIS:surface:8 hour fcst:prob <4828.03:prob fcst 4/6:probability forecast
+327:154563851:d=2026022810:VIS:surface:8 hour fcst:prob <8046.73:prob fcst 5/6:probability forecast
+328:157840897:d=2026022810:VRATE:entire atmosphere (considered as a single layer):8 hour fcst:
+329:161172637:d=2026022810:var discipline=0 center=7 local_table=1 parmcat=0 parm=206:surface:8 hour fcst:
+330:162671860:d=2026022810:WDIR:30 m above ground:8 hour fcst:
+331:163933616:d=2026022810:WDIR:80 m above ground:8 hour fcst:
+332:165195372:d=2026022810:WDIR:10 m above ground:8 hour fcst:
+333:166457128:d=2026022810:GUST:10 m above ground:8 hour fcst:
+334:167628725:d=2026022810:GUST:10 m above ground:8 hour fcst:ens std dev
+335:169216092:d=2026022810:WIND:30 m above ground:8 hour fcst:
+336:170547768:d=2026022810:WIND:80 m above ground:8 hour fcst:
+337:171907317:d=2026022810:WIND:10 m above ground:8 hour fcst:
+338:173209296:d=2026022810:WIND:10 m above ground:8 hour fcst:ens std dev

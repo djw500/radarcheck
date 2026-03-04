@@ -20,12 +20,15 @@ NWS_BASE = "https://api.weather.gov"
 NWS_HEADERS = {"User-Agent": "RadarCheck/1.0", "Accept": "application/geo+json"}
 
 # Model+variable combos for near-term (days=2)
+# max_runs limits how many runs to keep (newest first)
+# synoptic_only filters to 00/06/12/18Z init hours
 NEAR_TERM = [
-    ("hrrr", "asnow"), ("hrrr", "snod"), ("hrrr", "apcp"), ("hrrr", "t2m"),
-    ("nam_nest", "snod"), ("nam_nest", "apcp"), ("nam_nest", "t2m"),
-    ("gfs", "snod"), ("gfs", "apcp"), ("gfs", "t2m"),
-    ("nbm", "asnow"), ("nbm", "apcp"), ("nbm", "t2m"),
-    ("ecmwf_hres", "snod"), ("ecmwf_hres", "apcp"), ("ecmwf_hres", "t2m"),
+    ("hrrr", "asnow", 4, True), ("hrrr", "snod", 4, True),
+    ("hrrr", "apcp", 4, True), ("hrrr", "t2m", 4, True),
+    ("gfs", "snod", 4, False), ("gfs", "apcp", 4, False), ("gfs", "t2m", 4, False),
+    ("nbm", "asnow", 4, True), ("nbm", "apcp", 4, True), ("nbm", "t2m", 4, True),
+    ("ecmwf_hres", "snod", 4, False), ("ecmwf_hres", "apcp", 4, False),
+    ("ecmwf_hres", "t2m", 4, False),
 ]
 
 # Extended range (days=1, for forecast_hour > 168)
@@ -35,7 +38,7 @@ EXTENDED = [
 ]
 
 
-def fetch_multirun(lat, lon, model, variable, days):
+def fetch_multirun(lat, lon, model, variable, days, max_runs=0, synoptic_only=False):
     """Fetch timeseries data from local API and compact it."""
     url = f"{API_BASE}/api/timeseries/multirun"
     params = {"lat": lat, "lon": lon, "model": model, "variable": variable, "days": days}
@@ -52,8 +55,18 @@ def fetch_multirun(lat, lon, model, variable, days):
 
     runs = []
     for key, run_data in sorted(runs_raw.items(), key=lambda x: x[1].get("init_time", "")):
+        if synoptic_only:
+            # Filter to 00/06/12/18Z runs
+            run_id = run_data.get("run_id", "")
+            parts = run_id.split("_")
+            if len(parts) == 3:
+                try:
+                    if int(parts[2]) % 6 != 0:
+                        continue
+                except ValueError:
+                    pass
+
         series = run_data.get("series", [])
-        # Compact: [forecast_hour, value]
         compact_series = [[pt["forecast_hour"], round(pt["value"], 3)] for pt in series]
         values = [pt["value"] for pt in series]
         peak = round(max(values), 3) if values else 0
@@ -66,6 +79,11 @@ def fetch_multirun(lat, lon, model, variable, days):
             "n_points": len(series),
             "series": compact_series,
         })
+
+    # Keep only the newest N runs
+    if max_runs > 0 and len(runs) > max_runs:
+        runs = runs[-max_runs:]
+
     return {"runs": runs}
 
 
@@ -206,9 +224,12 @@ def main():
         nws_future = pool.submit(fetch_nws_data, lat, lon)
 
         # Near-term model data
-        for model, var in NEAR_TERM:
+        for model, var, max_runs, synoptic_only in NEAR_TERM:
             key = (model, var, "near")
-            futures[key] = pool.submit(fetch_multirun, lat, lon, model, var, days=2)
+            futures[key] = pool.submit(
+                fetch_multirun, lat, lon, model, var, days=2,
+                max_runs=max_runs, synoptic_only=synoptic_only,
+            )
 
         # Extended range model data
         for model, var in EXTENDED:

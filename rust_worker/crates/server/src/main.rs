@@ -6,6 +6,7 @@
 mod status;
 
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
@@ -410,19 +411,33 @@ fn multirun_blocking(
 
     for model_id in models_to_query {
         let res = config::get_tile_resolution_by_id(region_id, model_id);
-        // v2: one file per (model, variable) — all runs inside
-        let rctile_path = tiles_dir
-            .join(region_id)
-            .join(&config::format_res_dir(res))
-            .join(model_id)
-            .join(format!("{}.rctile", variable_id));
+        let res_dir = config::format_res_dir(res);
 
-        let point_result = match mmap_cache.query_point_v2(&rctile_path, lat, lon) {
-            Some(r) => r,
-            None => continue,
+        // Collect all runs from per-run rctile files in variable directory
+        let var_dir = tiles_dir
+            .join(region_id)
+            .join(&res_dir)
+            .join(model_id)
+            .join(variable_id);
+
+        let point_runs = read_all_runs_from_dir(&var_dir, lat, lon, mmap_cache);
+
+        // Fallback: try legacy single-file path if no per-run files found
+        let point_runs = if point_runs.is_empty() {
+            let legacy_path = tiles_dir
+                .join(region_id)
+                .join(&res_dir)
+                .join(model_id)
+                .join(format!("{}.rctile", variable_id));
+            match mmap_cache.query_point_v2(&legacy_path, lat, lon) {
+                Some(r) => r.runs,
+                None => continue,
+            }
+        } else {
+            point_runs
         };
 
-        for run_data in &point_result.runs {
+        for run_data in &point_runs {
             if run_data.init_unix < cutoff_unix {
                 continue;
             }
@@ -571,17 +586,35 @@ fn stitched_blocking(
     let cutoff_unix = now_unix - cutoff_seconds;
 
     let res = config::get_tile_resolution_by_id(region_id, model_id);
+    let res_dir = config::format_res_dir(res);
 
-    // v2: one file per (model, variable) — all runs inside
-    let rctile_path = tiles_dir
+    // Read from per-run rctile files in variable directory
+    let var_dir = tiles_dir
         .join(region_id)
-        .join(&config::format_res_dir(res))
+        .join(&res_dir)
         .join(model_id)
-        .join(format!("{}.rctile", variable_id));
+        .join(variable_id);
 
-    let point_result = mmap_cache
-        .query_point_v2(&rctile_path, lat, lon)
-        .ok_or_else(|| anyhow::anyhow!("No data available"))?;
+    let mut all_point_runs = read_all_runs_from_dir(&var_dir, lat, lon, mmap_cache);
+
+    // Fallback: try legacy single-file path
+    if all_point_runs.is_empty() {
+        let legacy_path = tiles_dir
+            .join(region_id)
+            .join(&res_dir)
+            .join(model_id)
+            .join(format!("{}.rctile", variable_id));
+        if let Some(r) = mmap_cache.query_point_v2(&legacy_path, lat, lon) {
+            all_point_runs = r.runs;
+        }
+    }
+
+    if all_point_runs.is_empty() {
+        anyhow::bail!("No data available");
+    }
+
+    // Wrap in a PointResult-like structure for the rest of the function
+    let point_result = rctile_v2::PointResult { runs: all_point_runs };
 
     // Collect all runs with their data
     struct RunInfo {
@@ -773,6 +806,36 @@ async fn api_writeup_audio_generate() -> Response {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Read all runs from per-run rctile files in a variable directory.
+/// Each file contains exactly 1 run. Returns all PointRunData collected.
+fn read_all_runs_from_dir(
+    var_dir: &Path,
+    lat: f64,
+    lon: f64,
+    mmap_cache: &MmapCache,
+) -> Vec<rctile_v2::PointRunData> {
+    let mut runs = Vec::new();
+    let entries = match std::fs::read_dir(var_dir) {
+        Ok(e) => e,
+        Err(_) => return runs,
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.extension() != Some(OsStr::new("rctile")) {
+            continue;
+        }
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) if n.starts_with("run_") => n,
+            _ => continue,
+        };
+        let _ = name;
+        if let Some(pr) = mmap_cache.query_point_v2(&path, lat, lon) {
+            runs.extend(pr.runs);
+        }
+    }
+    runs
+}
 
 fn error_response(status: u16, message: &str) -> Response {
     let status_code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);

@@ -629,6 +629,147 @@ mod tests {
         assert_eq!(u16::from_le_bytes([data[36], data[37]]), 3); // total_values_per_cell
     }
 
+    /// Simulate partial finalization: write hours 0-4 for a run, then merge
+    /// hours 5-9 for the SAME run. Verifies all 10 hours survive with correct
+    /// per-cell values. This catches the Vec<Vec<f32>> merge bug where treating
+    /// cell_values as flat corrupted the data.
+    #[test]
+    fn test_partial_finalize_merge_same_run() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.rctile");
+
+        let ny = 4u16;
+        let nx = 5u16;
+        let n_cells = ny as usize * nx as usize;
+
+        // Batch 1: hours 0-4
+        let hours_batch1: Vec<i32> = (0..5).collect();
+        let run_batch1 = make_run("run_20260301_12", 1740830400, &hours_batch1, ny as usize, nx as usize, 10.0);
+
+        // Also write a different run to ensure it survives the merge
+        let other_run = make_run("run_20260301_06", 1740808800, &[0, 1, 2], ny as usize, nx as usize, 50.0);
+
+        write_v2(&path, &[other_run.clone(), run_batch1], ny, nx, 33.0, 37.0, -88.0, -83.0, 1.0).unwrap();
+
+        // Verify batch 1 wrote correctly
+        let data = fs::read(&path).unwrap();
+        let result = query_point_v2(&data, 34.5, -86.5).unwrap();
+        assert_eq!(result.runs.len(), 2);
+        let run12z = result.runs.iter().find(|r| r.run_id == "run_20260301_12").unwrap();
+        assert_eq!(run12z.hours.len(), 5, "Batch 1 should have 5 hours");
+
+        // Load existing, merge batch 2 (hours 5-9) into the same run
+        let mut existing = load_all_runs(&data).unwrap();
+        assert_eq!(existing.len(), 2);
+
+        // Simulate what the fixed finalize merge does:
+        let hours_batch2: Vec<i32> = (5..10).collect();
+        let run_batch2 = make_run("run_20260301_12", 1740830400, &hours_batch2, ny as usize, nx as usize, 10.0);
+
+        // Find existing run and merge new hours
+        let existing_run = existing.iter_mut().find(|r| r.run_id == "run_20260301_12").unwrap();
+        for (hi, &hour) in run_batch2.hours.iter().enumerate() {
+            if !existing_run.hours.contains(&hour) {
+                existing_run.hours.push(hour);
+                for cell_idx in 0..existing_run.cell_values.len() {
+                    let val = run_batch2.cell_values.get(cell_idx)
+                        .and_then(|cv| cv.get(hi).copied())
+                        .unwrap_or(f32::NAN);
+                    existing_run.cell_values[cell_idx].push(val);
+                }
+            }
+        }
+        // Sort hours within the merged run
+        let mut hour_order: Vec<usize> = (0..existing_run.hours.len()).collect();
+        hour_order.sort_by_key(|&i| existing_run.hours[i]);
+        let sorted_hours: Vec<i32> = hour_order.iter().map(|&i| existing_run.hours[i]).collect();
+        for cell in &mut existing_run.cell_values {
+            let sorted: Vec<f32> = hour_order.iter().map(|&i| cell[i]).collect();
+            *cell = sorted;
+        }
+        existing_run.hours = sorted_hours;
+
+        write_v2(&path, &existing, ny, nx, 33.0, 37.0, -88.0, -83.0, 1.0).unwrap();
+
+        // Read back and verify ALL 10 hours are present with correct values
+        let data2 = fs::read(&path).unwrap();
+        let result2 = query_point_v2(&data2, 34.5, -86.5).unwrap();
+
+        // Other run should still be there
+        assert_eq!(result2.runs.len(), 2, "Should still have 2 runs after merge");
+        let other = result2.runs.iter().find(|r| r.run_id == "run_20260301_06").unwrap();
+        assert_eq!(other.hours.len(), 3, "Other run should be untouched");
+
+        // Merged run should have all 10 hours
+        let merged = result2.runs.iter().find(|r| r.run_id == "run_20260301_12").unwrap();
+        assert_eq!(merged.hours, (0..10).collect::<Vec<i32>>(), "Should have hours 0-9 in order");
+        assert_eq!(merged.values.len(), 10, "Should have 10 values");
+
+        // Verify actual values: cell (1,1) = cell_idx 6
+        // make_run formula: base_val + cell_idx * 0.1 + hour * 0.01
+        let cell_idx = 6;
+        for (i, &h) in merged.hours.iter().enumerate() {
+            let expected = 10.0 + cell_idx as f32 * 0.1 + h as f32 * 0.01;
+            assert!(
+                (merged.values[i] - expected).abs() < 1e-4,
+                "Hour {} at cell {}: got {} expected {} (batch merge value mismatch)",
+                h, cell_idx, merged.values[i], expected
+            );
+        }
+    }
+
+    /// Test that merging duplicate hours (already present) is idempotent.
+    #[test]
+    fn test_merge_duplicate_hours_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.rctile");
+
+        let ny = 3u16;
+        let nx = 3u16;
+
+        let run = make_run("run_20260301_00", 1740787200, &[0, 3, 6, 9], ny as usize, nx as usize, 20.0);
+        write_v2(&path, &[run.clone()], ny, nx, 40.0, 43.0, -75.0, -72.0, 1.0).unwrap();
+
+        // Load and "merge" the same hours again (simulates re-processing)
+        let data = fs::read(&path).unwrap();
+        let mut existing = load_all_runs(&data).unwrap();
+        let existing_run = existing.iter_mut().find(|r| r.run_id == "run_20260301_00").unwrap();
+
+        let overlap_run = make_run("run_20260301_00", 1740787200, &[3, 6, 9, 12], ny as usize, nx as usize, 20.0);
+        for (hi, &hour) in overlap_run.hours.iter().enumerate() {
+            if !existing_run.hours.contains(&hour) {
+                existing_run.hours.push(hour);
+                for cell_idx in 0..existing_run.cell_values.len() {
+                    existing_run.cell_values[cell_idx].push(overlap_run.cell_values[cell_idx][hi]);
+                }
+            }
+        }
+
+        // Sort
+        let mut hour_order: Vec<usize> = (0..existing_run.hours.len()).collect();
+        hour_order.sort_by_key(|&i| existing_run.hours[i]);
+        let sorted_hours: Vec<i32> = hour_order.iter().map(|&i| existing_run.hours[i]).collect();
+        for cell in &mut existing_run.cell_values {
+            let sorted: Vec<f32> = hour_order.iter().map(|&i| cell[i]).collect();
+            *cell = sorted;
+        }
+        existing_run.hours = sorted_hours;
+
+        write_v2(&path, &existing, ny, nx, 40.0, 43.0, -75.0, -72.0, 1.0).unwrap();
+
+        let data2 = fs::read(&path).unwrap();
+        let result = query_point_v2(&data2, 41.5, -73.5).unwrap();
+        assert_eq!(result.runs.len(), 1);
+        // Should have 5 unique hours: 0, 3, 6, 9, 12
+        assert_eq!(result.runs[0].hours, vec![0, 3, 6, 9, 12]);
+        assert_eq!(result.runs[0].values.len(), 5);
+
+        // Verify original hours kept their values (not overwritten)
+        let cell_idx = 4;
+        let expected_h0 = 20.0 + cell_idx as f32 * 0.1 + 0.0 * 0.01;
+        assert!((result.runs[0].values[0] - expected_h0).abs() < 1e-4);
+    }
+
     #[test]
     fn test_empty_file() {
         let dir = TempDir::new().unwrap();

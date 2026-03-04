@@ -379,6 +379,9 @@ def cleanup_old_runs():
     """Clean up old tile runs using tiered retention:
     - Keep up to MAX_SYNOPTIC_RUNS synoptic runs (00, 06, 12, 18z)
     - Keep up to MAX_HOURLY_RUNS recent hourly runs (for HRRR etc)
+
+    Handles both v1 (run_* directories under model/) and v2 (run_*.rctile
+    files under model/variable/ subdirectories).
     """
     # Open DB connection once
     conn = init_db(repomap.get("DB_PATH"))
@@ -404,51 +407,93 @@ def cleanup_old_runs():
                     if not os.path.isdir(model_dir):
                         continue
 
-                    # Get runs sorted newest to oldest
+                    max_syn, max_hr = _get_retention(model_id)
+
+                    # v1: run_* directories directly under model_dir
                     runs = sorted(
                         [r for r in os.listdir(model_dir) if r.startswith("run_") and os.path.isdir(os.path.join(model_dir, r))],
                         reverse=True
                     )
 
-                    if not runs:
-                        continue
+                    if runs:
+                        _apply_tiered_retention_dirs(conn, model_dir, runs, model_id, region_id, res, max_syn, max_hr)
 
-                    # Separate synoptic (00, 06, 12, 18z) from hourly runs
-                    synoptic_runs = []
-                    hourly_runs = []
-                    for run_id in runs:
-                        try:
-                            init_hour = int(run_id.split('_')[2])
-                            if init_hour % 6 == 0:
-                                synoptic_runs.append(run_id)
-                            else:
-                                hourly_runs.append(run_id)
-                        except (IndexError, ValueError):
-                            hourly_runs.append(run_id)
-
-                    # Keep top N synoptic + top M hourly (per-model)
-                    max_syn, max_hr = _get_retention(model_id)
-                    keep_synoptic = set(synoptic_runs[:max_syn])
-                    keep_hourly = set(hourly_runs[:max_hr])
-                    keep_all = keep_synoptic | keep_hourly
-
-                    runs_to_remove = [r for r in runs if r not in keep_all]
-
-                    if runs_to_remove:
-                        logger.info(f"Tile cleanup {model_id}: keeping {len(keep_synoptic)} synoptic + {len(keep_hourly)} hourly, removing {len(runs_to_remove)}")
-
-                    for old_run in runs_to_remove:
-                        old_run_dir = os.path.join(model_dir, old_run)
-                        logger.info(f"Removing old tile run: {model_id}/{old_run}")
-                        try:
-                            import shutil
-                            shutil.rmtree(old_run_dir)
-                            # Remove from DB as well
-                            delete_tile_run(conn, region_id, res, model_id, old_run)
-                        except Exception as e:
-                            logger.error(f"Failed to remove {old_run_dir}: {e}")
+                    # v2: variable subdirectories containing run_*.rctile files
+                    for var_entry in os.listdir(model_dir):
+                        var_dir = os.path.join(model_dir, var_entry)
+                        if not os.path.isdir(var_dir) or var_entry.startswith("run_"):
+                            continue  # skip v1 run dirs
+                        run_files = sorted(
+                            [f for f in os.listdir(var_dir) if f.startswith("run_") and f.endswith(".rctile")],
+                            reverse=True
+                        )
+                        if run_files:
+                            _apply_tiered_retention_files(conn, var_dir, run_files, model_id, region_id, res, max_syn, max_hr)
     finally:
         conn.close()
+
+
+def _apply_tiered_retention_dirs(conn, model_dir, runs, model_id, region_id, res, max_syn, max_hr):
+    """Apply tiered retention to v1 run_* directories."""
+    import shutil
+    synoptic_runs = []
+    hourly_runs = []
+    for run_id in runs:
+        try:
+            init_hour = int(run_id.split('_')[2])
+            if init_hour % 6 == 0:
+                synoptic_runs.append(run_id)
+            else:
+                hourly_runs.append(run_id)
+        except (IndexError, ValueError):
+            hourly_runs.append(run_id)
+
+    keep_all = set(synoptic_runs[:max_syn]) | set(hourly_runs[:max_hr])
+    runs_to_remove = [r for r in runs if r not in keep_all]
+
+    if runs_to_remove:
+        logger.info(f"Tile cleanup {model_id} (v1 dirs): removing {len(runs_to_remove)}")
+
+    for old_run in runs_to_remove:
+        old_run_dir = os.path.join(model_dir, old_run)
+        logger.info(f"Removing old tile run dir: {model_id}/{old_run}")
+        try:
+            shutil.rmtree(old_run_dir)
+            delete_tile_run(conn, region_id, res, model_id, old_run)
+        except Exception as e:
+            logger.error(f"Failed to remove {old_run_dir}: {e}")
+
+
+def _apply_tiered_retention_files(conn, var_dir, run_files, model_id, region_id, res, max_syn, max_hr):
+    """Apply tiered retention to v2 run_*.rctile files in a variable directory."""
+    synoptic_files = []
+    hourly_files = []
+    for fname in run_files:
+        run_id = fname.replace(".rctile", "")
+        try:
+            init_hour = int(run_id.split('_')[2])
+            if init_hour % 6 == 0:
+                synoptic_files.append(fname)
+            else:
+                hourly_files.append(fname)
+        except (IndexError, ValueError):
+            hourly_files.append(fname)
+
+    keep_all = set(synoptic_files[:max_syn]) | set(hourly_files[:max_hr])
+    files_to_remove = [f for f in run_files if f not in keep_all]
+
+    if files_to_remove:
+        logger.info(f"Tile cleanup {model_id} (v2 files): removing {len(files_to_remove)} from {os.path.basename(var_dir)}")
+
+    for fname in files_to_remove:
+        fpath = os.path.join(var_dir, fname)
+        run_id = fname.replace(".rctile", "")
+        logger.info(f"Removing old rctile: {model_id}/{os.path.basename(var_dir)}/{fname}")
+        try:
+            os.remove(fpath)
+            delete_tile_run(conn, region_id, res, model_id, run_id)
+        except Exception as e:
+            logger.error(f"Failed to remove {fpath}: {e}")
 
 
 def main():

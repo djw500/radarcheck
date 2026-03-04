@@ -30,6 +30,9 @@ fs2 = "0.4"
 # Memory-mapped file I/O for .rctile point queries
 memmap2 = "0.9"
 
+# Date/time for forecast trigger lookback
+chrono = "0.4"
+
 # Logging
 log = "0.4"
 

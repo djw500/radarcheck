@@ -1,0 +1,15 @@
+{
+  "region_id": "ne",
+  "model_id": "nbm",
+  "run_id": "run_20260301_18",
+  "variable_id": "t2m",
+  "lat_min": 33.0,
+  "lat_max": 47.0,
+  "lon_min": -88.0,
+  "lon_max": -66.0,
+  "resolution_deg": 0.1,
+  "units": "°F",
+  "lon_0_360": true,
+  "index_lon_min": 272.0,
+  "init_time_utc": "2026-03-01T18:00:00Z"
+}

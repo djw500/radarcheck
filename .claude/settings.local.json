@@ -66,7 +66,29 @@
       "Bash(tmux send-keys:*)",
       "Bash(docker:*)",
       "Bash(docker info:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(git -C /Users/djweiss/github/radarcheck log --oneline origin/main..HEAD)",
+      "Bash(git -C /Users/djweiss/github/radarcheck push origin main)",
+      "Bash(~/.fly/bin/flyctl secrets list:*)",
+      "WebFetch(domain:radarcheck.fly.dev)",
+      "Bash(git -C /Users/djweiss/github/radarcheck add app.py)",
+      "Bash(git -C:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(gh auth status:*)",
+      "Bash(brew list:*)",
+      "Bash(brew install:*)",
+      "Bash(gh auth login:*)",
+      "Bash(claude extensions list:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.stagehand.dev)",
+      "Bash(/opt/X11/bin/xhost:*)",
+      "Bash(defaults read:*)",
+      "Bash(defaults write:*)",
+      "Bash(bash dev-services.sh restart)",
+      "Bash(ps aux:*)",
+      "Bash(ps:*)",
+      "Bash(done)"
     ]
   }
 }

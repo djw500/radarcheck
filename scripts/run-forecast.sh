@@ -68,7 +68,7 @@ The JSON file contains:
   - \`series\`: array of \`[forecast_hour, value]\` pairs
 - \`extended_range.{gfs|ecmwf_hres}.{apcp|t2m}\`: Extended range (GFS to 384h, ECMWF to 240h). Look at forecast_hour > 168 for Day 7+ signals.
 
-**Models**: hrrr, nam_nest, gfs, nbm, ecmwf_hres
+**Models**: hrrr, gfs, nbm, ecmwf_hres (latest 4 synoptic runs each)
 **Variables**: asnow (accumulated snowfall, hrrr/nbm), snod (snow depth), apcp (precip), t2m (temperature)
 **Units**: asnow/snod/apcp in inches, t2m in Fahrenheit
 

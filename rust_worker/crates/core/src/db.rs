@@ -190,6 +190,55 @@ pub fn cancel_siblings(conn: &Connection, job: &Job) -> Result<usize> {
     Ok(count)
 }
 
+// ── Forecast trigger helpers ────────────────────────────────────────────────
+
+/// Count pending + processing jobs for a specific model+run.
+pub fn remaining_jobs_for_run(conn: &Connection, model_id: &str, run_id: &str) -> Result<i64> {
+    let model_like = format!("%\"model_id\":\"{}\"%", model_id);
+    let run_like = format!("%\"run_id\":\"{}\"%", run_id);
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM jobs
+         WHERE status IN ('pending', 'processing')
+           AND args_json LIKE ?1
+           AND args_json LIKE ?2",
+        params![model_like, run_like],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Find the most recent fully-loaded run for a model at a given init hour.
+/// Looks back 3 days. A run is "fully loaded" if it has an entry in tile_runs
+/// and 0 pending/processing jobs.
+pub fn latest_complete_run_at_hour(
+    conn: &Connection,
+    model_id: &str,
+    init_hour: &str,
+) -> Result<Option<String>> {
+    let now = chrono::Utc::now();
+    for days_back in 0..3i64 {
+        let dt = now - chrono::Duration::days(days_back);
+        let date_str = dt.format("%Y%m%d").to_string();
+        let run_id = format!("run_{}_{}", date_str, init_hour);
+
+        // Check if tile_runs has this run (any region/resolution)
+        let has_tiles: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM tile_runs WHERE model_id = ?1 AND run_id = ?2",
+            params![model_id, run_id],
+            |row| row.get(0),
+        )?;
+        if !has_tiles {
+            continue;
+        }
+
+        // Check 0 remaining jobs
+        if remaining_jobs_for_run(conn, model_id, &run_id)? == 0 {
+            return Ok(Some(run_id));
+        }
+    }
+    Ok(None)
+}
+
 // ── Tile metadata recording ─────────────────────────────────────────────────
 
 pub fn record_tile_run(
@@ -250,6 +299,29 @@ pub fn record_tile_variable(
             hours_json,
             size_bytes.map(|s| s as i64),
         ],
+    )?;
+    Ok(())
+}
+
+/// Delete all tile metadata records for a specific run (used by retention cleanup).
+pub fn delete_tile_run_records(
+    conn: &Connection,
+    region_id: &str,
+    resolution_deg: f64,
+    model_id: &str,
+    run_id: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM tile_hours WHERE region_id=?1 AND resolution_deg=?2 AND model_id=?3 AND run_id=?4",
+        params![region_id, resolution_deg, model_id, run_id],
+    )?;
+    conn.execute(
+        "DELETE FROM tile_variables WHERE region_id=?1 AND resolution_deg=?2 AND model_id=?3 AND run_id=?4",
+        params![region_id, resolution_deg, model_id, run_id],
+    )?;
+    conn.execute(
+        "DELETE FROM tile_runs WHERE region_id=?1 AND resolution_deg=?2 AND model_id=?3 AND run_id=?4",
+        params![region_id, resolution_deg, model_id, run_id],
     )?;
     Ok(())
 }

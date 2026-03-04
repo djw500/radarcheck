@@ -1,0 +1,15 @@
+{
+  "region_id": "ne",
+  "model_id": "nbm",
+  "run_id": "run_20260228_06",
+  "variable_id": "asnow",
+  "lat_min": 33.0,
+  "lat_max": 47.0,
+  "lon_min": -88.0,
+  "lon_max": -66.0,
+  "resolution_deg": 0.1,
+  "units": "in",
+  "lon_0_360": true,
+  "index_lon_min": 272.0,
+  "init_time_utc": "2026-02-28T06:00:00Z"
+}
