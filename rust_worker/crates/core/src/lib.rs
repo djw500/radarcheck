@@ -10,6 +10,7 @@ pub mod idx;
 pub mod npz;
 pub mod rctile;
 pub mod rctile_v2;
+pub mod solar;
 pub mod tile_query;
 pub mod tiles;
 pub mod worker;
