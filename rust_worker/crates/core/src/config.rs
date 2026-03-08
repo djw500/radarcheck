@@ -309,8 +309,8 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
         },
         "dswrf" => VariableConfig {
             id: "dswrf",
-            display_name: "Solar Radiation",
-            units: "W/m²",
+            display_name: "Solar",
+            units: "% clear sky",
             conversion: Conversion::None,
             search: VariableSearch {
                 default: ":DSWRF:surface",

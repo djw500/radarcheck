@@ -250,8 +250,8 @@ WEATHER_VARIABLES = {
         "model_exclusions": ["hrrr", "gfs", "nam_nest", "ecmwf_hres"],
     },
     "dswrf": {
-        "display_name": "Solar Radiation",
-        "units": "W/m²",
+        "display_name": "Solar",
+        "units": "% clear sky",
         "short_name": "dswrf",
         "colormap": "viridis",
         "vmin": 0,
