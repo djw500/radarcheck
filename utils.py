@@ -53,6 +53,8 @@ def convert_units(data: Any, conversion: Optional[str]) -> Any:
         return data * 9 / 5 + 32
     if conversion == "pa_to_mb":
         return data / 100.0
+    if conversion == "fraction_to_pct":
+        return data * 100.0
     return data
 
 

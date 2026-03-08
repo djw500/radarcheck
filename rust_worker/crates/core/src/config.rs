@@ -44,6 +44,7 @@ pub enum Conversion {
     KgM2SToInHr,
     PaToMb,
     MToFt,
+    FractionToPct,
     None,
 }
 
@@ -58,6 +59,7 @@ impl Conversion {
             Conversion::KgM2SToInHr => value * 0.0393701 * 3600.0,
             Conversion::PaToMb => value / 100.0,
             Conversion::MToFt => value * 3.28084,
+            Conversion::FractionToPct => value * 100.0,
             Conversion::None => value,
         }
     }
@@ -243,6 +245,25 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             is_accumulation: false,
             model_exclusions: &["nbm"],
         },
+        "cloud_cover" => VariableConfig {
+            id: "cloud_cover",
+            display_name: "Cloud Cover",
+            units: "%",
+            conversion: Conversion::None,
+            search: VariableSearch {
+                default: ":TCDC:entire atmosphere",
+                overrides: &[
+                    ("nbm", ":SKY:surface"),
+                    ("ifs", ":tcc:"),
+                ],
+            },
+            unit_conversions_by_units: &[
+                ("(0 - 1)", Conversion::FractionToPct),
+                ("Proportion", Conversion::FractionToPct),
+            ],
+            is_accumulation: false,
+            model_exclusions: &[],
+        },
         _ => return None,
     })
 }
@@ -279,7 +300,7 @@ pub fn build_idx_url(model: &ModelConfig, date: &str, init_hour: &str, forecast_
 pub static ALL_MODEL_IDS: &[&str] = &["hrrr", "nam_nest", "gfs", "nbm", "ecmwf_hres"];
 
 /// All tile build variable IDs (the 4 variables built by the scheduler)
-pub static TILE_BUILD_VARIABLE_IDS: &[&str] = &["t2m", "apcp", "asnow", "snod"];
+pub static TILE_BUILD_VARIABLE_IDS: &[&str] = &["t2m", "apcp", "asnow", "snod", "cloud_cover"];
 
 /// Get tile resolution for model+region by region_id string
 pub fn get_tile_resolution_by_id(region_id: &str, model_id: &str) -> f64 {

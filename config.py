@@ -248,6 +248,24 @@ WEATHER_VARIABLES = {
         # NBM only
         "model_exclusions": ["hrrr", "gfs", "nam_nest", "ecmwf_hres"],
     },
+    "cloud_cover": {
+        "display_name": "Cloud Cover",
+        "units": "%",
+        "short_name": "cloud_cover",
+        "colormap": "viridis",
+        "vmin": 0,
+        "vmax": 100,
+        "category": "cloud",
+        "herbie_search": {
+            "default": ":TCDC:entire atmosphere",
+            "nbm": ":SKY:surface",
+            "ifs": ":tcc:",
+        },
+        "unit_conversions_by_units": {
+            "(0 - 1)": "fraction_to_pct",
+            "Proportion": "fraction_to_pct",
+        },
+    },
 }
 
 MODELS = {
