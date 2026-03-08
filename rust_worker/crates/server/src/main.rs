@@ -410,7 +410,7 @@ fn multirun_blocking(
     let mut results = serde_json::Map::new();
 
     for model_id in models_to_query {
-        let res = config::get_tile_resolution_by_id(region_id, model_id);
+        let res = config::get_tile_resolution_for_variable(region_id, model_id, variable_id);
         let res_dir = config::format_res_dir(res);
 
         // Collect all runs from per-run rctile files in variable directory
@@ -585,7 +585,7 @@ fn stitched_blocking(
     let now_unix = chrono::Utc::now().timestamp();
     let cutoff_unix = now_unix - cutoff_seconds;
 
-    let res = config::get_tile_resolution_by_id(region_id, model_id);
+    let res = config::get_tile_resolution_for_variable(region_id, model_id, variable_id);
     let res_dir = config::format_res_dir(res);
 
     // Read from per-run rctile files in variable directory

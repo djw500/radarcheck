@@ -70,7 +70,7 @@ logger.setLevel(logging.INFO)
 
 # Configuration from environment with defaults
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
-BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,asnow,snod,t2m,cloud_cover"
+BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,asnow,snod,t2m,cloud_cover,dpt,dswrf"
 # Tile retention: keep N synoptic (00/06/12/18z) + M hourly runs per model
 # Global defaults; override per-model with TILE_BUILD_SYNOPTIC_RUNS_<MODEL>
 DEFAULT_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "8"))
@@ -210,6 +210,9 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
         if model_id in variable_config.get("model_exclusions", []):
             continue
 
+        # Use per-variable resolution override if set
+        var_resolution = variable_config.get("variable_resolution_override", resolution_deg)
+
         for hour in forecast_hours:
             job_args = {
                 "region_id": region_id,
@@ -217,7 +220,7 @@ def enqueue_run_jobs(conn, region_id: str, model_id: str, run_id: str, max_hours
                 "run_id": run_id,
                 "variable_id": variable_id,
                 "forecast_hour": hour,
-                "resolution_deg": resolution_deg,
+                "resolution_deg": var_resolution,
             }
             job_id = enqueue(conn, "build_tile_hour", job_args, priority=priority)
             if job_id is not None:

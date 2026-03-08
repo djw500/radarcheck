@@ -277,12 +277,14 @@ pub fn process_hour_v2(
     let region = config::get_region(&args.region_id)
         .context(format!("Unknown region: {}", args.region_id))?;
 
-    let resolution_deg = args
-        .resolution_deg
-        .unwrap_or_else(|| config::get_tile_resolution(region, &args.model_id));
-
     let var_config = config::get_variable(&args.variable_id)
         .context(format!("Unknown variable: {}", args.variable_id))?;
+
+    // Use variable resolution override if set, then job args, then model default
+    let resolution_deg = var_config
+        .variable_resolution_override
+        .or(args.resolution_deg)
+        .unwrap_or_else(|| config::get_tile_resolution(region, &args.model_id));
 
     let (date_str, init_hour) = parse_run_id(&args.run_id)?;
 

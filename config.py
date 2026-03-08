@@ -39,6 +39,7 @@ WEATHER_VARIABLES = {
             "default": ":DPT:2 m above ground",
             "ifs": ":2d:",
         },
+        "variable_resolution_override": 0.25,
     },
     "rh": {
         "display_name": "Relative Humidity",
@@ -247,6 +248,20 @@ WEATHER_VARIABLES = {
         },
         # NBM only
         "model_exclusions": ["hrrr", "gfs", "nam_nest", "ecmwf_hres"],
+    },
+    "dswrf": {
+        "display_name": "Solar Radiation",
+        "units": "W/m²",
+        "short_name": "dswrf",
+        "colormap": "viridis",
+        "vmin": 0,
+        "vmax": 1200,
+        "category": "solar",
+        "herbie_search": {
+            "default": ":DSWRF:surface",
+        },
+        "model_exclusions": ["ecmwf_hres"],
+        "variable_resolution_override": 0.25,
     },
     "cloud_cover": {
         "display_name": "Cloud Cover",

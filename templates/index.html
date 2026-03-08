@@ -108,6 +108,8 @@
                     <button data-var="wind_10m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
                     <button data-var="apcp" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Rain Rate</button>
                     <button data-var="cloud_cover" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Cloud</button>
+                    <button data-var="dpt" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Dew Pt</button>
+                    <button data-var="dswrf" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Solar</button>
                 </div>
 
                 <!-- Time Period -->
@@ -271,7 +273,11 @@ const VAR_CONFIG = {
     'msl':   { label: 'Pressure', unit: 'mb', decimals: 1,
         color: () => 'transparent' },
     'cloud_cover': { label: 'Cloud Cover', unit: '%', decimals: 0,
-        color: (v) => { const t = Math.min(v / 100, 1); return `rgba(148,163,184,${0.1 + t * 0.4})`; } }
+        color: (v) => { const t = Math.min(v / 100, 1); return `rgba(148,163,184,${0.1 + t * 0.4})`; } },
+    'dpt': { label: 'Dew Point', unit: '°F', decimals: 1,
+        color: (v) => { const t = Math.min(Math.max((v - 20) / 55, 0), 1); return `rgba(34,197,94,${0.1 + t * 0.4})`; } },
+    'dswrf': { label: 'Solar Radiation', unit: 'W/m²', decimals: 0,
+        color: (v) => { const t = Math.min(v / 1000, 1); return `rgba(250,204,21,${0.1 + t * 0.5})`; } }
 };
 
 // Validate currentVariable

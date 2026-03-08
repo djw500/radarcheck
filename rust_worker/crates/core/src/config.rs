@@ -80,6 +80,8 @@ pub struct VariableConfig {
     pub model_exclusions: &'static [&'static str],
     /// Per-model conversion overrides (keyed by herbie_model name)
     pub conversion_overrides: &'static [(&'static str, Conversion)],
+    /// Override tile resolution for this variable (coarser for smooth fields like dpt, dswrf)
+    pub variable_resolution_override: Option<f64>,
 }
 
 impl VariableConfig {
@@ -211,6 +213,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             is_accumulation: false,
             model_exclusions: &[],
             conversion_overrides: &[],
+            variable_resolution_override: None,
         },
         "apcp" => VariableConfig {
             id: "apcp",
@@ -232,6 +235,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             is_accumulation: true,
             model_exclusions: &[],
             conversion_overrides: &[],
+            variable_resolution_override: None,
         },
         "asnow" => VariableConfig {
             id: "asnow",
@@ -246,6 +250,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             is_accumulation: true,
             model_exclusions: &["gfs", "nam_nest", "ecmwf_hres"],
             conversion_overrides: &[],
+            variable_resolution_override: None,
         },
         "snod" => VariableConfig {
             id: "snod",
@@ -260,6 +265,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             is_accumulation: false,
             model_exclusions: &["nbm"],
             conversion_overrides: &[],
+            variable_resolution_override: None,
         },
         "cloud_cover" => VariableConfig {
             id: "cloud_cover",
@@ -280,6 +286,41 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             is_accumulation: false,
             model_exclusions: &[],
             conversion_overrides: &[("ifs", Conversion::FractionToPct)],
+            variable_resolution_override: None,
+        },
+        "dpt" => VariableConfig {
+            id: "dpt",
+            display_name: "2m Dew Point",
+            units: "°F",
+            conversion: Conversion::KToF,
+            search: VariableSearch {
+                default: ":DPT:2 m above ground",
+                overrides: &[("ifs", ":2d:")],
+            },
+            unit_conversions_by_units: &[
+                ("K", Conversion::KToF),
+                ("degC", Conversion::CToF),
+                ("°C", Conversion::CToF),
+            ],
+            is_accumulation: false,
+            model_exclusions: &[],
+            conversion_overrides: &[("ifs", Conversion::CToF)],
+            variable_resolution_override: Some(0.25),
+        },
+        "dswrf" => VariableConfig {
+            id: "dswrf",
+            display_name: "Solar Radiation",
+            units: "W/m²",
+            conversion: Conversion::None,
+            search: VariableSearch {
+                default: ":DSWRF:surface",
+                overrides: &[],
+            },
+            unit_conversions_by_units: &[],
+            is_accumulation: false,
+            model_exclusions: &["ecmwf_hres"],
+            conversion_overrides: &[],
+            variable_resolution_override: Some(0.25),
         },
         _ => return None,
     })
@@ -317,7 +358,7 @@ pub fn build_idx_url(model: &ModelConfig, date: &str, init_hour: &str, forecast_
 pub static ALL_MODEL_IDS: &[&str] = &["hrrr", "nam_nest", "gfs", "nbm", "ecmwf_hres"];
 
 /// All tile build variable IDs (the 4 variables built by the scheduler)
-pub static TILE_BUILD_VARIABLE_IDS: &[&str] = &["t2m", "apcp", "asnow", "snod", "cloud_cover"];
+pub static TILE_BUILD_VARIABLE_IDS: &[&str] = &["t2m", "apcp", "asnow", "snod", "cloud_cover", "dpt", "dswrf"];
 
 /// Get tile resolution for model+region by region_id string
 pub fn get_tile_resolution_by_id(region_id: &str, model_id: &str) -> f64 {
@@ -326,6 +367,16 @@ pub fn get_tile_resolution_by_id(region_id: &str, model_id: &str) -> f64 {
     } else {
         0.1
     }
+}
+
+/// Get tile resolution for a specific variable+model+region, respecting variable overrides
+pub fn get_tile_resolution_for_variable(region_id: &str, model_id: &str, variable_id: &str) -> f64 {
+    if let Some(var) = get_variable(variable_id) {
+        if let Some(override_res) = var.variable_resolution_override {
+            return override_res;
+        }
+    }
+    get_tile_resolution_by_id(region_id, model_id)
 }
 
 /// Infer region for a lat/lon point
