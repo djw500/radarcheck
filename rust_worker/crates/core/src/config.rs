@@ -304,7 +304,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             ],
             is_accumulation: false,
             model_exclusions: &[],
-            conversion_overrides: &[("ifs", Conversion::CToF)],
+            conversion_overrides: &[],
             variable_resolution_override: Some(0.25),
         },
         "dswrf" => VariableConfig {
