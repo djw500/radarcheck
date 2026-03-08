@@ -452,6 +452,7 @@ fn multirun_blocking(
             };
 
             let mut series = Vec::new();
+            let is_dswrf = variable_id == "dswrf";
             for (i, &h) in run_data.hours.iter().enumerate() {
                 if i >= accum_values.len() {
                     break;
@@ -462,11 +463,32 @@ fn multirun_blocking(
                 }
                 let valid_unix = run_data.init_unix + (h as i64) * 3600;
                 let valid_time = unix_to_iso(valid_unix);
-                series.push(serde_json::json!({
-                    "valid_time": valid_time,
-                    "forecast_hour": h,
-                    "value": v,
-                }));
+
+                if is_dswrf {
+                    match radarcheck_core::solar::clearness_index_from_unix(v, lat, lon, valid_unix)
+                    {
+                        Some(pct) => {
+                            series.push(serde_json::json!({
+                                "valid_time": valid_time,
+                                "forecast_hour": h,
+                                "value": (pct * 10.0).round() / 10.0,
+                            }));
+                        }
+                        None => {
+                            series.push(serde_json::json!({
+                                "valid_time": valid_time,
+                                "forecast_hour": h,
+                                "value": null,
+                            }));
+                        }
+                    }
+                } else {
+                    series.push(serde_json::json!({
+                        "valid_time": valid_time,
+                        "forecast_hour": h,
+                        "value": v,
+                    }));
+                }
             }
 
             if !series.is_empty() {
@@ -695,15 +717,36 @@ fn stitched_blocking(
     // Result: baseline + latest extended run
     let mut series = Vec::new();
     let mut event_total: f64 = 0.0;
+    let is_dswrf = variable_id == "dswrf";
 
     for (&vt, &val) in &latest.point_map {
         let total = baseline + val;
         event_total = event_total.max(total);
-        series.push(serde_json::json!({
-            "valid_time": unix_to_iso(vt),
-            "value": round2(total),
-            "source_run": latest.run_id,
-        }));
+
+        if is_dswrf {
+            match radarcheck_core::solar::clearness_index_from_unix(total, lat, lon, vt) {
+                Some(pct) => {
+                    series.push(serde_json::json!({
+                        "valid_time": unix_to_iso(vt),
+                        "value": (pct * 10.0).round() / 10.0,
+                        "source_run": latest.run_id,
+                    }));
+                }
+                None => {
+                    series.push(serde_json::json!({
+                        "valid_time": unix_to_iso(vt),
+                        "value": null,
+                        "source_run": latest.run_id,
+                    }));
+                }
+            }
+        } else {
+            series.push(serde_json::json!({
+                "valid_time": unix_to_iso(vt),
+                "value": round2(total),
+                "source_run": latest.run_id,
+            }));
+        }
     }
 
     Ok(serde_json::json!({
