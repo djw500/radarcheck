@@ -327,7 +327,7 @@ pub fn process_hour_v2(
     } else {
         None
     };
-    let conversion = var_config.conversion_for_units(src_units);
+    let conversion = var_config.conversion_for_model(model.herbie_model, src_units);
     let threshold = bucket_mapping::snap_threshold(&args.variable_id);
     let grib_values = decoded.values.as_slice().unwrap();
     let cell_values = mapping.apply(grib_values, conversion, threshold);

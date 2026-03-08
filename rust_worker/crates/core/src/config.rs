@@ -78,10 +78,12 @@ pub struct VariableConfig {
     pub is_accumulation: bool,
     /// Models that don't have this variable
     pub model_exclusions: &'static [&'static str],
+    /// Per-model conversion overrides (keyed by herbie_model name)
+    pub conversion_overrides: &'static [(&'static str, Conversion)],
 }
 
 impl VariableConfig {
-    /// Get the appropriate conversion for given source units
+    /// Get the appropriate conversion for given source units and model
     pub fn conversion_for_units(&self, src_units: Option<&str>) -> Conversion {
         if let Some(units) = src_units {
             for (u, conv) in self.unit_conversions_by_units {
@@ -91,6 +93,16 @@ impl VariableConfig {
             }
         }
         self.conversion
+    }
+
+    /// Get conversion for a specific model, falling back to unit-based then default
+    pub fn conversion_for_model(&self, herbie_model: &str, src_units: Option<&str>) -> Conversion {
+        for (model, conv) in self.conversion_overrides {
+            if *model == herbie_model {
+                return *conv;
+            }
+        }
+        self.conversion_for_units(src_units)
     }
 }
 
@@ -198,6 +210,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             ],
             is_accumulation: false,
             model_exclusions: &[],
+            conversion_overrides: &[],
         },
         "apcp" => VariableConfig {
             id: "apcp",
@@ -218,6 +231,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             ],
             is_accumulation: true,
             model_exclusions: &[],
+            conversion_overrides: &[],
         },
         "asnow" => VariableConfig {
             id: "asnow",
@@ -231,6 +245,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             unit_conversions_by_units: &[],
             is_accumulation: true,
             model_exclusions: &["gfs", "nam_nest", "ecmwf_hres"],
+            conversion_overrides: &[],
         },
         "snod" => VariableConfig {
             id: "snod",
@@ -244,6 +259,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             unit_conversions_by_units: &[],
             is_accumulation: false,
             model_exclusions: &["nbm"],
+            conversion_overrides: &[],
         },
         "cloud_cover" => VariableConfig {
             id: "cloud_cover",
@@ -263,6 +279,7 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             ],
             is_accumulation: false,
             model_exclusions: &[],
+            conversion_overrides: &[("ifs", Conversion::FractionToPct)],
         },
         _ => return None,
     })
