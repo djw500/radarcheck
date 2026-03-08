@@ -8,9 +8,10 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 /// Solar constant in W/m² (total solar irradiance at top of atmosphere).
 pub const SOLAR_CONSTANT: f64 = 1361.0;
 
-/// Fraction of solar radiation reaching the surface under clear skies.
-/// Accounts for atmospheric absorption and scattering.
-pub const CLEAR_SKY_TRANSMITTANCE: f64 = 0.75;
+/// Minimum clear-sky DSWRF (W/m²) to compute clearness index.
+/// Below this threshold (sun near horizon), clearness index is unreliable
+/// due to extreme air mass and diffuse twilight radiation artifacts.
+const CLEARNESS_MIN_THRESHOLD: f64 = 20.0;
 
 /// Solar declination using the Spencer (1971) Fourier approximation.
 ///
@@ -43,22 +44,40 @@ pub fn solar_elevation(lat_rad: f64, declination: f64, hour_angle_rad: f64) -> f
     sin_elev.asin()
 }
 
-/// Compute the solar hour angle from UTC hour and longitude.
+/// Equation of Time correction in minutes (Spencer 1971).
+///
+/// Accounts for the seasonal drift of solar noon due to orbital eccentricity
+/// and axial tilt. Ranges ±15 minutes throughout the year.
+fn equation_of_time_minutes(day_of_year: u32) -> f64 {
+    let b = 2.0 * std::f64::consts::PI * (day_of_year as f64 - 1.0) / 365.0;
+    229.18 * (0.000075 + 0.001868 * b.cos() - 0.032077 * b.sin()
+        - 0.014615 * (2.0 * b).cos() - 0.040849 * (2.0 * b).sin())
+}
+
+/// Compute the solar hour angle from UTC hour, longitude, and day of year.
+///
+/// Uses Equation of Time to correct for seasonal drift of solar noon.
 ///
 /// - `utc_hour`: fractional UTC hour (e.g. 17.5 = 17:30 UTC)
 /// - `lon_deg`: longitude in degrees (west is negative)
+/// - `day_of_year`: 1-based day of year (for EoT correction)
 ///
 /// Returns hour angle in radians. 0 = solar noon, negative = morning, positive = afternoon.
-pub fn hour_angle(utc_hour: f64, lon_deg: f64) -> f64 {
-    // Solar time = UTC + longitude/15 (each 15° = 1 hour)
-    let solar_hour = utc_hour + lon_deg / 15.0;
+pub fn hour_angle(utc_hour: f64, lon_deg: f64, day_of_year: u32) -> f64 {
+    let eot_hours = equation_of_time_minutes(day_of_year) / 60.0;
+    // True solar time = UTC + longitude offset + EoT
+    let solar_hour = utc_hour + lon_deg / 15.0 + eot_hours;
     // Hour angle: 0 at noon, 15°/hour
     (solar_hour - 12.0) * 15.0_f64.to_radians()
 }
 
 /// Clear-sky downward shortwave radiation at the surface.
 ///
-/// Uses SOLAR_CONSTANT * CLEAR_SKY_TRANSMITTANCE * sin(elevation).
+/// Uses Beer-Lambert air-mass model instead of flat transmittance:
+/// - Earth-Sun distance eccentricity correction (±3.3% seasonal)
+/// - Kasten-Young air mass formula (accounts for atmospheric path length)
+/// - Transmittance = 0.7^(AM^0.678) — standard clear-sky optical depth
+///
 /// Returns 0.0 if the sun is below the horizon.
 ///
 /// - `lat_deg`: latitude in degrees
@@ -67,15 +86,27 @@ pub fn hour_angle(utc_hour: f64, lon_deg: f64) -> f64 {
 /// - `utc_hour`: fractional UTC hour
 pub fn clear_sky_dswrf(lat_deg: f64, lon_deg: f64, day_of_year: u32, utc_hour: f64) -> f64 {
     let decl = solar_declination(day_of_year);
-    let ha = hour_angle(utc_hour, lon_deg);
+    let ha = hour_angle(utc_hour, lon_deg, day_of_year);
     let lat_rad = lat_deg.to_radians();
     let elev = solar_elevation(lat_rad, decl, ha);
 
-    if elev <= 0.0 {
+    let elev_deg = elev.to_degrees();
+    if elev_deg <= 0.0 {
         return 0.0;
     }
 
-    SOLAR_CONSTANT * CLEAR_SKY_TRANSMITTANCE * elev.sin()
+    // Earth-Sun distance eccentricity (varies ±3.3% through the year)
+    let b = 2.0 * std::f64::consts::PI * day_of_year as f64 / 365.0;
+    let eccentricity = 1.0 + 0.033 * b.cos();
+    let extraterrestrial = SOLAR_CONSTANT * eccentricity;
+
+    // Air mass: Kasten-Young (1989) — avoids extreme values near horizon
+    let air_mass = 1.0 / (elev.sin() + 0.50572 * (elev_deg + 6.07995).powf(-1.6364));
+
+    // Clear-sky transmittance based on air mass (Beer-Lambert with empirical exponent)
+    let transmittance = 0.7_f64.powf(air_mass.powf(0.678));
+
+    extraterrestrial * transmittance * elev.sin()
 }
 
 /// Clearness index: forecast DSWRF as a percentage of clear-sky DSWRF.
@@ -96,8 +127,9 @@ pub fn clearness_index(
 ) -> Option<f64> {
     let clear = clear_sky_dswrf(lat_deg, lon_deg, day_of_year, utc_hour);
 
-    // Night threshold: if clear-sky is negligible, return None
-    if clear < 1.0 {
+    // Twilight threshold: below 20 W/m² (sun near horizon), clearness index
+    // is unreliable due to extreme air mass and diffuse radiation artifacts
+    if clear < CLEARNESS_MIN_THRESHOLD {
         return None;
     }
 
