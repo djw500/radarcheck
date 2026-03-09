@@ -341,14 +341,14 @@ Do not use emoji. Do not start with "The forecast" or "Looking ahead"."""
         # llm CLI may return exit code 1 due to sqlite logging bug
         # but still produce valid output on stdout
         if result.stdout.strip():
-            return result.stdout.strip()
+            return result.stdout.strip(), prompt
         log.warning(f"LLM produced no output: {result.stderr}")
     except Exception as e:
         log.warning(f"LLM error: {e}")
 
     # Fallback: simple rule-based text from first hour's data
     first = hours_summary[0]
-    return f"{first['sky']}. {first['comfort'] or ''}."
+    return f"{first['sky']}. {first['comfort'] or ''}.", prompt
 
 
 def generate_summary(lat, lon, cache_dir):
@@ -377,7 +377,7 @@ def generate_summary(lat, lon, cache_dir):
     save_snapshot(cache_dir, grid_id, current_by_time)
 
     # Generate AI text
-    ai_text = generate_ai_text(hours_summary, trends, lat, lon)
+    ai_text, prompt = generate_ai_text(hours_summary, trends, lat, lon)
 
     # Build final result
     result = {
@@ -387,6 +387,7 @@ def generate_summary(lat, lon, cache_dir):
         "hours": hours_summary,
         "trends": trends,
         "text": ai_text,
+        "prompt": prompt,
     }
 
     # Cache result

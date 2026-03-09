@@ -165,6 +165,10 @@
         <div id="summaryTrends" class="flex flex-wrap gap-2 mb-4"></div>
         <div id="summaryTimeline" class="flex gap-2 overflow-x-auto pb-2 no-scrollbar"></div>
         <div id="summaryMeta" class="text-xs text-slate-500 dark:text-slate-500 mt-3 text-right"></div>
+        <details id="summaryPrompt" class="mt-3 hidden">
+            <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-600 dark:hover:text-slate-300">View prompt</summary>
+            <pre id="summaryPromptText" class="mt-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap"></pre>
+        </details>
     </div>
 
     <!-- Model Toggles (Sticky Bottom) -->
@@ -894,11 +898,14 @@ function renderSummary(data) {
     const timelineEl = document.getElementById('summaryTimeline');
 
     const metaEl = document.getElementById('summaryMeta');
+    const promptEl = document.getElementById('summaryPrompt');
+    const promptTextEl = document.getElementById('summaryPromptText');
     if (!data) {
         textEl.textContent = 'Summary not available yet. Data generates hourly.';
         trendsEl.innerHTML = '';
         timelineEl.innerHTML = '';
         metaEl.textContent = '';
+        promptEl.classList.add('hidden');
         return;
     }
 
@@ -909,6 +916,14 @@ function renderSummary(data) {
         const gen = new Date(data.generated_at);
         const ago = Math.round((Date.now() - gen.getTime()) / 60000);
         metaEl.textContent = ago < 60 ? `Updated ${ago}m ago` : `Updated ${Math.round(ago/60)}h ago`;
+    }
+
+    // Show raw prompt
+    if (data.prompt) {
+        promptTextEl.textContent = data.prompt;
+        promptEl.classList.remove('hidden');
+    } else {
+        promptEl.classList.add('hidden');
     }
 
     trendsEl.innerHTML = '';
