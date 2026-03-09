@@ -146,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         // Forecast API
         .route("/api/timeseries/multirun", get(api_timeseries_multirun))
         .route("/api/timeseries/stitched", get(api_timeseries_stitched))
+        .route("/api/qualitative", get(api_qualitative))
         // Status API
         .route("/api/status/summary", get(status::api_status_summary))
         .route("/api/status/run-grid", get(status::api_status_run_grid))
@@ -760,6 +761,47 @@ fn stitched_blocking(
         "runs_in_baseline": pre_runs.len(),
         "series": series,
     }))
+}
+
+// ── Qualitative endpoint ─────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct QualitativeParams {
+    lat: Option<f64>,
+    lon: Option<f64>,
+}
+
+async fn api_qualitative(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<QualitativeParams>,
+) -> Response {
+    let lat = params.lat.unwrap_or(40.0);
+    let lon = params.lon.unwrap_or(-75.4);
+
+    // Round to 0.1 degree grid (must match Python grid_key format)
+    let grid_key = format!("{:.1}_{:.1}", lat, lon);
+    let cache_file = state.cache_dir.join("qualitative").join(format!("{}.json", grid_key));
+
+    match std::fs::read_to_string(&cache_file) {
+        Ok(contents) => {
+            // Check staleness (max 3 hours)
+            if let Ok(meta) = std::fs::metadata(&cache_file) {
+                if let Ok(modified) = meta.modified() {
+                    let age = SystemTime::now().duration_since(modified).unwrap_or_default();
+                    if age.as_secs() > 3 * 3600 {
+                        return error_response(404, "Qualitative data is stale");
+                    }
+                }
+            }
+            Response::builder()
+                .status(200)
+                .header("content-type", "application/json")
+                .header("cache-control", "public, max-age=300")
+                .body(Body::from(contents))
+                .unwrap()
+        }
+        Err(_) => error_response(404, "No qualitative data available for this location"),
+    }
 }
 
 // ── Writeup endpoints ────────────────────────────────────────────────────────
