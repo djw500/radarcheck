@@ -65,10 +65,17 @@ def aggregate_hourly(all_data, hours_ahead=8):
         for var_id, var_response in all_data.items():
             if var_response is None:
                 continue
-            values = []
+            # Use only the latest run per model (not all runs)
+            latest_by_model = {}
             for run_key, run_info in var_response.get("runs", {}).items():
+                model_id = run_info.get("model_id", run_key.split("/")[0])
+                init_time = run_info.get("init_time", "")
+                if model_id not in latest_by_model or init_time > latest_by_model[model_id][0]:
+                    latest_by_model[model_id] = (init_time, run_info)
+
+            values = []
+            for _, (_, run_info) in latest_by_model.items():
                 for pt in run_info.get("series", []):
-                    # Match to nearest hour
                     if pt.get("valid_time", "").startswith(target_iso[:13]):
                         v = pt.get("value")
                         if v is not None:
@@ -76,7 +83,7 @@ def aggregate_hourly(all_data, hours_ahead=8):
             if values:
                 values.sort()
                 mid = len(values) // 2
-                hour_data[var_id] = values[mid]  # median
+                hour_data[var_id] = values[mid]  # median of latest runs only
 
         result[hour_offset] = {
             "time": target_iso,
@@ -166,8 +173,13 @@ def build_hourly_summary(hourly_data):
     for offset in sorted(hourly_data.keys()):
         h = hourly_data[offset]
         vals = h["values"]
+        # Treat dswrf=0 as None (nighttime/twilight — server returns null
+        # for night, but edge cases near sunrise may produce 0)
+        solar = vals.get("dswrf")
+        if solar is not None and solar <= 0:
+            solar = None
         sky_label, sky_icon = derive_sky_condition(
-            vals.get("cloud_cover"), vals.get("dswrf")
+            vals.get("cloud_cover"), solar
         )
         comfort = derive_comfort(vals.get("t2m"), vals.get("dpt"))
         precip = derive_precip(vals.get("apcp"), vals.get("asnow"))
@@ -187,22 +199,24 @@ def build_hourly_summary(hourly_data):
 def compute_trends(current_hourly, cache_dir, grid_id):
     """Compare current forecast to snapshots from 1h/6h/24h ago.
 
-    Returns dict of trend descriptions.
+    Compares by valid time: for each overlapping forecast hour, compute
+    the delta between what the old snapshot predicted and what the current
+    forecast predicts for that same future time. This avoids false trends
+    from diurnal cycle differences.
+
+    Returns (trends dict, current_by_valid_time dict).
     """
     trends = {}
     now = datetime.datetime.now(datetime.timezone.utc)
 
-    # Average the first 4 hours of current forecast
-    current_avgs = {}
-    for var in ["t2m", "dpt", "cloud_cover", "dswrf", "apcp"]:
-        vals = [h["raw"].get(var) for h in current_hourly[:4] if h["raw"].get(var) is not None]
-        if vals:
-            current_avgs[var] = sum(vals) / len(vals)
+    # Build current forecast keyed by valid time (ISO string)
+    current_by_time = {}
+    for h in current_hourly:
+        current_by_time[h["time"]] = h["raw"]
 
     snapshot_dir = cache_dir / "snapshots" / grid_id
     for label, hours_ago in [("1h ago", 1), ("6h ago", 6), ("24h ago", 24)]:
         target_time = now - datetime.timedelta(hours=hours_ago)
-        # Find closest snapshot file
         snapshot_file = find_closest_snapshot(snapshot_dir, target_time)
         if snapshot_file is None:
             continue
@@ -210,27 +224,43 @@ def compute_trends(current_hourly, cache_dir, grid_id):
         try:
             with open(snapshot_file) as f:
                 old_data = json.load(f)
-            old_avgs = old_data.get("averages", {})
+            old_by_time = old_data.get("by_valid_time", {})
         except Exception:
             continue
 
+        if not old_by_time:
+            continue
+
+        # Average deltas across overlapping valid times
+        var_deltas = {}
+        var_counts = {}
+        for valid_time, current_vals in current_by_time.items():
+            old_vals = old_by_time.get(valid_time, {})
+            for var in ["t2m", "dpt", "cloud_cover", "dswrf", "apcp"]:
+                cur_v = current_vals.get(var)
+                old_v = old_vals.get(var)
+                if cur_v is not None and old_v is not None:
+                    var_deltas.setdefault(var, 0.0)
+                    var_deltas[var] += cur_v - old_v
+                    var_counts[var] = var_counts.get(var, 0) + 1
+
         deltas = {}
-        for var, threshold, unit, direction in [
-            ("t2m", 3.0, "F", ("warmer", "cooler")),
-            ("apcp", 0.05, "in", ("wetter", "drier")),
-            ("cloud_cover", 15.0, "%", ("cloudier", "clearer")),
-            ("dswrf", 15.0, "%", ("less sunny", "sunnier")),
+        for var, threshold, direction in [
+            ("t2m", 3.0, ("warmer", "cooler")),
+            ("apcp", 0.05, ("wetter", "drier")),
+            ("cloud_cover", 15.0, ("cloudier", "clearer")),
+            ("dswrf", 15.0, ("less sunny", "sunnier")),
         ]:
-            if var in current_avgs and var in old_avgs:
-                delta = current_avgs[var] - old_avgs[var]
-                if abs(delta) >= threshold:
-                    word = direction[0] if delta > 0 else direction[1]
+            if var in var_deltas and var_counts.get(var, 0) > 0:
+                avg_delta = var_deltas[var] / var_counts[var]
+                if abs(avg_delta) >= threshold:
+                    word = direction[0] if avg_delta > 0 else direction[1]
                     deltas[var] = f"{word} than {label}"
 
         if deltas:
             trends[label] = deltas
 
-    return trends, current_avgs
+    return trends, current_by_time
 
 
 def find_closest_snapshot(snapshot_dir, target_time):
@@ -257,15 +287,19 @@ def find_closest_snapshot(snapshot_dir, target_time):
     return best_file
 
 
-def save_snapshot(cache_dir, grid_id, current_avgs):
-    """Save current averages as a timestamped snapshot for future trend comparison."""
+def save_snapshot(cache_dir, grid_id, current_by_time):
+    """Save current per-valid-time forecast as a timestamped snapshot.
+
+    Stores forecasts keyed by valid time ISO string so future trend
+    comparisons can match by the same future hour.
+    """
     snapshot_dir = cache_dir / "snapshots" / grid_id
     snapshot_dir.mkdir(parents=True, exist_ok=True)
 
     now = datetime.datetime.now(datetime.timezone.utc)
     filename = f"{now.timestamp():.0f}.json"
     with open(snapshot_dir / filename, "w") as f:
-        json.dump({"averages": current_avgs, "time": now.isoformat()}, f)
+        json.dump({"by_valid_time": current_by_time, "time": now.isoformat()}, f)
 
     # Prune old snapshots
     cutoff = now - datetime.timedelta(hours=SNAPSHOT_RETAIN_HOURS)
@@ -304,9 +338,11 @@ Do not use emoji. Do not start with "The forecast" or "Looking ahead"."""
             text=True,
             timeout=30,
         )
-        if result.returncode == 0 and result.stdout.strip():
+        # llm CLI may return exit code 1 due to sqlite logging bug
+        # but still produce valid output on stdout
+        if result.stdout.strip():
             return result.stdout.strip()
-        log.warning(f"LLM failed: {result.stderr}")
+        log.warning(f"LLM produced no output: {result.stderr}")
     except Exception as e:
         log.warning(f"LLM error: {e}")
 
@@ -334,11 +370,11 @@ def generate_summary(lat, lon, cache_dir):
     # Derive conditions
     hours_summary = build_hourly_summary(hourly_data)
 
-    # Compute trends
-    trends, current_avgs = compute_trends(hours_summary, cache_dir, grid_id)
+    # Compute trends (returns per-valid-time dict for snapshot)
+    trends, current_by_time = compute_trends(hours_summary, cache_dir, grid_id)
 
     # Save snapshot for future trend comparison
-    save_snapshot(cache_dir, grid_id, current_avgs)
+    save_snapshot(cache_dir, grid_id, current_by_time)
 
     # Generate AI text
     ai_text = generate_ai_text(hours_summary, trends, lat, lon)
