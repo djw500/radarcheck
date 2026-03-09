@@ -31,6 +31,8 @@ export TILE_BUILD_MAX_HOURS_NBM="${TILE_BUILD_MAX_HOURS_NBM:-48}"
 
 SCHED_LOG="/tmp/scheduler.log"
 SCHED_PID="/tmp/scheduler.pid"
+QUAL_LOG="/tmp/qualitative.log"
+QUAL_PID="/tmp/qualitative.pid"
 SERVER_LOG="/tmp/radarcheck_server.log"
 SERVER_PID="/tmp/radarcheck_server.pid"
 SERVER_PORT="${RADARCHECK_PORT:-5001}"
@@ -64,6 +66,28 @@ stop_scheduler() {
         echo "Scheduler not running"
     fi
     rm -f "$SCHED_PID"
+}
+
+# ── Qualitative summary generator ────────────────────────────────────────────
+
+start_qualitative() {
+    if [[ -f "$QUAL_PID" ]] && kill -0 "$(cat "$QUAL_PID")" 2>/dev/null; then
+        echo "Qualitative already running (pid $(cat "$QUAL_PID"))"
+        return
+    fi
+    nohup python3 scripts/qualitative.py --lat 40.0 --lon -75.4 > "$QUAL_LOG" 2>&1 &
+    echo $! > "$QUAL_PID"
+    echo "Started qualitative (pid $!), log: $QUAL_LOG"
+}
+
+stop_qualitative() {
+    if [[ -f "$QUAL_PID" ]] && kill -0 "$(cat "$QUAL_PID")" 2>/dev/null; then
+        local pid; pid=$(cat "$QUAL_PID")
+        kill "$pid" && echo "Stopped qualitative (pid $pid)"
+    else
+        echo "Qualitative not running"
+    fi
+    rm -f "$QUAL_PID"
 }
 
 # ── Rust API Server ──────────────────────────────────────────────────────────
@@ -188,12 +212,14 @@ stop_workers() {
 
 start_all() {
     start_scheduler
+    start_qualitative
     start_server
     start_workers
 }
 
 stop_all() {
     stop_scheduler
+    stop_qualitative
     stop_server
     stop_workers
 }
@@ -203,6 +229,11 @@ status_all() {
         echo "Scheduler: running (pid $(cat "$SCHED_PID"))"
     else
         echo "Scheduler: stopped"
+    fi
+    if [[ -f "$QUAL_PID" ]] && kill -0 "$(cat "$QUAL_PID")" 2>/dev/null; then
+        echo "Qualitative: running (pid $(cat "$QUAL_PID"))"
+    else
+        echo "Qualitative: stopped"
     fi
     if [[ -f "$SERVER_PID" ]] && kill -0 "$(cat "$SERVER_PID")" 2>/dev/null; then
         echo "Server: running (rust, pid $(cat "$SERVER_PID"), port $SERVER_PORT)"
@@ -225,6 +256,9 @@ status_all() {
     echo ""
     echo "=== Scheduler log (last 10 lines) ==="
     tail -n 10 "$SCHED_LOG" 2>/dev/null || echo "(no log yet)"
+    echo ""
+    echo "=== Qualitative log (last 10 lines) ==="
+    tail -n 10 "$QUAL_LOG" 2>/dev/null || echo "(no log yet)"
     echo ""
     for model in "${MODELS[@]}"; do
         echo "=== Worker[$model] log (last 5 lines) ==="
@@ -252,7 +286,7 @@ case "${1:-}" in
     status)
         status_all ;;
     logs)
-        tail -f "$SERVER_LOG" "$SCHED_LOG" /tmp/worker_*.log 2>/dev/null ;;
+        tail -f "$SERVER_LOG" "$SCHED_LOG" "$QUAL_LOG" /tmp/worker_*.log 2>/dev/null ;;
     *)
         echo "Usage: $0 {start|stop|restart|status|logs} [scheduler|server|workers]" >&2
         exit 1 ;;
