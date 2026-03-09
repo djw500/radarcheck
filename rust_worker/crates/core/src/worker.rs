@@ -302,8 +302,9 @@ pub fn process_hour_v2(
     let decoded = grib::decode_grib_message(&grib_bytes)
         .context("Failed to decode GRIB message")?;
 
-    // Build or reuse BucketMapping (cached per model)
-    if !mapping_cache.contains_key(&args.model_id) {
+    // Build or reuse BucketMapping (cached per model+resolution)
+    let cache_key = format!("{}@{:.3}", args.model_id, resolution_deg);
+    if !mapping_cache.contains_key(&cache_key) {
         let mapping = BucketMapping::build(
             &decoded.latitudes,
             &decoded.longitudes,
@@ -312,16 +313,17 @@ pub fn process_hour_v2(
         );
         let empty_cells = mapping.cells.iter().filter(|c| c.sources.is_empty()).count();
         log::info!(
-            "Built bucket mapping for {}: {}x{} ({} cells, {} empty)",
+            "Built bucket mapping for {} at {:.3}°: {}x{} ({} cells, {} empty)",
             args.model_id,
+            resolution_deg,
             mapping.ny,
             mapping.nx,
             mapping.cells.len(),
             empty_cells,
         );
-        mapping_cache.insert(args.model_id.clone(), mapping);
+        mapping_cache.insert(cache_key.clone(), mapping);
     }
-    let mapping = mapping_cache.get(&args.model_id).unwrap();
+    let mapping = mapping_cache.get(&cache_key).unwrap();
 
     // Apply mapping: gather + convert + snap
     let src_units = if decoded.units != "unknown" {
