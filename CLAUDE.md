@@ -102,6 +102,32 @@ pytest tests/
 pytest tests/
 ```
 
+## Sandbox Environment
+
+This project runs inside a Docker container (the "innie"). Key context:
+
+- **Container**: Python 3.11-slim on OrbStack (aarch64), user `dev` (uid 501)
+- **Innie/Outie protocol**: You're inside Docker. The host Claude is the "outie."
+  - Read from `~/.claude/inbox/` (messages from host)
+  - Write to `~/.claude/outbox/` (messages to host)
+  - File naming: `YYYY-MM-DD-HHMMSS-topic.md`
+- **Rebuilds**: Edit `/workspace/Dockerfile.unified` or `/workspace/docker-compose.yml`, then drop a message in outbox asking the host to run `./sandbox.sh --rebuild`
+- **No Docker socket** — you cannot rebuild yourself
+- **RTK hook**: Bash commands are automatically rewritten by the RTK hook for token savings
+- **Stagehand MCP**: Available globally for browser automation (local Playwright, `HEADLESS=false`, vision model `gemini-3-flash-preview`)
+- **Gemini**: Always use `gemini-3-flash-preview` (never 2.5 Flash). Use `gemini-cli -p` or `llm -m gemini-3-flash-preview`
+- **Fly.io CLI**: `~/.fly/bin/flyctl`
+
+## Available Skills
+
+Skills are symlinked from `/workspace/.claude/skills/`:
+- **weather-analysis** — Cross-model forecast overlap analysis at a lat/lon
+- **gemini-agent** — Dispatch research queries to Gemini CLI (free, fast)
+
+## Self-Maintenance Rule
+
+**Always update this CLAUDE.md when making significant changes to the project** — new endpoints, new files, architecture changes, new dependencies, workflow changes, or lessons learned. Keep it accurate so a fresh Claude session can be productive immediately.
+
 ## Commit Style
 
 - Small, targeted commits
