@@ -773,26 +773,13 @@ struct QualitativeParams {
 
 async fn api_qualitative(
     State(state): State<Arc<AppState>>,
-    Query(params): Query<QualitativeParams>,
+    Query(_params): Query<QualitativeParams>,
 ) -> Response {
-    let lat = params.lat.unwrap_or(40.0);
-    let lon = params.lon.unwrap_or(-75.4);
-
-    // Round to 0.1 degree grid (must match Python grid_key format)
-    let grid_key = format!("{:.1}_{:.1}", lat, lon);
-    let cache_file = state.cache_dir.join("qualitative").join(format!("{}.json", grid_key));
+    // Hardcoded to Radnor, PA — single-location deployment
+    let cache_file = state.cache_dir.join("qualitative").join("40.0_-75.4.json");
 
     match std::fs::read_to_string(&cache_file) {
         Ok(contents) => {
-            // Check staleness (max 3 hours)
-            if let Ok(meta) = std::fs::metadata(&cache_file) {
-                if let Ok(modified) = meta.modified() {
-                    let age = SystemTime::now().duration_since(modified).unwrap_or_default();
-                    if age.as_secs() > 3 * 3600 {
-                        return error_response(404, "Qualitative data is stale");
-                    }
-                }
-            }
             Response::builder()
                 .status(200)
                 .header("content-type", "application/json")
@@ -800,7 +787,7 @@ async fn api_qualitative(
                 .body(Body::from(contents))
                 .unwrap()
         }
-        Err(_) => error_response(404, "No qualitative data available for this location"),
+        Err(_) => error_response(404, "No qualitative data available"),
     }
 }
 

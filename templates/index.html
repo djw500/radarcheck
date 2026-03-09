@@ -114,7 +114,7 @@
                 </div>
 
                 <!-- Time Period -->
-                <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto">
+                <div id="periodSelector" class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto">
                     <button data-days="1" class="period-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">24h</button>
                     <button data-days="3" class="period-btn px-4 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">3 Days</button>
                     <button data-days="7" class="period-btn px-4 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap">7 Days</button>
@@ -163,11 +163,12 @@
             Loading summary...
         </div>
         <div id="summaryTrends" class="flex flex-wrap gap-2 mb-4"></div>
-        <div id="summaryTimeline" class="grid grid-cols-4 sm:grid-cols-8 gap-2"></div>
+        <div id="summaryTimeline" class="flex gap-2 overflow-x-auto pb-2 no-scrollbar"></div>
+        <div id="summaryMeta" class="text-xs text-slate-500 dark:text-slate-500 mt-3 text-right"></div>
     </div>
 
     <!-- Model Toggles (Sticky Bottom) -->
-    <div class="sticky bottom-6 z-40 flex justify-center w-full px-4">
+    <div id="modelToggles" class="sticky bottom-6 z-40 flex justify-center w-full px-4">
         <div class="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-slate-200 dark:border-slate-700 p-2 rounded-full shadow-2xl flex items-center gap-3 overflow-x-auto max-w-full no-scrollbar">
             
             <!-- HRRR -->
@@ -339,19 +340,23 @@ document.querySelectorAll('.var-btn').forEach(btn => {
             e.target.classList.remove('text-slate-600', 'dark:text-slate-400');
 
             currentVariable = 'summary';
-            document.getElementById('snowChart').style.display = 'none';
+            document.getElementById('chartCard').style.display = 'none';
+            document.getElementById('toggleTableBtn').style.display = 'none';
             document.getElementById('dataTableContainer').style.display = 'none';
+            document.getElementById('periodSelector').style.display = 'none';
+            document.getElementById('modelToggles').style.display = 'none';
             document.getElementById('summaryPanel').classList.remove('hidden');
-            if (currentLat && currentLon) {
-                fetchSummary(currentLat, currentLon).then(renderSummary);
-            }
+            fetchSummary().then(renderSummary);
             return;
         }
 
         // For all other variables, hide summary and show chart/table
         document.getElementById('summaryPanel').classList.add('hidden');
-        document.getElementById('snowChart').style.display = '';
+        document.getElementById('chartCard').style.display = '';
+        document.getElementById('toggleTableBtn').style.display = '';
         document.getElementById('dataTableContainer').style.display = '';
+        document.getElementById('periodSelector').style.display = '';
+        document.getElementById('modelToggles').style.display = '';
 
         currentVariable = newVar;
         localStorage.setItem(STORAGE_KEY_LAST_VAR, currentVariable);
@@ -873,8 +878,8 @@ const SKY_ICONS = {
     'question': '\u2753'
 };
 
-async function fetchSummary(lat, lon) {
-    const url = `${API_BASE}/api/qualitative?lat=${lat}&lon=${lon}`;
+async function fetchSummary() {
+    const url = `/api/qualitative`;
     try {
         return await fetchJSON(url);
     } catch (e) {
@@ -888,14 +893,23 @@ function renderSummary(data) {
     const trendsEl = document.getElementById('summaryTrends');
     const timelineEl = document.getElementById('summaryTimeline');
 
+    const metaEl = document.getElementById('summaryMeta');
     if (!data) {
         textEl.textContent = 'Summary not available yet. Data generates hourly.';
         trendsEl.innerHTML = '';
         timelineEl.innerHTML = '';
+        metaEl.textContent = '';
         return;
     }
 
     textEl.textContent = data.text || 'No summary available.';
+
+    // Show last updated
+    if (data.generated_at) {
+        const gen = new Date(data.generated_at);
+        const ago = Math.round((Date.now() - gen.getTime()) / 60000);
+        metaEl.textContent = ago < 60 ? `Updated ${ago}m ago` : `Updated ${Math.round(ago/60)}h ago`;
+    }
 
     trendsEl.innerHTML = '';
     if (data.trends) {
@@ -912,14 +926,18 @@ function renderSummary(data) {
     timelineEl.innerHTML = '';
     (data.hours || []).forEach(h => {
         const col = document.createElement('div');
-        col.className = 'bg-white dark:bg-slate-800 rounded-lg p-3 text-center border border-slate-200 dark:border-slate-700';
+        col.className = 'bg-white dark:bg-slate-800 rounded-lg p-3 text-center border border-slate-200 dark:border-slate-700 min-w-[5rem] flex-shrink-0';
         const icon = SKY_ICONS[h.sky_icon] || SKY_ICONS['question'];
+        // Convert UTC time to local timezone label
+        const localLabel = new Date(h.time).toLocaleTimeString([], { hour: 'numeric' }).toLowerCase();
+        // Add degree symbol to comfort string
+        const comfort = (h.comfort || '').replace(/(\d+)F/g, '$1°F');
         const precipHtml = h.precip ? `<div class="text-xs text-blue-500 mt-1">${h.precip}</div>` : '';
         col.innerHTML = `
-            <div class="text-xs text-slate-500 dark:text-slate-400 font-medium">${h.label}</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 font-medium">${localLabel}</div>
             <div class="text-2xl my-1">${icon}</div>
             <div class="text-xs text-slate-600 dark:text-slate-300">${h.sky}</div>
-            <div class="text-sm font-medium text-slate-800 dark:text-white mt-1">${h.comfort || ''}</div>
+            <div class="text-sm font-medium text-slate-800 dark:text-white mt-1">${comfort}</div>
             ${precipHtml}
         `;
         timelineEl.appendChild(col);
@@ -1150,7 +1168,7 @@ function setLocation(lat, lon, name) {
     localStorage.setItem(STORAGE_KEY_LAST_LOC, JSON.stringify({ lat, lon, name }));
     loadData();
     if (currentVariable === 'summary') {
-        fetchSummary(currentLat, currentLon).then(renderSummary);
+        fetchSummary().then(renderSummary);
     }
 }
 
