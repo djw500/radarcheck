@@ -330,6 +330,7 @@ Be conversational, mention specific times if conditions shift.
 If trends show changes vs earlier forecasts, mention them naturally.
 Do not use emoji. Do not start with "The forecast" or "Looking ahead"."""
 
+    raw_output = {"stdout": "", "stderr": "", "exit_code": None}
     try:
         result = subprocess.run(
             ["llm", "-m", "gemini-3-flash-preview"],
@@ -338,17 +339,21 @@ Do not use emoji. Do not start with "The forecast" or "Looking ahead"."""
             text=True,
             timeout=30,
         )
+        raw_output["stdout"] = result.stdout
+        raw_output["stderr"] = result.stderr
+        raw_output["exit_code"] = result.returncode
         # llm CLI may return exit code 1 due to sqlite logging bug
         # but still produce valid output on stdout
         if result.stdout.strip():
-            return result.stdout.strip(), prompt
+            return result.stdout.strip(), prompt, raw_output
         log.warning(f"LLM produced no output: {result.stderr}")
     except Exception as e:
         log.warning(f"LLM error: {e}")
+        raw_output["error"] = str(e)
 
     # Fallback: simple rule-based text from first hour's data
     first = hours_summary[0]
-    return f"{first['sky']}. {first['comfort'] or ''}.", prompt
+    return f"{first['sky']}. {first['comfort'] or ''}.", prompt, raw_output
 
 
 def generate_summary(lat, lon, cache_dir):
@@ -377,7 +382,7 @@ def generate_summary(lat, lon, cache_dir):
     save_snapshot(cache_dir, grid_id, current_by_time)
 
     # Generate AI text
-    ai_text, prompt = generate_ai_text(hours_summary, trends, lat, lon)
+    ai_text, prompt, raw_output = generate_ai_text(hours_summary, trends, lat, lon)
 
     # Build final result
     result = {
@@ -388,6 +393,7 @@ def generate_summary(lat, lon, cache_dir):
         "trends": trends,
         "text": ai_text,
         "prompt": prompt,
+        "llm_raw": raw_output,
     }
 
     # Cache result

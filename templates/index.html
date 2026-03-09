@@ -165,9 +165,22 @@
         <div id="summaryTrends" class="flex flex-wrap gap-2 mb-4"></div>
         <div id="summaryTimeline" class="flex gap-2 overflow-x-auto pb-2 no-scrollbar"></div>
         <div id="summaryMeta" class="text-xs text-slate-500 dark:text-slate-500 mt-3 text-right"></div>
-        <details id="summaryPrompt" class="mt-3 hidden">
-            <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-600 dark:hover:text-slate-300">View prompt</summary>
-            <pre id="summaryPromptText" class="mt-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap"></pre>
+        <details id="summaryPrompt" class="mt-4 hidden">
+            <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-600 dark:hover:text-slate-300">Prompt &amp; raw output</summary>
+            <div class="mt-2 space-y-3">
+                <div>
+                    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Prompt sent to LLM</div>
+                    <pre id="summaryPromptText" class="text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto"></pre>
+                </div>
+                <div>
+                    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Raw LLM output (stdout)</div>
+                    <pre id="summaryRawStdout" class="text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-40 overflow-y-auto"></pre>
+                </div>
+                <div id="summaryRawStderrWrap">
+                    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Stderr / thinking</div>
+                    <pre id="summaryRawStderr" class="text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-40 overflow-y-auto"></pre>
+                </div>
+            </div>
         </details>
     </div>
 
@@ -918,9 +931,13 @@ function renderSummary(data) {
         metaEl.textContent = ago < 60 ? `Updated ${ago}m ago` : `Updated ${Math.round(ago/60)}h ago`;
     }
 
-    // Show raw prompt
-    if (data.prompt) {
-        promptTextEl.textContent = data.prompt;
+    // Show prompt and raw LLM output
+    if (data.prompt || data.llm_raw) {
+        promptTextEl.textContent = data.prompt || '';
+        document.getElementById('summaryRawStdout').textContent = (data.llm_raw && data.llm_raw.stdout) || '';
+        const stderr = (data.llm_raw && data.llm_raw.stderr) || '';
+        document.getElementById('summaryRawStderr').textContent = stderr;
+        document.getElementById('summaryRawStderrWrap').style.display = stderr ? '' : 'none';
         promptEl.classList.remove('hidden');
     } else {
         promptEl.classList.add('hidden');
