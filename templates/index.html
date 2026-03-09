@@ -102,6 +102,7 @@
             <div class="flex flex-col sm:flex-row gap-3">
                 <!-- Variable Switcher -->
                 <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto max-w-full">
+                    <button data-var="summary" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap font-semibold">Summary</button>
                     <button data-var="asnow" class="var-btn px-3 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap transition">Snow</button>
                     <button data-var="snod" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Depth</button>
                     <button data-var="t2m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
@@ -155,6 +156,14 @@
                 <tbody id="dataTableBody"></tbody>
             </table>
         </div>
+    </div>
+
+    <div id="summaryPanel" class="hidden mt-6">
+        <div id="summaryText" class="bg-white dark:bg-slate-800 rounded-xl p-4 mb-4 text-slate-700 dark:text-slate-300 text-sm leading-relaxed border border-slate-200 dark:border-slate-700">
+            Loading summary...
+        </div>
+        <div id="summaryTrends" class="flex flex-wrap gap-2 mb-4"></div>
+        <div id="summaryTimeline" class="grid grid-cols-4 sm:grid-cols-8 gap-2"></div>
     </div>
 
     <!-- Model Toggles (Sticky Bottom) -->
@@ -281,7 +290,7 @@ const VAR_CONFIG = {
 };
 
 // Validate currentVariable
-if (!currentVariable || !VAR_CONFIG[currentVariable]) {
+if (!currentVariable || (!VAR_CONFIG[currentVariable] && currentVariable !== 'summary')) {
     currentVariable = 'asnow';
 }
 
@@ -319,6 +328,30 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         const newVar = e.target.dataset.var;
         if (newVar === currentVariable) return;
+
+        if (newVar === 'summary') {
+            // Switch active button styling
+            document.querySelectorAll('.var-btn').forEach(b => {
+                b.classList.remove('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+                b.classList.add('text-slate-600', 'dark:text-slate-400');
+            });
+            e.target.classList.add('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+            e.target.classList.remove('text-slate-600', 'dark:text-slate-400');
+
+            currentVariable = 'summary';
+            document.getElementById('snowChart').style.display = 'none';
+            document.getElementById('dataTableContainer').style.display = 'none';
+            document.getElementById('summaryPanel').classList.remove('hidden');
+            if (currentLat && currentLon) {
+                fetchSummary(currentLat, currentLon).then(renderSummary);
+            }
+            return;
+        }
+
+        // For all other variables, hide summary and show chart/table
+        document.getElementById('summaryPanel').classList.add('hidden');
+        document.getElementById('snowChart').style.display = '';
+        document.getElementById('dataTableContainer').style.display = '';
 
         currentVariable = newVar;
         localStorage.setItem(STORAGE_KEY_LAST_VAR, currentVariable);
@@ -830,6 +863,69 @@ function renderTable(data, timeline) {
     }
 }
 
+// --- Summary Mode ---
+const SKY_ICONS = {
+    'sun': '\u2600\uFE0F',
+    'cloud-sun': '\u26C5',
+    'cloud': '\u2601\uFE0F',
+    'cloud-moon': '\u2601\uFE0F',
+    'moon': '\uD83C\uDF19',
+    'question': '\u2753'
+};
+
+async function fetchSummary(lat, lon) {
+    const url = `${API_BASE}/api/qualitative?lat=${lat}&lon=${lon}`;
+    try {
+        return await fetchJSON(url);
+    } catch (e) {
+        console.error('Summary fetch error:', e);
+        return null;
+    }
+}
+
+function renderSummary(data) {
+    const textEl = document.getElementById('summaryText');
+    const trendsEl = document.getElementById('summaryTrends');
+    const timelineEl = document.getElementById('summaryTimeline');
+
+    if (!data) {
+        textEl.textContent = 'Summary not available yet. Data generates hourly.';
+        trendsEl.innerHTML = '';
+        timelineEl.innerHTML = '';
+        return;
+    }
+
+    textEl.textContent = data.text || 'No summary available.';
+
+    trendsEl.innerHTML = '';
+    if (data.trends) {
+        Object.entries(data.trends).forEach(([period, deltas]) => {
+            Object.values(deltas).forEach(desc => {
+                const badge = document.createElement('span');
+                badge.className = 'px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200';
+                badge.textContent = desc;
+                trendsEl.appendChild(badge);
+            });
+        });
+    }
+
+    timelineEl.innerHTML = '';
+    (data.hours || []).forEach(h => {
+        const col = document.createElement('div');
+        col.className = 'bg-white dark:bg-slate-800 rounded-lg p-3 text-center border border-slate-200 dark:border-slate-700';
+        const icon = SKY_ICONS[h.sky_icon] || SKY_ICONS['question'];
+        const precipHtml = h.precip ? `<div class="text-xs text-blue-500 mt-1">${h.precip}</div>` : '';
+        col.innerHTML = `
+            <div class="text-xs text-slate-500 dark:text-slate-400 font-medium">${h.label}</div>
+            <div class="text-2xl my-1">${icon}</div>
+            <div class="text-xs text-slate-600 dark:text-slate-300">${h.sky}</div>
+            <div class="text-sm font-medium text-slate-800 dark:text-white mt-1">${h.comfort || ''}</div>
+            ${precipHtml}
+        `;
+        timelineEl.appendChild(col);
+    });
+}
+
 document.getElementById('toggleTableBtn').addEventListener('click', () => {
     const container = document.getElementById('dataTableContainer');
     container.classList.toggle('hidden');
@@ -1053,6 +1149,9 @@ function setLocation(lat, lon, name) {
     
     localStorage.setItem(STORAGE_KEY_LAST_LOC, JSON.stringify({ lat, lon, name }));
     loadData();
+    if (currentVariable === 'summary') {
+        fetchSummary(currentLat, currentLon).then(renderSummary);
+    }
 }
 
 // --- Search Logic (Nominatim) ---
