@@ -126,14 +126,14 @@ def build_model_data(lat, lon, hours_ahead=24):
                 model_data[label] = {"init": init_time, "hours": hour_labels[:], "data": {}}
             model_data[label]["data"][var] = extract_hourly([hrrr_runs[i]], hour_isos)
 
-    # GFS: latest run
-    for var in VARIABLES:
-        gfs_runs = extract_latest_runs(all_data[var], "gfs", count=1)
-        if gfs_runs:
-            label = "gfs"
-            if label not in model_data:
-                model_data[label] = {"init": gfs_runs[0][0], "hours": hour_labels[:], "data": {}}
-            model_data[label]["data"][var] = extract_hourly(gfs_runs, hour_isos)
+    # GFS, ECMWF, NBM: latest run each
+    for model_id in ["gfs", "ecmwf_hres", "nbm"]:
+        for var in VARIABLES:
+            runs = extract_latest_runs(all_data[var], model_id, count=1)
+            if runs:
+                if model_id not in model_data:
+                    model_data[model_id] = {"init": runs[0][0], "hours": hour_labels[:], "data": {}}
+                model_data[model_id]["data"][var] = extract_hourly(runs, hour_isos)
 
     # Build current all-model median for snapshots (backward compat)
     current_by_time = {}
@@ -251,10 +251,10 @@ def build_prompt(model_data, trends, hour_labels):
     """Build the LLM prompt with raw model data and trend snapshots."""
     sections = []
     sections.append("""You are a meteorologist who finally got their own forecast column. This is your chance to shine.
-Think of those entertaining highway signs that make people smile — that energy, but for weather.
-You have raw data from multiple models. Your job is to interpret this data, tell the story of
-the next 24 hours, and make it genuinely fun to read. Be witty, be opinionated, have a voice.
-But always be accurate — you're entertaining AND informative.
+You have raw data from 5 weather models (HRRR, GFS, ECMWF, NBM). Your job is to interpret
+this data, tell the story of the next 24 hours, and make it genuinely engaging to read.
+Be witty and have a voice, but always be precise and quantitative when it matters.
+You're entertaining AND informative — a weather nerd's dream forecaster.
 """)
 
     for model_label, mdata in model_data.items():
@@ -283,53 +283,58 @@ But always be accurate — you're entertaining AND informative.
 Produce JSON with this exact structure:
 
 {
-  "hours": [
+  "buckets": [
     {
-      "time": "<hour label>",
-      "icon": "<icon>",
+      "time": "<label>",
       "cloud_pct": <0-100>,
       "clearness": <0-100>,
       "precip_type": null | "rain" | "snow",
       "is_night": true/false,
+      "temp": <number or string>,
       "lines": ["<line1>", "<line2>", ...],
-      "temp": <number>
+      "icon": "<icon>"
     },
-    ... one per forecast hour
+    ... as many as you need (8-16 typically)
   ],
   "narrative": "<3-5 sentence meteorologist brief>"
 }
 
-## Rules for "lines" (this is the most important part)
+## Time buckets — YOU decide the structure
 
-Each hour gets 2-3 short lines displayed in a vertical timeline. You have space — use it creatively.
-- Line 1: ALWAYS the temperature (e.g. "53°F")
-- Line 2+: The most INTERESTING thing about this hour. Be creative and fun! Ideas:
-  - Interpret conditions with personality: "Crisp enough for a hoodie" not "dewpoint 32°F"
-  - Model drama: "GFS wants rain, HRRR says no way"
-  - Forecast evolution: "Yesterday's storm? Gone. Poof." or "Rain just crashed the party"
-  - Vibe check: "Perfect dog-walking weather", "Peak patio hour", "You'll regret shorts"
-  - Snarky observations: "Models finally agree on something", "GFS being optimistic again"
-  - Notable transitions: "Clouds rolling in like they own the place"
-- Do NOT repeat the same commentary for consecutive hours. If 6 hours are all clear, find something different and interesting to say each time. Boring is the only sin.
-- MUST include precip info if rain/snow is non-zero.
-- Temperature is the ONLY raw number that should appear. Interpret everything else.
+You do NOT have to do one bucket per hour. Group time intelligently:
+- Overnight when nothing changes: "Tonight 11pm-5am" as one bucket
+- Interesting transition hours: give them their own bucket ("3pm", "4pm")
+- Morning/afternoon blocks: "Morning 7-10am" if conditions are steady
+- Use 8-16 buckets total. More detail for interesting periods, less for boring ones.
 
-## Rules for SVG fields
+## Rules for each bucket
 
-- "cloud_pct": 0 = clear sky, 100 = fully overcast. Drives cloud shape size in the icon.
-- "clearness": 0 = dark/hazy, 100 = brilliant sun/bright moon. Drives sun/moon opacity.
-- "precip_type": null if dry, "rain" or "snow" if precipitating
+- "time": Your label. Can be "2pm", "Tonight 11pm-5am", "Morning", "Late afternoon", whatever fits.
+- "temp": A number OR a string. Use a number for single hours (53). Use a string for ranges or uncertainty: "48-53", "low 50s", "~72". Express uncertainty when models disagree!
+- "cloud_pct": 0-100, your best estimate for this period. Drives SVG cloud size.
+- "clearness": 0-100, how bright. Drives SVG sun/moon brightness.
+- "precip_type": null, "rain", or "snow"
 - "is_night": true if before sunrise or after sunset
-- "icon": one of sun, moon, cloud, cloud-sun, cloud-moon, cloud-rain, snowflake (used as fallback)
+- "icon": one of sun, moon, cloud, cloud-sun, cloud-moon, cloud-rain, snowflake (SVG fallback)
+- "lines": 2-3 short lines displayed in the timeline:
+  - Line 1: temperature (e.g. "53°F" or "48-53°F" or "Low 50s")
+  - Line 2+: The most interesting thing about this period. Be precise AND engaging:
+    - Quantify when useful: "HRRR says 72°F, GFS only 68°F" or "30% cloud cover"
+    - Interpret conditions: "Dry enough for a bonfire" or "Muggy, you'll notice it"
+    - Model drama: "ECMWF and HRRR agree, NBM is the outlier"
+    - Forecast shifts: "Rain vanished from the latest HRRR run"
+    - Express uncertainty: "Precip is a coin flip between models"
+  - MUST mention precip if non-zero
+  - Don't be repetitive across consecutive buckets
 
 ## Rules for "narrative"
 
-3-5 sentences. This is YOUR column — own it. Tell the story of the next 24 hours with personality.
-- Attribute to specific models when they disagree (make it dramatic if warranted)
-- Call out how the forecast has evolved vs earlier runs
-- Mention specific times when conditions shift
-- Describe what kind of day/night it will be — paint the picture
-- Have fun with it. Be the weather person people actually want to read. No emoji though.
+3-5 sentences. This is YOUR column — tell the story of the next 24 hours.
+- Be precise: cite specific models, temperatures, times
+- Express uncertainty where models disagree — don't pretend to know what you don't
+- Call out forecast evolution vs earlier runs
+- Paint the picture of what kind of day it will be
+- Have personality but stay grounded in the data. No emoji.
 
 Output ONLY the JSON object. No markdown fences, no explanation.""")
 
@@ -347,11 +352,13 @@ def parse_llm_response(stdout):
 
     data = json.loads(text)
 
-    if not isinstance(data.get("hours"), list) or len(data["hours"]) < 1:
-        raise ValueError("Missing or empty 'hours' array")
+    # Support both "buckets" and "hours" keys
+    buckets = data.get("buckets") or data.get("hours") or []
+    if not isinstance(buckets, list) or len(buckets) < 1:
+        raise ValueError("Missing or empty 'buckets'/'hours' array")
 
     # Validate and fix fields
-    for h in data["hours"]:
+    for h in buckets:
         if h.get("icon") not in VALID_ICONS:
             h["icon"] = "question"
         if not isinstance(h.get("lines"), list):
@@ -361,9 +368,17 @@ def parse_llm_response(stdout):
         h.setdefault("clearness", 50)
         h.setdefault("precip_type", None)
         h.setdefault("is_night", False)
+        # Normalize temp to string for display flexibility
+        if isinstance(h.get("temp"), (int, float)):
+            h["temp_display"] = f"{h['temp']:.0f}°F"
+        elif isinstance(h.get("temp"), str):
+            h["temp_display"] = h["temp"] if "°" in h["temp"] else h["temp"] + "°F"
+        else:
+            h["temp_display"] = "?"
 
+    data["buckets"] = buckets
     if "narrative" not in data or not data["narrative"]:
-        data["narrative"] = " ".join(data["hours"][0].get("lines", []))
+        data["narrative"] = " ".join(buckets[0].get("lines", []))
 
     return data
 
@@ -479,7 +494,7 @@ def generate_summary(lat, lon, cache_dir):
         log.info("Using rule-based fallback")
         fallback_hours = build_fallback(model_data, hour_labels)
         llm_data = {
-            "hours": fallback_hours,
+            "buckets": fallback_hours,
             "narrative": "Forecast summary temporarily unavailable. Showing basic conditions from HRRR.",
         }
 
@@ -488,7 +503,7 @@ def generate_summary(lat, lon, cache_dir):
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "lat": lat,
         "lon": lon,
-        "hours": llm_data["hours"],
+        "buckets": llm_data.get("buckets", llm_data.get("hours", [])),
         "narrative": llm_data["narrative"],
         "prompt": prompt,
         "llm_raw": raw_output,

@@ -971,14 +971,17 @@ function renderSummary(data) {
 
     timelineEl.innerHTML = '';
     svgIdCounter = 0;
-    (data.hours || []).forEach(h => {
+    const buckets = data.buckets || data.hours || [];
+    buckets.forEach(h => {
         const row = document.createElement('div');
         row.className = 'flex items-center gap-3 bg-white dark:bg-slate-800 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700';
 
-        // SVG icon (use numeric fields if available, else fallback to emoji)
+        // SVG icon with temp overlay
         let iconHtml;
         if (h.cloud_pct !== undefined && h.clearness !== undefined) {
-            iconHtml = weatherSVG(h.cloud_pct, h.clearness, h.precip_type || null, h.is_night || false);
+            const svg = weatherSVG(h.cloud_pct, h.clearness, h.precip_type || null, h.is_night || false);
+            const tempLabel = h.temp_display || (typeof h.temp === 'number' ? h.temp + '°' : (h.temp || ''));
+            iconHtml = `<div class="relative">${svg}<div class="absolute inset-0 flex items-end justify-center pb-0.5"><span class="text-[10px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">${tempLabel}</span></div></div>`;
         } else {
             const emoji = SKY_ICONS[h.icon] || SKY_ICONS[h.sky_icon] || SKY_ICONS['question'];
             iconHtml = `<span class="text-2xl">${emoji}</span>`;
@@ -993,7 +996,7 @@ function renderSummary(data) {
 
         row.innerHTML = `
             <div class="flex-shrink-0 w-12">${iconHtml}</div>
-            <div class="flex-shrink-0 w-12 text-xs font-medium text-slate-500 dark:text-slate-400">${h.time}</div>
+            <div class="flex-shrink-0 w-24 text-xs font-medium text-slate-500 dark:text-slate-400">${h.time}</div>
             <div class="flex-1 flex flex-wrap items-baseline gap-x-0">${linesHtml}</div>
         `;
         timelineEl.appendChild(row);
