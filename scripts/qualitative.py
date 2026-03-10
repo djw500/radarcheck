@@ -411,8 +411,7 @@ def generate_summary(lat, lon, cache_dir):
     llm_data = None
     try:
         result = subprocess.run(
-            ["llm", "-m", "gemini-3-flash-preview"],
-            input=prompt,
+            ["gemini", "-m", "gemini-3.1-pro-preview", "-p", prompt],
             capture_output=True,
             text=True,
             timeout=60,
