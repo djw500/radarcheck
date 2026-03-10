@@ -976,12 +976,15 @@ function renderSummary(data) {
         const row = document.createElement('div');
         row.className = 'flex items-center gap-3 bg-white dark:bg-slate-800 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700';
 
-        // SVG icon with temp overlay
+        // SVG icon with cloud/clearness overlay
         let iconHtml;
         if (h.cloud_pct !== undefined && h.clearness !== undefined) {
             const svg = weatherSVG(h.cloud_pct, h.clearness, h.precip_type || null, h.is_night || false);
-            const tempLabel = h.temp_display || (typeof h.temp === 'number' ? h.temp + '°' : (h.temp || ''));
-            iconHtml = `<div class="relative">${svg}<div class="absolute inset-0 flex items-end justify-center pb-0.5"><span class="text-[10px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">${tempLabel}</span></div></div>`;
+            const cl = Math.round(h.cloud_pct);
+            const br = Math.round(h.clearness);
+            const overlayLabel = cl > 10 ? `${cl}%` : `${br}%`;
+            const overlayColor = cl > 10 ? 'rgba(200,200,220,0.9)' : 'rgba(255,220,100,0.9)';
+            iconHtml = `<div class="relative">${svg}<div class="absolute inset-0 flex items-end justify-center pb-0.5"><span class="text-[9px] font-bold drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" style="color:${overlayColor}">${overlayLabel}</span></div></div>`;
         } else {
             const emoji = SKY_ICONS[h.icon] || SKY_ICONS[h.sky_icon] || SKY_ICONS['question'];
             iconHtml = `<span class="text-2xl">${emoji}</span>`;

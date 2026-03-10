@@ -77,7 +77,7 @@ def extract_latest_runs(api_response, model_id, count=1):
     return runs_by_init[:count]
 
 
-def build_model_data(lat, lon, hours_ahead=24):
+def build_model_data(lat, lon, hours_ahead=48):
     """Fetch raw model data and build compact per-model, per-hour payload.
 
     Returns (model_data dict, hour_labels list, all_data for snapshot).
@@ -294,7 +294,7 @@ Produce JSON with this exact structure:
       "lines": ["<line1>", "<line2>", ...],
       "icon": "<icon>"
     },
-    ... as many as you need (8-16 typically)
+    ... as many as you need
   ],
   "narrative": "<3-5 sentence meteorologist brief>"
 }
@@ -305,7 +305,8 @@ You do NOT have to do one bucket per hour. Group time intelligently:
 - Overnight when nothing changes: "Tonight 11pm-5am" as one bucket
 - Interesting transition hours: give them their own bucket ("3pm", "4pm")
 - Morning/afternoon blocks: "Morning 7-10am" if conditions are steady
-- Use 8-16 buckets total. More detail for interesting periods, less for boring ones.
+- You can extend as far into the future as the data allows — if there's a storm in 36 hours, add a bucket for it
+- More detail for interesting periods, less for boring ones. No minimum or maximum.
 
 ## Rules for each bucket
 
