@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate qualitative forecast summaries.
+"""Generate qualitative forecast summaries (v2 — LLM-driven).
 
-Runs hourly. Fetches multirun API data for all variables, aggregates
-across models, derives sky/comfort conditions, generates AI text,
-and caches the result.
+Runs hourly. Fetches raw model data from HRRR (latest 2 runs) and GFS
+(latest run), plus trend snapshots from 1h/6h/24h ago. Passes everything
+to Gemini Flash which produces both structured hourly columns and a
+meteorologist-style narrative.
 
 Usage:
     python scripts/qualitative.py --once --lat 40.0 --lon -75.4
@@ -15,6 +16,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -28,7 +30,8 @@ log = logging.getLogger(__name__)
 API_BASE = os.environ.get("RADARCHECK_API_BASE", "http://localhost:5001")
 CACHE_DIR = Path(os.environ.get("QUALITATIVE_CACHE_DIR", "cache/qualitative"))
 VARIABLES = ["t2m", "dpt", "cloud_cover", "dswrf", "apcp", "asnow", "snod"]
-SNAPSHOT_RETAIN_HOURS = 25  # keep snapshots for 25h (covers 24h lookback)
+SNAPSHOT_RETAIN_HOURS = 25
+VALID_ICONS = {"sun", "moon", "cloud", "cloud-sun", "cloud-moon", "cloud-rain", "snowflake", "question"}
 
 
 def grid_key(lat, lon):
@@ -36,186 +39,134 @@ def grid_key(lat, lon):
     return f"{lat:.1f}_{lon:.1f}"
 
 
-def fetch_multirun(lat, lon, variable, days=1):
+def fetch_multirun(lat, lon, variable, model="all", days=1):
     """Fetch multirun data from the API."""
     import urllib.request
-    url = f"{API_BASE}/api/timeseries/multirun?lat={lat}&lon={lon}&variable={variable}&model=all&days={days}"
+    url = f"{API_BASE}/api/timeseries/multirun?lat={lat}&lon={lon}&variable={variable}&model={model}&days={days}"
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             return json.loads(resp.read())
     except Exception as e:
-        log.warning(f"Failed to fetch {variable}: {e}")
+        log.warning(f"Failed to fetch {variable}/{model}: {e}")
         return None
 
 
-def aggregate_hourly(all_data, hours_ahead=8):
-    """Aggregate multirun data into per-hour median values across models.
+def extract_latest_runs(api_response, model_id, count=1):
+    """Extract the latest N runs for a specific model from multirun API response.
 
-    Returns dict: {hour_offset: {variable: median_value}}
+    Returns list of (init_time, {valid_time: value}) dicts, newest first.
+    """
+    if api_response is None:
+        return []
+
+    runs_by_init = []
+    for run_key, run_info in api_response.get("runs", {}).items():
+        rid = run_info.get("model_id", run_key.split("/")[0])
+        if rid != model_id:
+            continue
+        init_time = run_info.get("init_time", "")
+        values_by_time = {}
+        for pt in run_info.get("series", []):
+            vt = pt.get("valid_time", "")
+            v = pt.get("value")
+            if vt and v is not None:
+                values_by_time[vt] = round(v, 1)
+        runs_by_init.append((init_time, values_by_time))
+
+    runs_by_init.sort(key=lambda x: x[0], reverse=True)
+    return runs_by_init[:count]
+
+
+def build_model_data(lat, lon, hours_ahead=8):
+    """Fetch raw model data and build compact per-model, per-hour payload.
+
+    Returns (model_data dict, hour_labels list, all_data for snapshot).
     """
     now = datetime.datetime.now(datetime.timezone.utc)
-    result = {}
 
-    for hour_offset in range(1, hours_ahead + 1):
-        target_time = now + datetime.timedelta(hours=hour_offset)
-        target_hour = target_time.replace(minute=0, second=0, microsecond=0)
-        target_iso = target_hour.strftime("%Y-%m-%dT%H:00:00Z")
+    # Build target hours
+    target_hours = []
+    for offset in range(1, hours_ahead + 1):
+        t = (now + datetime.timedelta(hours=offset)).replace(minute=0, second=0, microsecond=0)
+        target_hours.append(t)
 
-        hour_data = {}
-        for var_id, var_response in all_data.items():
-            if var_response is None:
+    hour_labels = [t.astimezone().strftime("%-I%p").lower() for t in target_hours]
+    hour_isos = [t.strftime("%Y-%m-%dT%H:00:00") for t in target_hours]
+
+    # Fetch all variables for all models at once
+    all_data = {}
+    for var in VARIABLES:
+        all_data[var] = fetch_multirun(lat, lon, var, model="all", days=1)
+
+    def extract_hourly(runs_list, hour_isos):
+        """Given a list of (init_time, {valid_time: value}), return values for target hours."""
+        if not runs_list:
+            return [None] * len(hour_isos)
+        _, values_by_time = runs_list[0]
+        result = []
+        for iso in hour_isos:
+            # Match by hour prefix (valid_time may have timezone suffix)
+            val = None
+            for vt, v in values_by_time.items():
+                if vt.startswith(iso[:13]):
+                    val = v
+                    break
+            result.append(val)
+        return result
+
+    # Build per-model data
+    model_data = {}
+
+    # HRRR: latest 2 runs
+    for var in VARIABLES:
+        hrrr_runs = extract_latest_runs(all_data[var], "hrrr", count=2)
+        for i, (init_time, _) in enumerate(hrrr_runs):
+            label = "hrrr_latest" if i == 0 else "hrrr_previous"
+            if label not in model_data:
+                model_data[label] = {"init": init_time, "hours": hour_labels[:], "data": {}}
+            model_data[label]["data"][var] = extract_hourly([hrrr_runs[i]], hour_isos)
+
+    # GFS: latest run
+    for var in VARIABLES:
+        gfs_runs = extract_latest_runs(all_data[var], "gfs", count=1)
+        if gfs_runs:
+            label = "gfs"
+            if label not in model_data:
+                model_data[label] = {"init": gfs_runs[0][0], "hours": hour_labels[:], "data": {}}
+            model_data[label]["data"][var] = extract_hourly(gfs_runs, hour_isos)
+
+    # Build current all-model median for snapshots (backward compat)
+    current_by_time = {}
+    for idx, iso in enumerate(hour_isos):
+        full_iso = iso + "Z"
+        vals = {}
+        for var in VARIABLES:
+            all_values = []
+            if all_data[var] is None:
                 continue
-            # Use only the latest run per model (not all runs)
-            latest_by_model = {}
-            for run_key, run_info in var_response.get("runs", {}).items():
-                model_id = run_info.get("model_id", run_key.split("/")[0])
-                init_time = run_info.get("init_time", "")
-                if model_id not in latest_by_model or init_time > latest_by_model[model_id][0]:
-                    latest_by_model[model_id] = (init_time, run_info)
-
-            values = []
-            for _, (_, run_info) in latest_by_model.items():
+            for run_key, run_info in all_data[var].get("runs", {}).items():
                 for pt in run_info.get("series", []):
-                    if pt.get("valid_time", "").startswith(target_iso[:13]):
+                    if pt.get("valid_time", "").startswith(iso[:13]):
                         v = pt.get("value")
                         if v is not None:
-                            values.append(v)
-            if values:
-                values.sort()
-                mid = len(values) // 2
-                hour_data[var_id] = values[mid]  # median of latest runs only
+                            all_values.append(v)
+                            break
+            if all_values:
+                all_values.sort()
+                vals[var] = all_values[len(all_values) // 2]
+        current_by_time[full_iso] = vals
 
-        result[hour_offset] = {
-            "time": target_iso,
-            "local_label": target_hour.astimezone().strftime("%-I%p").lower(),
-            "values": hour_data,
-        }
-
-    return result
+    return model_data, hour_labels, hour_isos, current_by_time
 
 
-def derive_sky_condition(cloud_cover, solar_clearness):
-    """Derive qualitative sky condition from cloud cover + solar clearness.
-
-    Returns (label, icon) tuple.
-    """
-    # Nighttime: solar is None
-    if solar_clearness is None:
-        if cloud_cover is None:
-            return ("Unknown", "question")
-        if cloud_cover < 20:
-            return ("Clear", "moon")
-        if cloud_cover < 60:
-            return ("Partly cloudy", "cloud-moon")
-        if cloud_cover < 90:
-            return ("Mostly cloudy", "cloud")
-        return ("Overcast", "cloud")
-
-    # Daytime: combine both signals
-    if cloud_cover is not None:
-        if cloud_cover < 20 and solar_clearness > 80:
-            return ("Bright sunny", "sun")
-        if cloud_cover < 60 and solar_clearness > 60:
-            return ("Bright cloudy", "cloud-sun")
-        if cloud_cover < 60:
-            return ("Partly cloudy", "cloud-sun")
-        if cloud_cover < 90 and solar_clearness > 40:
-            return ("Mostly cloudy, some sun", "cloud-sun")
-        if cloud_cover < 90:
-            return ("Overcast", "cloud")
-        if solar_clearness < 20:
-            return ("Dark and heavy", "cloud")
-        return ("Overcast", "cloud")
-
-    # No cloud data, just solar
-    if solar_clearness > 80:
-        return ("Sunny", "sun")
-    if solar_clearness > 50:
-        return ("Hazy", "cloud-sun")
-    return ("Cloudy", "cloud")
-
-
-def derive_comfort(temp_f, dpt_f):
-    """Derive comfort label from temperature and dew point."""
-    if dpt_f is None:
-        if temp_f is None:
-            return None
-        return f"{temp_f:.0f}F"
-
-    if dpt_f < 40:
-        comfort = "Crisp"
-    elif dpt_f < 55:
-        comfort = "Comfortable"
-    elif dpt_f < 65:
-        comfort = "Sticky"
-    elif dpt_f < 70:
-        comfort = "Muggy"
-    else:
-        comfort = "Oppressive"
-
-    if temp_f is not None:
-        return f"{temp_f:.0f}F - {comfort}"
-    return comfort
-
-
-def derive_precip(apcp, asnow):
-    """Derive precipitation label."""
-    if asnow is not None and asnow > 0.05:
-        return f"Snow {asnow:.1f} in"
-    if apcp is not None and apcp > 0.01:
-        return f"Rain {apcp:.2f} in"
-    return None
-
-
-def build_hourly_summary(hourly_data):
-    """Build derived conditions for each hour."""
-    hours = []
-    for offset in sorted(hourly_data.keys()):
-        h = hourly_data[offset]
-        vals = h["values"]
-        # Treat dswrf=0 as None (nighttime/twilight — server returns null
-        # for night, but edge cases near sunrise may produce 0)
-        solar = vals.get("dswrf")
-        if solar is not None and solar <= 0:
-            solar = None
-        sky_label, sky_icon = derive_sky_condition(
-            vals.get("cloud_cover"), solar
-        )
-        comfort = derive_comfort(vals.get("t2m"), vals.get("dpt"))
-        precip = derive_precip(vals.get("apcp"), vals.get("asnow"))
-
-        hours.append({
-            "time": h["time"],
-            "label": h["local_label"],
-            "sky": sky_label,
-            "sky_icon": sky_icon,
-            "comfort": comfort,
-            "precip": precip,
-            "raw": vals,
-        })
-    return hours
-
-
-def compute_trends(current_hourly, cache_dir, grid_id):
-    """Compare current forecast to snapshots from 1h/6h/24h ago.
-
-    Compares by valid time: for each overlapping forecast hour, compute
-    the delta between what the old snapshot predicted and what the current
-    forecast predicts for that same future time. This avoids false trends
-    from diurnal cycle differences.
-
-    Returns (trends dict, current_by_valid_time dict).
-    """
-    trends = {}
+def load_trend_snapshots(cache_dir, grid_id, hour_isos):
+    """Load trend snapshots and build per-hour delta data for LLM."""
     now = datetime.datetime.now(datetime.timezone.utc)
-
-    # Build current forecast keyed by valid time (ISO string)
-    current_by_time = {}
-    for h in current_hourly:
-        current_by_time[h["time"]] = h["raw"]
-
     snapshot_dir = cache_dir / "snapshots" / grid_id
-    for label, hours_ago in [("1h ago", 1), ("6h ago", 6), ("24h ago", 24)]:
+    trend_vars = ["t2m", "dpt", "cloud_cover", "dswrf", "apcp"]
+
+    trends = {}
+    for label, hours_ago in [("1h_ago", 1), ("6h_ago", 6), ("24h_ago", 24)]:
         target_time = now - datetime.timedelta(hours=hours_ago)
         snapshot_file = find_closest_snapshot(snapshot_dir, target_time)
         if snapshot_file is None:
@@ -231,36 +182,25 @@ def compute_trends(current_hourly, cache_dir, grid_id):
         if not old_by_time:
             continue
 
-        # Average deltas across overlapping valid times
-        var_deltas = {}
-        var_counts = {}
-        for valid_time, current_vals in current_by_time.items():
-            old_vals = old_by_time.get(valid_time, {})
-            for var in ["t2m", "dpt", "cloud_cover", "dswrf", "apcp"]:
-                cur_v = current_vals.get(var)
+        # Build per-hour deltas for overlapping valid times
+        per_hour = {}
+        for iso in hour_isos:
+            full_iso = iso + "Z"
+            old_vals = old_by_time.get(full_iso, {})
+            if not old_vals:
+                continue
+            deltas = {}
+            for var in trend_vars:
                 old_v = old_vals.get(var)
-                if cur_v is not None and old_v is not None:
-                    var_deltas.setdefault(var, 0.0)
-                    var_deltas[var] += cur_v - old_v
-                    var_counts[var] = var_counts.get(var, 0) + 1
+                if old_v is not None:
+                    deltas[var] = round(old_v, 1)
+            if deltas:
+                per_hour[iso[:13]] = deltas
 
-        deltas = {}
-        for var, threshold, direction in [
-            ("t2m", 3.0, ("warmer", "cooler")),
-            ("apcp", 0.05, ("wetter", "drier")),
-            ("cloud_cover", 15.0, ("cloudier", "clearer")),
-            ("dswrf", 15.0, ("less sunny", "sunnier")),
-        ]:
-            if var in var_deltas and var_counts.get(var, 0) > 0:
-                avg_delta = var_deltas[var] / var_counts[var]
-                if abs(avg_delta) >= threshold:
-                    word = direction[0] if avg_delta > 0 else direction[1]
-                    deltas[var] = f"{word} than {label}"
+        if per_hour:
+            trends[label] = per_hour
 
-        if deltas:
-            trends[label] = deltas
-
-    return trends, current_by_time
+    return trends
 
 
 def find_closest_snapshot(snapshot_dir, target_time):
@@ -278,7 +218,7 @@ def find_closest_snapshot(snapshot_dir, target_time):
         try:
             file_ts = float(f.stem)
             delta = abs(file_ts - target_ts)
-            if delta < best_delta and delta < 7200:  # within 2 hours
+            if delta < best_delta and delta < 7200:
                 best_delta = delta
                 best_file = f
         except ValueError:
@@ -288,11 +228,7 @@ def find_closest_snapshot(snapshot_dir, target_time):
 
 
 def save_snapshot(cache_dir, grid_id, current_by_time):
-    """Save current per-valid-time forecast as a timestamped snapshot.
-
-    Stores forecasts keyed by valid time ISO string so future trend
-    comparisons can match by the same future hour.
-    """
+    """Save current per-valid-time forecast as a timestamped snapshot."""
     snapshot_dir = cache_dir / "snapshots" / grid_id
     snapshot_dir.mkdir(parents=True, exist_ok=True)
 
@@ -301,7 +237,6 @@ def save_snapshot(cache_dir, grid_id, current_by_time):
     with open(snapshot_dir / filename, "w") as f:
         json.dump({"by_valid_time": current_by_time, "time": now.isoformat()}, f)
 
-    # Prune old snapshots
     cutoff = now - datetime.timedelta(hours=SNAPSHOT_RETAIN_HOURS)
     for snap in snapshot_dir.iterdir():
         try:
@@ -312,48 +247,142 @@ def save_snapshot(cache_dir, grid_id, current_by_time):
             pass
 
 
-def generate_ai_text(hours_summary, trends, lat, lon):
-    """Generate qualitative text using Gemini Flash via llm CLI."""
-    prompt_data = {
-        "hours": [
-            {"time": h["label"], "sky": h["sky"], "comfort": h["comfort"], "precip": h["precip"]}
-            for h in hours_summary
-        ],
-        "trends": trends,
-    }
+def build_prompt(model_data, trends, hour_labels):
+    """Build the LLM prompt with raw model data and trend snapshots."""
+    # Compact format: per-model tables
+    sections = []
+    sections.append("You are a meteorologist writing a brief forecast. You have data from multiple weather models.\n")
 
-    prompt = f"""Given this 8-hour forecast:
-{json.dumps(prompt_data, indent=2)}
+    for model_label, mdata in model_data.items():
+        init = mdata.get("init", "unknown")
+        sections.append(f"## {model_label} (init: {init})")
+        sections.append(f"Hours: {', '.join(hour_labels)}")
+        for var, values in mdata.get("data", {}).items():
+            vals_str = ", ".join(str(v) if v is not None else "-" for v in values)
+            sections.append(f"  {var}: {vals_str}")
+        sections.append("")
 
-Write 2-3 sentences describing conditions and notable changes.
-Be conversational, mention specific times if conditions shift.
-If trends show changes vs earlier forecasts, mention them naturally.
-Do not use emoji. Do not start with "The forecast" or "Looking ahead"."""
+    # Variable legend
+    sections.append("Variable key: t2m=temp(°F), dpt=dewpoint(°F), cloud_cover=clouds(%), dswrf=solar(W/m²), apcp=rain(in), asnow=snow(in), snod=snow_depth(in)")
+    sections.append("")
 
-    raw_output = {"stdout": "", "stderr": "", "exit_code": None}
-    try:
-        result = subprocess.run(
-            ["llm", "-m", "gemini-3-flash-preview"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        raw_output["stdout"] = result.stdout
-        raw_output["stderr"] = result.stderr
-        raw_output["exit_code"] = result.returncode
-        # llm CLI may return exit code 1 due to sqlite logging bug
-        # but still produce valid output on stdout
-        if result.stdout.strip():
-            return result.stdout.strip(), prompt, raw_output
-        log.warning(f"LLM produced no output: {result.stderr}")
-    except Exception as e:
-        log.warning(f"LLM error: {e}")
-        raw_output["error"] = str(e)
+    # Trends
+    if trends:
+        sections.append("## Previous forecast snapshots (what older forecasts predicted for these same hours)")
+        for label, per_hour in trends.items():
+            sections.append(f"### {label}")
+            for hour_key, vals in per_hour.items():
+                vals_str = ", ".join(f"{k}={v}" for k, v in vals.items())
+                sections.append(f"  {hour_key}: {vals_str}")
+        sections.append("")
 
-    # Fallback: simple rule-based text from first hour's data
-    first = hours_summary[0]
-    return f"{first['sky']}. {first['comfort'] or ''}.", prompt, raw_output
+    # Output spec
+    sections.append("""## Your task
+
+Produce JSON with this exact structure:
+
+{
+  "hours": [
+    {"time": "<hour label>", "icon": "<icon>", "lines": ["<line1>", ...], "temp": <number>},
+    ...8 total
+  ],
+  "narrative": "<2-4 sentence meteorologist brief>"
+}
+
+Rules:
+- "icon" must be one of: sun, moon, cloud, cloud-sun, cloud-moon, cloud-rain, snowflake
+- "lines": 1-3 short strings per hour. MUST include temperature. MUST include precip if non-zero. Otherwise highlight whatever you think matters most (model disagreement, trend shifts, comfort, notable changes).
+- "temp": numeric °F value
+- "narrative": 2-4 sentences. Attribute to specific models when they disagree. Call out trends vs earlier forecasts. Mention specific times when conditions shift. Be conversational but precise.
+- Do not use emoji in lines or narrative.
+- Output ONLY the JSON object, no markdown fences, no explanation.""")
+
+    return "\n".join(sections)
+
+
+def parse_llm_response(stdout):
+    """Parse and validate the LLM JSON response."""
+    text = stdout.strip()
+
+    # Strip markdown code fences if present
+    text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+    text = re.sub(r'\n?```\s*$', '', text)
+    text = text.strip()
+
+    data = json.loads(text)
+
+    if not isinstance(data.get("hours"), list) or len(data["hours"]) < 1:
+        raise ValueError("Missing or empty 'hours' array")
+
+    # Validate and fix icons
+    for h in data["hours"]:
+        if h.get("icon") not in VALID_ICONS:
+            h["icon"] = "question"
+        if not isinstance(h.get("lines"), list):
+            h["lines"] = [f"{h.get('temp', '?')}°F"]
+
+    if "narrative" not in data or not data["narrative"]:
+        data["narrative"] = " ".join(data["hours"][0].get("lines", []))
+
+    return data
+
+
+# --- Fallback: rule-based derivation (used if LLM fails) ---
+
+def derive_sky_condition(cloud_cover, solar):
+    if solar is not None and solar <= 0:
+        solar = None
+    if solar is None:
+        if cloud_cover is None:
+            return ("Unknown", "question")
+        if cloud_cover < 20:
+            return ("Clear", "moon")
+        if cloud_cover < 60:
+            return ("Partly cloudy", "cloud-moon")
+        if cloud_cover < 90:
+            return ("Mostly cloudy", "cloud")
+        return ("Overcast", "cloud")
+    if cloud_cover is not None:
+        if cloud_cover < 20:
+            return ("Sunny", "sun")
+        if cloud_cover < 60:
+            return ("Partly cloudy", "cloud-sun")
+        if cloud_cover < 90:
+            return ("Mostly cloudy", "cloud")
+        return ("Overcast", "cloud")
+    return ("Unknown", "question")
+
+
+def build_fallback(model_data, hour_labels):
+    """Build fallback hourly data from rule-based derivation."""
+    hours = []
+    # Use hrrr_latest if available, else first model
+    src = model_data.get("hrrr_latest") or next(iter(model_data.values()), None)
+    if src is None:
+        return hours
+
+    data = src.get("data", {})
+    for i, label in enumerate(hour_labels):
+        t2m = data.get("t2m", [None] * 8)[i] if i < len(data.get("t2m", [])) else None
+        cloud = data.get("cloud_cover", [None] * 8)[i] if i < len(data.get("cloud_cover", [])) else None
+        solar = data.get("dswrf", [None] * 8)[i] if i < len(data.get("dswrf", [])) else None
+        apcp = data.get("apcp", [None] * 8)[i] if i < len(data.get("apcp", [])) else None
+
+        sky_label, icon = derive_sky_condition(cloud, solar)
+        lines = []
+        if t2m is not None:
+            lines.append(f"{t2m:.0f}°F")
+        lines.append(sky_label)
+        if apcp is not None and apcp > 0.01:
+            lines.append(f"Rain {apcp:.2f} in")
+
+        hours.append({
+            "time": label,
+            "icon": icon,
+            "lines": lines,
+            "temp": round(t2m) if t2m is not None else None,
+        })
+    return hours
 
 
 def generate_summary(lat, lon, cache_dir):
@@ -361,37 +390,65 @@ def generate_summary(lat, lon, cache_dir):
     grid_id = grid_key(lat, lon)
     log.info(f"Generating summary for {grid_id}")
 
-    # Fetch all variables
-    all_data = {}
-    for var in VARIABLES:
-        all_data[var] = fetch_multirun(lat, lon, var, days=1)
+    # Fetch raw model data
+    model_data, hour_labels, hour_isos, current_by_time = build_model_data(lat, lon)
 
-    # Aggregate into hourly medians
-    hourly_data = aggregate_hourly(all_data)
-    if not hourly_data:
-        log.warning("No data available")
+    if not model_data:
+        log.warning("No model data available")
         return None
 
-    # Derive conditions
-    hours_summary = build_hourly_summary(hourly_data)
-
-    # Compute trends (returns per-valid-time dict for snapshot)
-    trends, current_by_time = compute_trends(hours_summary, cache_dir, grid_id)
+    # Load trend snapshots
+    trends = load_trend_snapshots(cache_dir, grid_id, hour_isos)
 
     # Save snapshot for future trend comparison
     save_snapshot(cache_dir, grid_id, current_by_time)
 
-    # Generate AI text
-    ai_text, prompt, raw_output = generate_ai_text(hours_summary, trends, lat, lon)
+    # Build prompt
+    prompt = build_prompt(model_data, trends, hour_labels)
+
+    # Call LLM
+    raw_output = {"stdout": "", "stderr": "", "exit_code": None}
+    llm_data = None
+    try:
+        result = subprocess.run(
+            ["llm", "-m", "gemini-3-flash-preview"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        raw_output["stdout"] = result.stdout
+        raw_output["stderr"] = result.stderr
+        raw_output["exit_code"] = result.returncode
+
+        if result.stdout.strip():
+            llm_data = parse_llm_response(result.stdout)
+            log.info("LLM produced valid JSON response")
+        else:
+            log.warning(f"LLM produced no output: {result.stderr[:200]}")
+    except json.JSONDecodeError as e:
+        log.warning(f"LLM returned invalid JSON: {e}")
+        raw_output["parse_error"] = str(e)
+    except Exception as e:
+        log.warning(f"LLM error: {e}")
+        raw_output["error"] = str(e)
+
+    # Fallback if LLM failed
+    if llm_data is None:
+        log.info("Using rule-based fallback")
+        fallback_hours = build_fallback(model_data, hour_labels)
+        llm_data = {
+            "hours": fallback_hours,
+            "narrative": "Forecast summary temporarily unavailable. Showing basic conditions from HRRR.",
+        }
 
     # Build final result
     result = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "lat": lat,
         "lon": lon,
-        "hours": hours_summary,
-        "trends": trends,
-        "text": ai_text,
+        "hours": llm_data["hours"],
+        "narrative": llm_data["narrative"],
         "prompt": prompt,
         "llm_raw": raw_output,
     }
