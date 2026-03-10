@@ -163,7 +163,7 @@
             Loading summary...
         </div>
         <div id="summaryTrends" class="flex flex-wrap gap-2 mb-4"></div>
-        <div id="summaryTimeline" class="flex gap-2 overflow-x-auto pb-2 no-scrollbar"></div>
+        <div id="summaryTimeline" class="space-y-1"></div>
         <div id="summaryMeta" class="text-xs text-slate-500 dark:text-slate-500 mt-3 text-right"></div>
         <details id="summaryPrompt" class="mt-4 hidden">
             <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-600 dark:hover:text-slate-300">Prompt &amp; raw output</summary>
@@ -886,13 +886,37 @@ function renderTable(data, timeline) {
 }
 
 // --- Summary Mode ---
+let svgIdCounter = 0;
+function weatherSVG(cloud_pct, clearness, precip_type, is_night) {
+    const id = svgIdCounter++;
+    const clOp = Math.max(0.1, clearness / 100);
+    const cPct = Math.max(0, Math.min(1, cloud_pct / 100));
+    const bg0 = is_night ? '#0B132B' : (cPct > 0.4 ? '#606C88' : '#2193b0');
+    const bg1 = is_night ? '#1C2541' : (cPct > 0.4 ? '#3F4C6B' : '#fde28f');
+    const rays = [0, 45, 90, 135].map(a =>
+        `<g transform="rotate(${a} 26 16)"><line x1="26" y1="4" x2="26" y2="7"/><line x1="26" y1="25" x2="26" y2="28"/></g>`
+    ).join('');
+    const sun = `<g opacity="${clOp}"><circle cx="26" cy="16" r="7" fill="url(#sg${id})" filter="url(#g${id})"/><g stroke="#FFD194" stroke-width="1.5" stroke-linecap="round">${rays}</g></g>`;
+    const moon = `<path d="M30 6 A 9 9 0 1 0 38 18 A 8 8 0 1 1 30 6 Z" fill="url(#mg${id})" opacity="${clOp}" filter="url(#g${id})"/>`;
+    const cScale = 0.5 + cPct * 0.7;
+    const dx = (1 - cPct) * -12 + 26 * (1 - cScale);
+    const dy = (1 - cPct) * 12 + 21 * (1 - cScale);
+    const cloudPath = "M16 32c-4.4 0-8-3.6-8-8s3.6-8 8-8c1.5 0 2.8.4 4 1 2.1-4.7 7.3-7.3 12.7-6 4.4 1.1 7.6 4.8 8.3 9.3 3.1.8 5.3 3.6 5.3 6.9 0 4.1-3.3 7.5-7.6 7.5H16z";
+    const cloud = cPct > 0 ?
+        `<g transform="translate(${dx}, ${dy}) scale(${cScale})" opacity="${0.85 + cPct*0.15}"><path d="${cloudPath}" fill="#ffffff" opacity="0.4" transform="translate(-2, -3) scale(1.05)"/><path d="${cloudPath}" fill="url(#cg${id})"/></g>` : '';
+    let precip = '';
+    if (precip_type === 'rain') {
+        precip = `<g stroke="#A0C4FF" stroke-width="2" stroke-linecap="round" opacity="0.9"><line x1="14" y1="36" x2="12" y2="40"/><line x1="21" y1="38" x2="19" y2="42"/><line x1="28" y1="35" x2="26" y2="39"/><line x1="35" y1="37" x2="33" y2="41"/></g>`;
+    } else if (precip_type === 'snow') {
+        precip = `<g fill="#FFFFFF" opacity="0.9"><circle cx="14" cy="38" r="1.5"/><circle cx="21" cy="41" r="2"/><circle cx="28" cy="36" r="1.5"/><circle cx="35" cy="39" r="2"/></g>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48"><defs><filter id="g${id}"><feGaussianBlur stdDeviation="1.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><linearGradient id="bg${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${bg0}"/><stop offset="100%" stop-color="${bg1}"/></linearGradient><linearGradient id="sg${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FFD700"/><stop offset="100%" stop-color="#FF8C00"/></linearGradient><linearGradient id="mg${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E0E0E0"/><stop offset="100%" stop-color="#FFFFFF"/></linearGradient><linearGradient id="cg${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FFFFFF"/><stop offset="100%" stop-color="#D3D9DF"/></linearGradient></defs><rect width="48" height="48" rx="10" fill="url(#bg${id})"/>${is_night ? moon : sun}${cloud}${precip}</svg>`;
+}
+
 const SKY_ICONS = {
-    'sun': '\u2600\uFE0F',
-    'cloud-sun': '\u26C5',
-    'cloud': '\u2601\uFE0F',
-    'cloud-moon': '\u2601\uFE0F',
-    'moon': '\uD83C\uDF19',
-    'question': '\u2753'
+    'sun': '\u2600\uFE0F', 'cloud-sun': '\u26C5', 'cloud': '\u2601\uFE0F',
+    'cloud-moon': '\u2601\uFE0F', 'moon': '\uD83C\uDF19', 'cloud-rain': '\uD83C\uDF27\uFE0F',
+    'snowflake': '\u2744\uFE0F', 'question': '\u2753'
 };
 
 async function fetchSummary() {
@@ -943,25 +967,36 @@ function renderSummary(data) {
         promptEl.classList.add('hidden');
     }
 
-    // Trends badges (not used in v2 — LLM handles trends in narrative)
     trendsEl.innerHTML = '';
 
     timelineEl.innerHTML = '';
+    svgIdCounter = 0;
     (data.hours || []).forEach(h => {
-        const col = document.createElement('div');
-        col.className = 'bg-white dark:bg-slate-800 rounded-lg p-3 text-center border border-slate-200 dark:border-slate-700 min-w-[5rem] flex-shrink-0';
-        const icon = SKY_ICONS[h.icon] || SKY_ICONS[h.sky_icon] || SKY_ICONS['question'];
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3 bg-white dark:bg-slate-800 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700';
+
+        // SVG icon (use numeric fields if available, else fallback to emoji)
+        let iconHtml;
+        if (h.cloud_pct !== undefined && h.clearness !== undefined) {
+            iconHtml = weatherSVG(h.cloud_pct, h.clearness, h.precip_type || null, h.is_night || false);
+        } else {
+            const emoji = SKY_ICONS[h.icon] || SKY_ICONS[h.sky_icon] || SKY_ICONS['question'];
+            iconHtml = `<span class="text-2xl">${emoji}</span>`;
+        }
+
+        // Lines: first is temp (bold), rest are commentary
         const linesHtml = (h.lines || []).map((line, i) =>
             i === 0
-                ? `<div class="text-sm font-medium text-slate-800 dark:text-white">${line}</div>`
-                : `<div class="text-xs text-slate-600 dark:text-slate-300">${line}</div>`
-        ).join('');
-        col.innerHTML = `
-            <div class="text-xs text-slate-500 dark:text-slate-400 font-medium">${h.time}</div>
-            <div class="text-2xl my-1">${icon}</div>
-            ${linesHtml}
+                ? `<span class="text-sm font-semibold text-slate-800 dark:text-white">${line}</span>`
+                : `<span class="text-xs text-slate-500 dark:text-slate-400">${line}</span>`
+        ).join('<span class="text-slate-300 dark:text-slate-600 mx-1">·</span>');
+
+        row.innerHTML = `
+            <div class="flex-shrink-0 w-12">${iconHtml}</div>
+            <div class="flex-shrink-0 w-12 text-xs font-medium text-slate-500 dark:text-slate-400">${h.time}</div>
+            <div class="flex-1 flex flex-wrap items-baseline gap-x-0">${linesHtml}</div>
         `;
-        timelineEl.appendChild(col);
+        timelineEl.appendChild(row);
     });
 }
 

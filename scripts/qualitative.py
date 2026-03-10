@@ -77,7 +77,7 @@ def extract_latest_runs(api_response, model_id, count=1):
     return runs_by_init[:count]
 
 
-def build_model_data(lat, lon, hours_ahead=8):
+def build_model_data(lat, lon, hours_ahead=24):
     """Fetch raw model data and build compact per-model, per-hour payload.
 
     Returns (model_data dict, hour_labels list, all_data for snapshot).
@@ -249,9 +249,13 @@ def save_snapshot(cache_dir, grid_id, current_by_time):
 
 def build_prompt(model_data, trends, hour_labels):
     """Build the LLM prompt with raw model data and trend snapshots."""
-    # Compact format: per-model tables
     sections = []
-    sections.append("You are a meteorologist writing a brief forecast. You have data from multiple weather models.\n")
+    sections.append("""You are a meteorologist who finally got their own forecast column. This is your chance to shine.
+Think of those entertaining highway signs that make people smile — that energy, but for weather.
+You have raw data from multiple models. Your job is to interpret this data, tell the story of
+the next 24 hours, and make it genuinely fun to read. Be witty, be opinionated, have a voice.
+But always be accurate — you're entertaining AND informative.
+""")
 
     for model_label, mdata in model_data.items():
         init = mdata.get("init", "unknown")
@@ -262,11 +266,9 @@ def build_prompt(model_data, trends, hour_labels):
             sections.append(f"  {var}: {vals_str}")
         sections.append("")
 
-    # Variable legend
     sections.append("Variable key: t2m=temp(°F), dpt=dewpoint(°F), cloud_cover=clouds(%), dswrf=solar(W/m²), apcp=rain(in), asnow=snow(in), snod=snow_depth(in)")
     sections.append("")
 
-    # Trends
     if trends:
         sections.append("## Previous forecast snapshots (what older forecasts predicted for these same hours)")
         for label, per_hour in trends.items():
@@ -276,26 +278,60 @@ def build_prompt(model_data, trends, hour_labels):
                 sections.append(f"  {hour_key}: {vals_str}")
         sections.append("")
 
-    # Output spec
     sections.append("""## Your task
 
 Produce JSON with this exact structure:
 
 {
   "hours": [
-    {"time": "<hour label>", "icon": "<icon>", "lines": ["<line1>", ...], "temp": <number>},
-    ...8 total
+    {
+      "time": "<hour label>",
+      "icon": "<icon>",
+      "cloud_pct": <0-100>,
+      "clearness": <0-100>,
+      "precip_type": null | "rain" | "snow",
+      "is_night": true/false,
+      "lines": ["<line1>", "<line2>", ...],
+      "temp": <number>
+    },
+    ... one per forecast hour
   ],
-  "narrative": "<2-4 sentence meteorologist brief>"
+  "narrative": "<3-5 sentence meteorologist brief>"
 }
 
-Rules:
-- "icon" must be one of: sun, moon, cloud, cloud-sun, cloud-moon, cloud-rain, snowflake
-- "lines": 1-3 short strings per hour. MUST include temperature. MUST include precip if non-zero. Otherwise highlight whatever you think matters most (model disagreement, trend shifts, comfort, notable changes).
-- "temp": numeric °F value
-- "narrative": 2-4 sentences. Attribute to specific models when they disagree. Call out trends vs earlier forecasts. Mention specific times when conditions shift. Be conversational but precise.
-- Do not use emoji in lines or narrative.
-- Output ONLY the JSON object, no markdown fences, no explanation.""")
+## Rules for "lines" (this is the most important part)
+
+Each hour gets 2-3 short lines displayed in a vertical timeline. You have space — use it creatively.
+- Line 1: ALWAYS the temperature (e.g. "53°F")
+- Line 2+: The most INTERESTING thing about this hour. Be creative and fun! Ideas:
+  - Interpret conditions with personality: "Crisp enough for a hoodie" not "dewpoint 32°F"
+  - Model drama: "GFS wants rain, HRRR says no way"
+  - Forecast evolution: "Yesterday's storm? Gone. Poof." or "Rain just crashed the party"
+  - Vibe check: "Perfect dog-walking weather", "Peak patio hour", "You'll regret shorts"
+  - Snarky observations: "Models finally agree on something", "GFS being optimistic again"
+  - Notable transitions: "Clouds rolling in like they own the place"
+- Do NOT repeat the same commentary for consecutive hours. If 6 hours are all clear, find something different and interesting to say each time. Boring is the only sin.
+- MUST include precip info if rain/snow is non-zero.
+- Temperature is the ONLY raw number that should appear. Interpret everything else.
+
+## Rules for SVG fields
+
+- "cloud_pct": 0 = clear sky, 100 = fully overcast. Drives cloud shape size in the icon.
+- "clearness": 0 = dark/hazy, 100 = brilliant sun/bright moon. Drives sun/moon opacity.
+- "precip_type": null if dry, "rain" or "snow" if precipitating
+- "is_night": true if before sunrise or after sunset
+- "icon": one of sun, moon, cloud, cloud-sun, cloud-moon, cloud-rain, snowflake (used as fallback)
+
+## Rules for "narrative"
+
+3-5 sentences. This is YOUR column — own it. Tell the story of the next 24 hours with personality.
+- Attribute to specific models when they disagree (make it dramatic if warranted)
+- Call out how the forecast has evolved vs earlier runs
+- Mention specific times when conditions shift
+- Describe what kind of day/night it will be — paint the picture
+- Have fun with it. Be the weather person people actually want to read. No emoji though.
+
+Output ONLY the JSON object. No markdown fences, no explanation.""")
 
     return "\n".join(sections)
 
@@ -314,12 +350,17 @@ def parse_llm_response(stdout):
     if not isinstance(data.get("hours"), list) or len(data["hours"]) < 1:
         raise ValueError("Missing or empty 'hours' array")
 
-    # Validate and fix icons
+    # Validate and fix fields
     for h in data["hours"]:
         if h.get("icon") not in VALID_ICONS:
             h["icon"] = "question"
         if not isinstance(h.get("lines"), list):
             h["lines"] = [f"{h.get('temp', '?')}°F"]
+        # Ensure SVG fields have defaults
+        h.setdefault("cloud_pct", 50)
+        h.setdefault("clearness", 50)
+        h.setdefault("precip_type", None)
+        h.setdefault("is_night", False)
 
     if "narrative" not in data or not data["narrative"]:
         data["narrative"] = " ".join(data["hours"][0].get("lines", []))
@@ -411,10 +452,11 @@ def generate_summary(lat, lon, cache_dir):
     llm_data = None
     try:
         result = subprocess.run(
-            ["gemini", "-m", "gemini-3.1-pro-preview", "-p", prompt],
+            ["gemini", "-m", "gemini-3.1-pro-preview"],
+            input=prompt,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
         )
         raw_output["stdout"] = result.stdout
         raw_output["stderr"] = result.stderr
