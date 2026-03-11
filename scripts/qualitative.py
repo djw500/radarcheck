@@ -34,6 +34,24 @@ SNAPSHOT_RETAIN_HOURS = 25
 VALID_ICONS = {"sun", "moon", "cloud", "cloud-sun", "cloud-moon", "cloud-rain", "snowflake", "question"}
 
 
+def sun_times(lat, lon, date):
+    """Fetch official sunrise/sunset from sunrise-sunset.org API."""
+    import urllib.request
+    url = f"https://api.sunrise-sunset.org/json?lat={lat}&lng={lon}&date={date}&formatted=0"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "radarcheck/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        if data.get("status") == "OK":
+            r = data["results"]
+            rise = datetime.datetime.fromisoformat(r["sunrise"])
+            sset = datetime.datetime.fromisoformat(r["sunset"])
+            return rise, sset
+    except Exception as e:
+        log.warning(f"Sunrise API failed for {date}: {e}")
+    return None, None
+
+
 def grid_key(lat, lon):
     """Round lat/lon to 0.1 degree grid for cache keying."""
     return f"{lat:.1f}_{lon:.1f}"
@@ -83,20 +101,35 @@ def build_model_data(lat, lon, hours_ahead=48):
     Returns (model_data dict, hour_labels list, all_data for snapshot).
     """
     now = datetime.datetime.now(datetime.timezone.utc)
+    # Hardcoded to US Eastern (Radnor, PA) — container runs UTC
+    eastern = datetime.timezone(datetime.timedelta(hours=-5))
 
-    # Build target hours
+    # Build target hours for detailed 48h view
     target_hours = []
     for offset in range(1, hours_ahead + 1):
         t = (now + datetime.timedelta(hours=offset)).replace(minute=0, second=0, microsecond=0)
         target_hours.append(t)
 
-    hour_labels = [t.astimezone().strftime("%-I%p").lower() for t in target_hours]
+    # Labels in Eastern time with day-of-week for multi-day clarity
+    today_eastern = now.astimezone(eastern).date()
+    def make_label(t):
+        t_east = t.astimezone(eastern)
+        time_str = t_east.strftime("%-I%p").lower()
+        day_diff = (t_east.date() - today_eastern).days
+        if day_diff == 0:
+            return time_str
+        elif day_diff == 1:
+            return f"tmrw {time_str}"
+        else:
+            return f"{t_east.strftime('%a').lower()} {time_str}"
+
+    hour_labels = [make_label(t) for t in target_hours]
     hour_isos = [t.strftime("%Y-%m-%dT%H:00:00") for t in target_hours]
 
-    # Fetch all variables for all models at once
+    # Fetch all variables — days=2 gets latest runs (GFS already forecasts 16 days)
     all_data = {}
     for var in VARIABLES:
-        all_data[var] = fetch_multirun(lat, lon, var, model="all", days=1)
+        all_data[var] = fetch_multirun(lat, lon, var, model="all", days=2)
 
     def extract_hourly(runs_list, hour_isos):
         """Given a list of (init_time, {valid_time: value}), return values for target hours."""
@@ -105,7 +138,6 @@ def build_model_data(lat, lon, hours_ahead=48):
         _, values_by_time = runs_list[0]
         result = []
         for iso in hour_isos:
-            # Match by hour prefix (valid_time may have timezone suffix)
             val = None
             for vt, v in values_by_time.items():
                 if vt.startswith(iso[:13]):
@@ -114,7 +146,47 @@ def build_model_data(lat, lon, hours_ahead=48):
             result.append(val)
         return result
 
-    # Build per-model data
+    def extract_extended(runs_list, after_hour, max_hour, step=6):
+        """Extract every Nth hour from available model data beyond after_hour.
+
+        Instead of generating target times and hoping they align, scan the
+        model's actual valid times and pick one per step-hour window.
+        """
+        if not runs_list:
+            return [], [], []
+        _, values_by_time = runs_list[0]
+        cutoff = now + datetime.timedelta(hours=after_hour)
+        end = now + datetime.timedelta(hours=max_hour)
+
+        # Collect all valid times beyond cutoff, sorted
+        future_points = []
+        for vt, v in values_by_time.items():
+            try:
+                t = datetime.datetime.fromisoformat(vt.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if cutoff <= t <= end:
+                future_points.append((t, v))
+        future_points.sort()
+
+        if not future_points:
+            return [], [], []
+
+        # Sample every step hours from the available data
+        ext_labels = []
+        ext_isos = []
+        values = []
+        next_target = future_points[0][0]
+        for t, v in future_points:
+            if t >= next_target:
+                ext_labels.append(make_label(t))
+                ext_isos.append(t.strftime("%Y-%m-%dT%H:00:00"))
+                values.append(round(v, 1) if v is not None else None)
+                next_target = t + datetime.timedelta(hours=step)
+
+        return values, ext_labels, ext_isos
+
+    # Build per-model data (48h detail)
     model_data = {}
 
     # HRRR: latest 2 runs
@@ -126,7 +198,7 @@ def build_model_data(lat, lon, hours_ahead=48):
                 model_data[label] = {"init": init_time, "hours": hour_labels[:], "data": {}}
             model_data[label]["data"][var] = extract_hourly([hrrr_runs[i]], hour_isos)
 
-    # GFS, ECMWF, NBM: latest run each
+    # GFS, ECMWF, NBM: latest run each (48h detail)
     for model_id in ["gfs", "ecmwf_hres", "nbm"]:
         for var in VARIABLES:
             runs = extract_latest_runs(all_data[var], model_id, count=1)
@@ -135,7 +207,22 @@ def build_model_data(lat, lon, hours_ahead=48):
                     model_data[model_id] = {"init": runs[0][0], "hours": hour_labels[:], "data": {}}
                 model_data[model_id]["data"][var] = extract_hourly(runs, hour_isos)
 
-    # Build current all-model median for snapshots (backward compat)
+    # GFS extended outlook: every 6h from hour 48 to hour 240 (days 3-10)
+    for var in VARIABLES:
+        gfs_runs = extract_latest_runs(all_data[var], "gfs", count=1)
+        if gfs_runs:
+            values, labels, _ = extract_extended(gfs_runs, hours_ahead + 1, 240, step=6)
+            if any(v is not None for v in values):
+                if "gfs_extended" not in model_data:
+                    model_data["gfs_extended"] = {
+                        "init": gfs_runs[0][0],
+                        "hours": labels,
+                        "data": {},
+                        "note": "Every 6h, days 3-10 — for daily outlook buckets"
+                    }
+                model_data["gfs_extended"]["data"][var] = values
+
+    # Build current all-model median for snapshots (backward compat, 48h only)
     current_by_time = {}
     for idx, iso in enumerate(hour_isos):
         full_iso = iso + "Z"
@@ -247,15 +334,40 @@ def save_snapshot(cache_dir, grid_id, current_by_time):
             pass
 
 
-def build_prompt(model_data, trends, hour_labels):
+def build_prompt(model_data, trends, hour_labels, lat, lon):
     """Build the LLM prompt with raw model data and trend snapshots."""
     sections = []
-    sections.append("""You are a meteorologist who finally got their own forecast column. This is your chance to shine.
+    # Tell LLM the current local time so it knows what "today" means
+    now = datetime.datetime.now(datetime.timezone.utc)
+    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+    local_now = now.astimezone(eastern)
+    sections.append(f"""You are a meteorologist who finally got their own forecast column. This is your chance to shine.
 You have raw data from 5 weather models (HRRR, GFS, ECMWF, NBM). Your job is to interpret
-this data, tell the story of the next 24 hours, and make it genuinely engaging to read.
+this data, tell the story of the next 24-48 hours, and make it genuinely engaging to read.
 Be witty and have a voice, but always be precise and quantitative when it matters.
 You're entertaining AND informative — a weather nerd's dream forecaster.
+
+Current local time: {local_now.strftime("%A, %B %-d, %Y %-I:%M%p")} Eastern (Radnor, PA area).
+All hour labels in the data below are in Eastern time.
 """)
+
+    # Add sunrise/sunset times
+    now = datetime.datetime.now(datetime.timezone.utc)
+    sun_info = []
+    for day_offset in range(3):
+        d = (now + datetime.timedelta(days=day_offset)).date()
+        rise, sset = sun_times(lat, lon, d)
+        if rise and sset:
+            # Hardcoded to US Eastern (Radnor, PA) — container runs UTC
+            eastern = datetime.timezone(datetime.timedelta(hours=-5))
+            rise_local = rise.astimezone(eastern).strftime("%-I:%M%p").lower()
+            sset_local = sset.astimezone(eastern).strftime("%-I:%M%p").lower()
+            day_label = ["Today", "Tomorrow", d.strftime("%A")][day_offset]
+            sun_info.append(f"{day_label} ({d}): sunrise {rise_local}, sunset {sset_local}")
+    if sun_info:
+        sections.append("## Sun times")
+        sections.extend(sun_info)
+        sections.append("")
 
     for model_label, mdata in model_data.items():
         init = mdata.get("init", "unknown")
@@ -267,6 +379,7 @@ You're entertaining AND informative — a weather nerd's dream forecaster.
         sections.append("")
 
     sections.append("Variable key: t2m=temp(°F), dpt=dewpoint(°F), cloud_cover=clouds(%), dswrf=solar(W/m²), apcp=rain(in), asnow=snow(in), snod=snow_depth(in)")
+    sections.append("Note: 'gfs_extended' has every-6h data for days 3-10 — use it for the daily outlook buckets beyond 24h.")
     sections.append("")
 
     if trends:
@@ -299,14 +412,24 @@ Produce JSON with this exact structure:
   "narrative": "<3-5 sentence meteorologist brief>"
 }
 
-## Time buckets — YOU decide the structure
+## Time buckets — three tiers of detail
 
-You do NOT have to do one bucket per hour. Group time intelligently:
-- Overnight when nothing changes: "Tonight 11pm-5am" as one bucket
-- Interesting transition hours: give them their own bucket ("3pm", "4pm")
-- Morning/afternoon blocks: "Morning 7-10am" if conditions are steady
-- You can extend as far into the future as the data allows — if there's a storm in 36 hours, add a bucket for it
-- More detail for interesting periods, less for boring ones. No minimum or maximum.
+**Today (next 24h):** Hourly during waking hours (~7am-10pm), grouped overnight.
+- Go hour by hour so the user sees the temp curve and can plan their day
+- Group overnight/sleeping hours into one bucket ("Tonight 10pm-6am")
+- Use sunrise/sunset times to decide is_night and to mark transitions
+
+**Tomorrow (hours 24-48):** A few larger blocks — morning, afternoon, evening, overnight.
+- "Tomorrow morning", "Tomorrow afternoon", etc.
+- Still cite model spread where interesting
+
+**Days 3-10:** One bucket per day using the GFS extended data. YOU MUST COVER EVERY DAY that has data.
+- Label as day name: "Thursday", "Friday", etc.
+- Give the high/low range, sky condition, and any precip
+- Flag any storms, big temp swings, or notable weather
+- Confidence naturally decreases — say so
+- You MAY group 2-3 consecutive similar days ("Thu-Sat: More of the same, highs near 50")
+- But DO NOT skip days. The user wants to see the full 10-day outlook.
 
 ## Rules for each bucket
 
@@ -325,17 +448,19 @@ You do NOT have to do one bucket per hour. Group time intelligently:
     - Model drama: "ECMWF and HRRR agree, NBM is the outlier"
     - Forecast shifts: "Rain vanished from the latest HRRR run"
     - Express uncertainty: "Precip is a coin flip between models"
-  - MUST mention precip if non-zero
+  - MUST mention precip if non-zero — include the amount (e.g. "0.2 in rain", "1 in snow")
+  - Note: apcp values are CUMULATIVE from forecast start. To get period amounts, subtract consecutive values.
   - Don't be repetitive across consecutive buckets
 
 ## Rules for "narrative"
 
-3-5 sentences. This is YOUR column — tell the story of the next 24 hours.
+3-5 sentences. This is YOUR column — tell the story of the next 24-48 hours.
 - Be precise: cite specific models, temperatures, times
 - Express uncertainty where models disagree — don't pretend to know what you don't
 - Call out forecast evolution vs earlier runs
 - Paint the picture of what kind of day it will be
 - Have personality but stay grounded in the data. No emoji.
+- If there's a storm/significant weather coming later in the week, mention it
 
 Output ONLY the JSON object. No markdown fences, no explanation.""")
 
@@ -442,6 +567,34 @@ def build_fallback(model_data, hour_labels):
     return hours
 
 
+def build_raw_hrrr(model_data):
+    """Extract latest HRRR run data as per-hour dicts for frontend display.
+
+    Returns {"init": str, "hours": [{"hour": label, "t2m": val, ...}, ...]}
+    or None if HRRR data not available.
+    """
+    hrrr = model_data.get("hrrr_latest")
+    if not hrrr:
+        return None
+
+    hours_list = hrrr.get("hours", [])
+    data = hrrr.get("data", {})
+    if not hours_list:
+        return None
+
+    per_hour = []
+    for i, label in enumerate(hours_list):
+        entry = {"hour": label}
+        for var, values in data.items():
+            entry[var] = values[i] if i < len(values) else None
+        per_hour.append(entry)
+
+    return {
+        "init": hrrr.get("init", "unknown"),
+        "hours": per_hour,
+    }
+
+
 def generate_summary(lat, lon, cache_dir):
     """Main generation function for a single lat/lon."""
     grid_id = grid_key(lat, lon)
@@ -461,7 +614,7 @@ def generate_summary(lat, lon, cache_dir):
     save_snapshot(cache_dir, grid_id, current_by_time)
 
     # Build prompt
-    prompt = build_prompt(model_data, trends, hour_labels)
+    prompt = build_prompt(model_data, trends, hour_labels, lat, lon)
 
     # Call LLM
     raw_output = {"stdout": "", "stderr": "", "exit_code": None}
@@ -472,7 +625,7 @@ def generate_summary(lat, lon, cache_dir):
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         raw_output["stdout"] = result.stdout
         raw_output["stderr"] = result.stderr
@@ -500,12 +653,15 @@ def generate_summary(lat, lon, cache_dir):
         }
 
     # Build final result
+    raw_hrrr = build_raw_hrrr(model_data)
+
     result = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "lat": lat,
         "lon": lon,
         "buckets": llm_data.get("buckets", llm_data.get("hours", [])),
         "narrative": llm_data["narrative"],
+        "raw_hrrr": raw_hrrr,
         "prompt": prompt,
         "llm_raw": raw_output,
     }
