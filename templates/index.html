@@ -1019,6 +1019,68 @@ function renderSummary(data) {
 
     timelineEl.innerHTML = '';
     svgIdCounter = 0;
+
+    // --- Full HRRR data table (expandable at top) ---
+    if (rawHrrr && rawHrrr.hours && rawHrrr.hours.some(h => h.t2m != null)) {
+        const validHours = rawHrrr.hours.filter(h => Object.entries(VARIABLE_META).some(([k]) => h[k] != null));
+        const hdr = document.createElement('div');
+        const initLabel = rawHrrr.init ? new Date(rawHrrr.init).toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York'}) : '?';
+        const synLabel = rawHrrr.synoptic_init ? new Date(rawHrrr.synoptic_init).toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York'}) : null;
+        const initInfo = synLabel ? `${initLabel} + ${synLabel} synoptic` : initLabel;
+
+        const hdrRow = document.createElement('div');
+        hdrRow.className = 'flex items-center gap-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2 border border-blue-200 dark:border-blue-800 cursor-pointer select-none active:bg-blue-100 dark:active:bg-blue-900/30 transition-colors mb-1';
+        hdrRow.innerHTML = `
+            <div class="flex-shrink-0 w-12 text-center text-lg">📊</div>
+            <div class="flex-1 text-sm font-medium text-blue-700 dark:text-blue-300">Raw HRRR Data <span class="text-xs font-normal text-blue-500 dark:text-blue-400">(${validHours.length}h · init ${initInfo})</span></div>
+            <span class="text-blue-400 dark:text-blue-500 text-xs bucket-chevron">▶</span>
+        `;
+
+        const hdrDetail = document.createElement('div');
+        hdrDetail.className = 'hidden overflow-hidden mb-2';
+        let fullTable = '<div class="bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700 overflow-x-auto max-h-[50vh] overflow-y-auto">';
+        fullTable += '<table class="w-full text-xs">';
+        fullTable += '<thead class="sticky top-0 bg-slate-50 dark:bg-slate-900"><tr class="text-slate-400 dark:text-slate-500">';
+        fullTable += '<td class="pr-2 py-0.5 font-medium">Hour</td>';
+        for (const [, meta] of Object.entries(VARIABLE_META)) {
+            fullTable += `<td class="px-2 py-0.5 text-right">${meta.label}</td>`;
+        }
+        fullTable += '</tr></thead><tbody>';
+        for (const hourData of validHours) {
+            const stitched = hourData._stitched ? ' text-slate-400 dark:text-slate-500 italic' : ' text-slate-600 dark:text-slate-300';
+            fullTable += `<tr class="${stitched} border-t border-slate-200/50 dark:border-slate-700/50">`;
+            fullTable += `<td class="pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400">${hourData.hour}${hourData._stitched ? '*' : ''}</td>`;
+            for (const [varKey] of Object.entries(VARIABLE_META)) {
+                const val = hourData[varKey];
+                const display = val != null ? (Number.isInteger(val) ? val : val.toFixed(1)) : '—';
+                fullTable += `<td class="px-2 py-0.5 text-right font-mono">${display}</td>`;
+            }
+            fullTable += '</tr>';
+        }
+        fullTable += '</tbody>';
+        fullTable += '<tfoot><tr class="text-[10px] text-slate-400 dark:text-slate-600"><td></td>';
+        for (const [, meta] of Object.entries(VARIABLE_META)) {
+            fullTable += `<td class="px-2 text-right">${meta.unit}</td>`;
+        }
+        fullTable += '</tr></tfoot></table>';
+        if (rawHrrr.synoptic_init) {
+            fullTable += '<div class="text-[10px] text-slate-400 dark:text-slate-600 mt-1">* = stitched from synoptic run</div>';
+        }
+        fullTable += '</div>';
+        hdrDetail.innerHTML = fullTable;
+
+        hdrRow.addEventListener('click', () => {
+            const isOpen = !hdrDetail.classList.contains('hidden');
+            hdrDetail.classList.toggle('hidden');
+            const chev = hdrRow.querySelector('.bucket-chevron');
+            if (chev) chev.textContent = isOpen ? '▶' : '▼';
+        });
+
+        hdr.appendChild(hdrRow);
+        hdr.appendChild(hdrDetail);
+        timelineEl.appendChild(hdr);
+    }
+
     const buckets = data.buckets || data.hours || [];
     buckets.forEach(h => {
         const wrapper = document.createElement('div');

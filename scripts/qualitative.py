@@ -575,9 +575,12 @@ def build_fallback(model_data, hour_labels):
 
 
 def build_raw_hrrr(model_data):
-    """Extract latest HRRR run data as per-hour dicts for frontend display.
+    """Extract latest HRRR run data, stitching with previous synoptic run.
 
-    Returns {"init": str, "hours": [{"hour": label, "t2m": val, ...}, ...]}
+    Uses hrrr_latest for all available hours, then fills remaining hours
+    from hrrr_previous (typically the last synoptic run with 48h range).
+
+    Returns {"init": str, "synoptic_init": str|None, "hours": [...]}
     or None if HRRR data not available.
     """
     hrrr = model_data.get("hrrr_latest")
@@ -589,15 +592,28 @@ def build_raw_hrrr(model_data):
     if not hours_list:
         return None
 
+    # Get all variable names from both runs
+    prev = model_data.get("hrrr_previous")
+    prev_data = prev.get("data", {}) if prev else {}
+    all_vars = set(data.keys()) | set(prev_data.keys())
+
     per_hour = []
     for i, label in enumerate(hours_list):
         entry = {"hour": label}
-        for var, values in data.items():
-            entry[var] = values[i] if i < len(values) else None
+        for var in all_vars:
+            latest_vals = data.get(var, [])
+            val = latest_vals[i] if i < len(latest_vals) else None
+            if val is None and prev:
+                prev_vals = prev_data.get(var, [])
+                val = prev_vals[i] if i < len(prev_vals) else None
+                if val is not None:
+                    entry.setdefault("_stitched", True)
+            entry[var] = val
         per_hour.append(entry)
 
     return {
         "init": hrrr.get("init", "unknown"),
+        "synoptic_init": prev.get("init") if prev else None,
         "hours": per_hour,
     }
 

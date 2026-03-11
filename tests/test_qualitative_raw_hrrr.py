@@ -53,3 +53,39 @@ def test_build_raw_hrrr_missing_hrrr():
 
     raw = build_raw_hrrr({"gfs": {"init": "x", "hours": [], "data": {}}})
     assert raw is None
+
+
+def test_build_raw_hrrr_stitches_synoptic():
+    """Should fill nulls from hrrr_previous (synoptic run)."""
+    from scripts.qualitative import build_raw_hrrr
+
+    model_data = {
+        "hrrr_latest": {
+            "init": "2026-03-11T15:00:00+00:00",
+            "hours": ["5pm", "6pm", "7pm"],
+            "data": {
+                "t2m": [53.2, None, None],
+                "dpt": [35.1, None, None],
+            },
+        },
+        "hrrr_previous": {
+            "init": "2026-03-11T12:00:00+00:00",
+            "hours": ["5pm", "6pm", "7pm"],
+            "data": {
+                "t2m": [52.0, 50.5, 48.0],
+                "dpt": [34.0, 33.0, 32.0],
+            },
+        },
+    }
+    raw = build_raw_hrrr(model_data)
+
+    # Hour 0: latest has data, use it
+    assert raw["hours"][0]["t2m"] == 53.2
+    assert "_stitched" not in raw["hours"][0]
+
+    # Hours 1-2: latest is null, filled from previous
+    assert raw["hours"][1]["t2m"] == 50.5
+    assert raw["hours"][1]["_stitched"] is True
+    assert raw["hours"][2]["t2m"] == 48.0
+
+    assert raw["synoptic_init"] == "2026-03-11T12:00:00+00:00"
