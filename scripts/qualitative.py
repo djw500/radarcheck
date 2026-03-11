@@ -399,6 +399,7 @@ Produce JSON with this exact structure:
   "buckets": [
     {
       "time": "<label>",
+      "hours_covered": ["5pm", "6pm"],
       "cloud_pct": <0-100>,
       "clearness": <0-100>,
       "precip_type": null | "rain" | "snow",
@@ -440,6 +441,12 @@ Produce JSON with this exact structure:
 - "precip_type": null, "rain", or "snow"
 - "is_night": true if before sunrise or after sunset
 - "icon": one of sun, moon, cloud, cloud-sun, cloud-moon, cloud-rain, snowflake (SVG fallback)
+- "hours_covered": list of hour labels from the input data that this bucket covers.
+  - For single-hour buckets: ["2pm"]
+  - For multi-hour buckets: ["10pm", "11pm", "12am", "1am", "2am", "3am", "4am", "5am", "6am"]
+  - For tomorrow blocks: list all covered hour labels from the data
+  - For day-3+ daily buckets: [] (empty — no hourly HRRR data available)
+  - Use the EXACT hour labels from the model data (e.g. "5pm", "tmrw 1am", "fri 6am")
 - "lines": 2-3 short lines displayed in the timeline:
   - Line 1: temperature (e.g. "53°F" or "48-53°F" or "Low 50s")
   - Line 2+: The most interesting thing about this period. Be precise AND engaging:
