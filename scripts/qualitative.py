@@ -207,6 +207,11 @@ def build_model_data(lat, lon, hours_ahead=48):
                     model_data[model_id] = {"init": runs[0][0], "hours": hour_labels[:], "data": {}}
                 model_data[model_id]["data"][var] = extract_hourly(runs, hour_isos)
 
+    # NBM previous run apcp — for stitching gaps in raw HRRR table
+    nbm_apcp_runs = extract_latest_runs(all_data.get("apcp", {}), "nbm", count=2)
+    if len(nbm_apcp_runs) >= 2:
+        model_data["_nbm_apcp_prev"] = extract_hourly([nbm_apcp_runs[1]], hour_isos)
+
     # GFS extended outlook: every 6h from hour 48 to hour 240 (days 3-10)
     for var in VARIABLES:
         gfs_runs = extract_latest_runs(all_data[var], "gfs", count=1)
@@ -370,6 +375,8 @@ All hour labels in the data below are in Eastern time.
         sections.append("")
 
     for model_label, mdata in model_data.items():
+        if model_label.startswith("_"):
+            continue
         init = mdata.get("init", "unknown")
         sections.append(f"## {model_label} (init: {init})")
         sections.append(f"Hours: {', '.join(hour_labels)}")
@@ -574,11 +581,12 @@ def build_fallback(model_data, hour_labels):
     return hours
 
 
-def build_raw_hrrr(model_data):
+def build_raw_hrrr(model_data, nbm_apcp_prev=None):
     """Extract latest HRRR run data, stitching with previous synoptic run.
 
     Uses hrrr_latest for all available hours, then fills remaining hours
     from hrrr_previous (typically the last synoptic run with 48h range).
+    Also includes NBM precip (stitched from previous run via nbm_apcp_prev).
 
     Returns {"init": str, "synoptic_init": str|None, "hours": [...]}
     or None if HRRR data not available.
@@ -592,10 +600,20 @@ def build_raw_hrrr(model_data):
     if not hours_list:
         return None
 
-    # Get all variable names from both runs
+    # Get all variable names from both HRRR runs
     prev = model_data.get("hrrr_previous")
     prev_data = prev.get("data", {}) if prev else {}
     all_vars = set(data.keys()) | set(prev_data.keys())
+
+    # NBM precip: latest run, stitched with previous where gaps exist
+    nbm = model_data.get("nbm")
+    nbm_apcp = list(nbm["data"].get("apcp", [])) if nbm else []
+    if nbm_apcp_prev:
+        for i in range(len(hours_list)):
+            if i >= len(nbm_apcp):
+                nbm_apcp.append(None)
+            if nbm_apcp[i] is None and i < len(nbm_apcp_prev):
+                nbm_apcp[i] = nbm_apcp_prev[i]
 
     per_hour = []
     for i, label in enumerate(hours_list):
@@ -604,11 +622,12 @@ def build_raw_hrrr(model_data):
             latest_vals = data.get(var, [])
             val = latest_vals[i] if i < len(latest_vals) else None
             if val is None and prev:
-                prev_vals = prev_data.get(var, [])
-                val = prev_vals[i] if i < len(prev_vals) else None
+                prev_vals_list = prev_data.get(var, [])
+                val = prev_vals_list[i] if i < len(prev_vals_list) else None
                 if val is not None:
                     entry.setdefault("_stitched", True)
             entry[var] = val
+        entry["nbm_apcp"] = nbm_apcp[i] if i < len(nbm_apcp) else None
         per_hour.append(entry)
 
     return {
@@ -676,7 +695,7 @@ def generate_summary(lat, lon, cache_dir):
         }
 
     # Build final result
-    raw_hrrr = build_raw_hrrr(model_data)
+    raw_hrrr = build_raw_hrrr(model_data, nbm_apcp_prev=model_data.get("_nbm_apcp_prev"))
 
     result = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
