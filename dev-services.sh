@@ -26,7 +26,7 @@ elif ! python3 -c "import flask" 2>/dev/null; then
 fi
 
 # Variable set — must match fly.toml TILE_BUILD_VARIABLES
-export TILE_BUILD_VARIABLES="${TILE_BUILD_VARIABLES:-apcp,asnow,snod,t2m,cloud_cover,dpt,dswrf}"
+export TILE_BUILD_VARIABLES="${TILE_BUILD_VARIABLES:-apcp,asnow,snod,t2m,cloud_cover,dpt,dswrf,wind_10m,gust,refc}"
 export TILE_BUILD_MAX_HOURS_NBM="${TILE_BUILD_MAX_HOURS_NBM:-48}"
 
 SCHED_LOG="/tmp/scheduler.log"

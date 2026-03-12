@@ -322,6 +322,39 @@ pub fn get_variable(var_id: &str) -> Option<VariableConfig> {
             conversion_overrides: &[],
             variable_resolution_override: Some(0.25),
         },
+        "gust" => VariableConfig {
+            id: "gust",
+            display_name: "Wind Gusts",
+            units: "mph",
+            conversion: Conversion::MSToMph,
+            search: VariableSearch {
+                default: ":GUST:surface",
+                overrides: &[
+                    ("nbm", ":GUST:10 m"),
+                    ("ifs", ":10fg:"),
+                ],
+            },
+            unit_conversions_by_units: &[],
+            is_accumulation: false,
+            model_exclusions: &[],
+            conversion_overrides: &[],
+            variable_resolution_override: None,
+        },
+        "refc" => VariableConfig {
+            id: "refc",
+            display_name: "Radar Reflectivity",
+            units: "dBZ",
+            conversion: Conversion::None,
+            search: VariableSearch {
+                default: ":REFC:entire atmosphere",
+                overrides: &[],
+            },
+            unit_conversions_by_units: &[],
+            is_accumulation: false,
+            model_exclusions: &["gfs", "nbm", "ecmwf_hres"],
+            conversion_overrides: &[],
+            variable_resolution_override: None,
+        },
         _ => return None,
     })
 }

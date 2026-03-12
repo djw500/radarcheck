@@ -70,7 +70,7 @@ logger.setLevel(logging.INFO)
 
 # Configuration from environment with defaults
 BUILD_INTERVAL_MINUTES = int(os.environ.get("TILE_BUILD_INTERVAL_MINUTES", "15"))
-BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,asnow,snod,t2m,cloud_cover,dpt,dswrf"
+BUILD_VARIABLES_ENV = os.environ.get("TILE_BUILD_VARIABLES", "") or "apcp,asnow,snod,t2m,cloud_cover,dpt,dswrf,wind_10m,gust,refc"
 # Tile retention: keep N synoptic (00/06/12/18z) + M hourly runs per model
 # Global defaults; override per-model with TILE_BUILD_SYNOPTIC_RUNS_<MODEL>
 DEFAULT_SYNOPTIC_RUNS = int(os.environ.get("TILE_BUILD_SYNOPTIC_RUNS", "8"))
