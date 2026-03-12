@@ -1283,6 +1283,14 @@ function renderLatest(lt) {
     const stickyHdr = 'sticky left-0 z-20 bg-slate-50 dark:bg-slate-900';
     const stickyCell = 'sticky left-0 z-10 bg-slate-50 dark:bg-slate-900/95';
 
+    // Vars where zero means "nothing" — show dash instead of 0.00
+    const ZERO_IS_EMPTY = new Set(['apcp', 'nbm_apcp', 'asnow', 'snod']);
+    function fmtVal(varKey, val, dec) {
+        if (val == null) return '\u2014';
+        if (ZERO_IS_EMPTY.has(varKey) && Math.abs(val) < 0.005) return '\u2014';
+        return val.toFixed(dec);
+    }
+
     if (latestTransposed) {
         // ===== TRANSPOSED LAYOUT: rows = variables, columns = hours/days =====
         let html = '<div class="flex items-center gap-2 mb-2">';
@@ -1317,8 +1325,8 @@ function renderLatest(lt) {
             html += `<td class="${stickyCell} pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">${meta.label}</td>`;
             for (const row of hourly) {
                 const val = row[varKey];
-                const display = val != null ? val.toFixed(meta.dec) : '\u2014';
-                const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                const display = fmtVal(varKey, val, meta.dec);
+                const bg = (val != null && val !== 0 && meta.bg) ? meta.bg(val) : null;
                 const tint = getSourceTint(row.source);
                 const combined = bg || tint;
                 const style = combined ? ` style="background:${combined}"` : '';
@@ -1361,8 +1369,8 @@ function renderLatest(lt) {
                     for (const stat of stats) {
                         let val = null;
                         if (varData && typeof varData === 'object') val = varData[stat];
-                        const display = val != null ? val.toFixed(meta.dec) : '\u2014';
-                        const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                        const display = fmtVal(varKey, val, meta.dec);
+                        const bg = (val != null && val !== 0 && meta.bg) ? meta.bg(val) : null;
                         const tint = getSourceTint(day.source);
                         const combined = bg || tint;
                         const style = combined ? ` style="background:${combined}"` : '';
@@ -1403,8 +1411,8 @@ function renderLatest(lt) {
             html += `<td class="px-2 py-0.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">${row.source}</td>`;
             for (const [varKey, meta] of varEntries) {
                 const val = row[varKey];
-                const display = val != null ? val.toFixed(meta.dec) : '\u2014';
-                const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                const display = fmtVal(varKey, val, meta.dec);
+                const bg = (val != null && val !== 0 && meta.bg) ? meta.bg(val) : null;
                 const style = bg ? ` style="background:${bg}"` : '';
                 html += `<td class="px-2 py-0.5 text-right font-mono"${style}>${display}</td>`;
             }
@@ -1439,8 +1447,8 @@ function renderLatest(lt) {
                         if (varData && typeof varData === 'object') {
                             val = varData[stat];
                         }
-                        const display = val != null ? val.toFixed(meta.dec) : '\u2014';
-                        const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                        const display = fmtVal(varKey, val, meta.dec);
+                        const bg = (val != null && val !== 0 && meta.bg) ? meta.bg(val) : null;
                         const style = bg ? ` style="background:${bg}"` : '';
                         html += `<td class="px-2 py-0.5 text-right font-mono"${style}>${display}</td>`;
                     }

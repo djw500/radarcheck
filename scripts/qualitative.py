@@ -119,7 +119,7 @@ def build_model_data(lat, lon, hours_ahead=48):
         if day_diff == 0:
             return time_str
         elif day_diff == 1:
-            return f"tmrw {time_str}"
+            return f"{t_east.strftime('%a').lower()} {time_str}"
         else:
             return f"{t_east.strftime('%a').lower()} {time_str}"
 
