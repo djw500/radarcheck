@@ -273,7 +273,7 @@ let currentName = null;
 let currentData = null; // Store fetched data locally for toggling
 let _cachedSummaryData = null; // Cached qualitative API data for Latest/Summary views
 let latestTransposed = false; // Transpose toggle state for Latest view
-let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR) || 'latest';
+let currentVariable = 'latest'; // Always start on Latest view
 
 const MODEL_CONFIG = {
     'hrrr': { color: '#3b82f6', glow: 'chart-glow-blue' },     // Blue
