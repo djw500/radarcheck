@@ -102,8 +102,9 @@
             <div class="flex flex-col sm:flex-row gap-3">
                 <!-- Variable Switcher -->
                 <div class="bg-slate-200 dark:bg-slate-800 p-1 rounded-full flex text-sm font-medium overflow-x-auto max-w-full">
+                    <button data-var="latest" class="var-btn px-3 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap transition font-semibold">Latest</button>
                     <button data-var="summary" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap font-semibold">Summary</button>
-                    <button data-var="asnow" class="var-btn px-3 py-1.5 rounded-full bg-primary text-white shadow-lg shadow-primary/30 whitespace-nowrap transition">Snow</button>
+                    <button data-var="asnow" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white whitespace-nowrap transition">Snow</button>
                     <button data-var="snod" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Depth</button>
                     <button data-var="t2m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Temp</button>
                     <button data-var="wind_10m" class="var-btn px-3 py-1.5 rounded-full text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">Wind</button>
@@ -182,6 +183,11 @@
                 </div>
             </div>
         </details>
+    </div>
+
+    <div id="latestView" class="hidden space-y-2">
+        <p class="text-sm text-slate-500 dark:text-slate-400" id="latestMeta"></p>
+        <div id="latestContent"></div>
     </div>
 
     <!-- Model Toggles (Sticky Bottom) -->
@@ -265,7 +271,9 @@ let currentLat = null;
 let currentLon = null;
 let currentName = null;
 let currentData = null; // Store fetched data locally for toggling
-let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR) || 'asnow';
+let _cachedSummaryData = null; // Cached qualitative API data for Latest/Summary views
+let latestTransposed = false; // Transpose toggle state for Latest view
+let currentVariable = localStorage.getItem(STORAGE_KEY_LAST_VAR) || 'latest';
 
 const MODEL_CONFIG = {
     'hrrr': { color: '#3b82f6', glow: 'chart-glow-blue' },     // Blue
@@ -308,8 +316,8 @@ const VAR_CONFIG = {
 };
 
 // Validate currentVariable
-if (!currentVariable || (!VAR_CONFIG[currentVariable] && currentVariable !== 'summary')) {
-    currentVariable = 'asnow';
+if (!currentVariable || (!VAR_CONFIG[currentVariable] && currentVariable !== 'summary' && currentVariable !== 'latest')) {
+    currentVariable = 'latest';
 }
 
 // --- UI Interaction ---
@@ -347,6 +355,27 @@ document.querySelectorAll('.var-btn').forEach(btn => {
         const newVar = e.target.dataset.var;
         if (newVar === currentVariable) return;
 
+        if (newVar === 'latest') {
+            // Switch active button styling
+            document.querySelectorAll('.var-btn').forEach(b => {
+                b.classList.remove('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+                b.classList.add('text-slate-600', 'dark:text-slate-400');
+            });
+            e.target.classList.add('bg-primary', 'text-white', 'shadow-lg', 'shadow-primary/30');
+            e.target.classList.remove('text-slate-600', 'dark:text-slate-400');
+
+            currentVariable = 'latest';
+            document.getElementById('chartCard').style.display = 'none';
+            document.getElementById('toggleTableBtn').style.display = 'none';
+            document.getElementById('dataTableContainer').style.display = 'none';
+            document.getElementById('periodSelector').style.display = 'none';
+            document.getElementById('modelToggles').style.display = 'none';
+            document.getElementById('summaryPanel').classList.add('hidden');
+            document.getElementById('latestView').classList.remove('hidden');
+            fetchSummary().then(d => { _cachedSummaryData = d; renderLatest(d); });
+            return;
+        }
+
         if (newVar === 'summary') {
             // Switch active button styling
             document.querySelectorAll('.var-btn').forEach(b => {
@@ -362,13 +391,15 @@ document.querySelectorAll('.var-btn').forEach(btn => {
             document.getElementById('dataTableContainer').style.display = 'none';
             document.getElementById('periodSelector').style.display = 'none';
             document.getElementById('modelToggles').style.display = 'none';
+            document.getElementById('latestView').classList.add('hidden');
             document.getElementById('summaryPanel').classList.remove('hidden');
-            fetchSummary().then(renderSummary);
+            fetchSummary().then(d => { _cachedSummaryData = d; renderSummary(d); });
             return;
         }
 
-        // For all other variables, hide summary and show chart/table
+        // For all other variables, hide summary/latest and show chart/table
         document.getElementById('summaryPanel').classList.add('hidden');
+        document.getElementById('latestView').classList.add('hidden');
         document.getElementById('chartCard').style.display = '';
         document.getElementById('toggleTableBtn').style.display = '';
         document.getElementById('dataTableContainer').style.display = '';
@@ -955,6 +986,52 @@ async function fetchSummary() {
     }
 }
 
+// Color functions return rgba background for "interesting" values, null otherwise
+// Shared by renderSummary and renderLatest
+const _refcBg = v => {
+    if (v < 5) return null;
+    if (v < 20) return 'rgba(34,197,94,0.15)';    // green - light
+    if (v < 35) return 'rgba(234,179,8,0.2)';     // yellow - moderate
+    if (v < 50) return 'rgba(249,115,22,0.3)';    // orange - heavy
+    if (v < 65) return 'rgba(239,68,68,0.35)';    // red - severe
+    return 'rgba(168,85,247,0.4)';                 // purple - extreme
+};
+const _precipBg = v => {
+    if (v < 0.01) return null;
+    const t = Math.min(v / 0.5, 1);
+    return `rgba(59,130,246,${0.1 + t * 0.3})`;   // blue ramp
+};
+const _snowBg = v => {
+    if (v < 0.01) return null;
+    const t = Math.min(v / 1.0, 1);
+    return `rgba(147,112,219,${0.1 + t * 0.35})`;  // purple ramp
+};
+const _gustBg = v => {
+    if (v < 15) return null;
+    if (v < 25) return 'rgba(234,179,8,0.15)';
+    if (v < 40) return 'rgba(249,115,22,0.25)';
+    if (v < 58) return 'rgba(239,68,68,0.3)';
+    return 'rgba(168,85,247,0.4)';                 // hurricane force
+};
+const _tempBg = v => {
+    if (v <= 32) return 'rgba(59,130,246,0.15)';   // freezing
+    if (v >= 95) return 'rgba(239,68,68,0.15)';    // extreme heat
+    return null;
+};
+const VARIABLE_META = {
+    t2m:         {label: 'Temp',    unit: '\u00b0F',   dec: 0, bg: _tempBg},
+    dpt:         {label: 'Dew Pt',  unit: '\u00b0F',   dec: 0, bg: v => v >= 70 ? 'rgba(249,115,22,0.2)' : v >= 65 ? 'rgba(234,179,8,0.15)' : null},
+    wind_10m:    {label: 'Wind',    unit: 'mph',  dec: 0, bg: _gustBg},
+    gust:        {label: 'Gust',    unit: 'mph',  dec: 0, bg: _gustBg},
+    cloud_cover: {label: 'Clouds',  unit: '%',    dec: 0, bg: null},
+    dswrf:       {label: 'Solar',   unit: 'W/m\u00b2', dec: 0, bg: null},
+    refc:        {label: 'Refl',    unit: 'dBZ',  dec: 0, bg: _refcBg},
+    apcp:        {label: 'Precip',  unit: 'in',   dec: 2, bg: _precipBg},
+    nbm_apcp:    {label: 'NBM Pcp', unit: 'in',   dec: 2, bg: _precipBg},
+    asnow:       {label: 'Snow',    unit: 'in',   dec: 2, bg: _snowBg},
+    snod:        {label: 'Depth',   unit: 'in',   dec: 1, bg: v => v > 0 ? `rgba(147,112,219,${Math.min(v/12,1)*0.3})` : null},
+};
+
 function renderSummary(data) {
     const textEl = document.getElementById('summaryText');
     const trendsEl = document.getElementById('summaryTrends');
@@ -1006,51 +1083,6 @@ function renderSummary(data) {
     }
 
     trendsEl.innerHTML = '';
-
-    // Color functions return rgba background for "interesting" values, null otherwise
-    const _refcBg = v => {
-        if (v < 5) return null;
-        if (v < 20) return 'rgba(34,197,94,0.15)';    // green - light
-        if (v < 35) return 'rgba(234,179,8,0.2)';     // yellow - moderate
-        if (v < 50) return 'rgba(249,115,22,0.3)';    // orange - heavy
-        if (v < 65) return 'rgba(239,68,68,0.35)';    // red - severe
-        return 'rgba(168,85,247,0.4)';                 // purple - extreme
-    };
-    const _precipBg = v => {
-        if (v < 0.01) return null;
-        const t = Math.min(v / 0.5, 1);
-        return `rgba(59,130,246,${0.1 + t * 0.3})`;   // blue ramp
-    };
-    const _snowBg = v => {
-        if (v < 0.01) return null;
-        const t = Math.min(v / 1.0, 1);
-        return `rgba(147,112,219,${0.1 + t * 0.35})`;  // purple ramp
-    };
-    const _gustBg = v => {
-        if (v < 15) return null;
-        if (v < 25) return 'rgba(234,179,8,0.15)';
-        if (v < 40) return 'rgba(249,115,22,0.25)';
-        if (v < 58) return 'rgba(239,68,68,0.3)';
-        return 'rgba(168,85,247,0.4)';                 // hurricane force
-    };
-    const _tempBg = v => {
-        if (v <= 32) return 'rgba(59,130,246,0.15)';   // freezing
-        if (v >= 95) return 'rgba(239,68,68,0.15)';    // extreme heat
-        return null;
-    };
-    const VARIABLE_META = {
-        t2m:         {label: 'Temp',    unit: '°F',   dec: 0, bg: _tempBg},
-        dpt:         {label: 'Dew Pt',  unit: '°F',   dec: 0, bg: v => v >= 70 ? 'rgba(249,115,22,0.2)' : v >= 65 ? 'rgba(234,179,8,0.15)' : null},
-        wind_10m:    {label: 'Wind',    unit: 'mph',  dec: 0, bg: _gustBg},
-        gust:        {label: 'Gust',    unit: 'mph',  dec: 0, bg: _gustBg},
-        cloud_cover: {label: 'Clouds',  unit: '%',    dec: 0, bg: null},
-        dswrf:       {label: 'Solar',   unit: 'W/m²', dec: 0, bg: null},
-        refc:        {label: 'Refl',    unit: 'dBZ',  dec: 0, bg: _refcBg},
-        apcp:        {label: 'Precip',  unit: 'in',   dec: 2, bg: _precipBg},
-        nbm_apcp:    {label: 'NBM Pcp', unit: 'in',   dec: 2, bg: _precipBg},
-        asnow:       {label: 'Snow',    unit: 'in',   dec: 2, bg: _snowBg},
-        snod:        {label: 'Depth',   unit: 'in',   dec: 1, bg: v => v > 0 ? `rgba(147,112,219,${Math.min(v/12,1)*0.3})` : null},
-    };
 
     timelineEl.innerHTML = '';
     svgIdCounter = 0;
@@ -1213,11 +1245,235 @@ function renderSummary(data) {
     });
 }
 
+function renderLatest(data) {
+    const contentEl = document.getElementById('latestContent');
+    const metaEl = document.getElementById('latestMeta');
+    if (!data || !data.latest_table) {
+        contentEl.innerHTML = '<p class="text-slate-400">No latest forecast data available yet.</p>';
+        metaEl.textContent = '';
+        return;
+    }
+    const lt = data.latest_table;
+
+    // Source tint colors (very subtle)
+    const SOURCE_TINTS = {
+        'HRRR': null,
+        'GFS': 'rgba(168,85,247,0.04)',
+    };
+    function getSourceTint(source) {
+        if (!source) return null;
+        for (const [key, tint] of Object.entries(SOURCE_TINTS)) {
+            if (source.startsWith(key)) return tint;
+        }
+        return null;
+    }
+
+    const varEntries = Object.entries(VARIABLE_META);
+    const colCount = varEntries.length + 2; // hour/day + source + vars
+
+    // Sticky cell base classes
+    const stickyHdr = 'sticky left-0 z-20 bg-slate-50 dark:bg-slate-900';
+    const stickyCell = 'sticky left-0 z-10 bg-slate-50 dark:bg-slate-900/95';
+
+    if (latestTransposed) {
+        // ===== TRANSPOSED LAYOUT: rows = variables, columns = hours/days =====
+        let html = '<div class="flex items-center gap-2 mb-2">';
+        html += '<button id="latestTransposeBtn" class="text-xs px-2 py-1 rounded border border-primary/50 text-primary hover:bg-primary/10 dark:border-primary/40 dark:text-primary dark:hover:bg-primary/10 font-medium">&#8644; Normal</button>';
+        html += '</div>';
+
+        // --- Transposed Hourly ---
+        html += '<div class="bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700 overflow-x-auto max-h-[70vh] overflow-y-auto mb-4">';
+        html += '<table class="text-xs">';
+        const hourly = lt.hourly || [];
+
+        // Header row: blank | hour labels
+        html += `<thead class="sticky top-0 bg-slate-50 dark:bg-slate-900 z-30"><tr class="text-slate-400 dark:text-slate-500">`;
+        html += `<td class="${stickyHdr} pr-2 py-1 font-medium min-w-[60px]">Var</td>`;
+        for (const row of hourly) {
+            html += `<td class="px-1.5 py-1 text-center whitespace-nowrap">${row.hour}</td>`;
+        }
+        html += '</tr>';
+        // Source row
+        html += '<tr class="text-slate-400 dark:text-slate-500">';
+        html += `<td class="${stickyHdr} pr-2 py-0.5 text-[10px]">Source</td>`;
+        for (const row of hourly) {
+            const tint = getSourceTint(row.source);
+            const style = tint ? ` style="background:${tint}"` : '';
+            html += `<td class="px-1.5 py-0.5 text-center text-[10px] whitespace-nowrap"${style}>${row.source}</td>`;
+        }
+        html += '</tr></thead><tbody>';
+
+        // One row per variable
+        for (const [varKey, meta] of varEntries) {
+            html += `<tr class="border-t border-slate-200/50 dark:border-slate-700/50">`;
+            html += `<td class="${stickyCell} pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">${meta.label}</td>`;
+            for (const row of hourly) {
+                const val = row[varKey];
+                const display = val != null ? val.toFixed(meta.dec) : '\u2014';
+                const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                const tint = getSourceTint(row.source);
+                const combined = bg || tint;
+                const style = combined ? ` style="background:${combined}"` : '';
+                html += `<td class="px-1.5 py-0.5 text-right font-mono"${style}>${display}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+
+        // --- Transposed Daily ---
+        if (lt.daily && lt.daily.length > 0) {
+            html += '<div class="bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700 overflow-x-auto max-h-[50vh] overflow-y-auto">';
+            html += '<table class="text-xs">';
+            const daily = lt.daily;
+            const stats = ['min', 'max', 'avg'];
+
+            // Header row: Var | day1-min day1-max day1-avg | day2-min ...
+            html += '<thead class="sticky top-0 bg-slate-50 dark:bg-slate-900 z-30"><tr class="text-slate-400 dark:text-slate-500">';
+            html += `<td class="${stickyHdr} pr-2 py-1 font-medium min-w-[60px]">Var</td>`;
+            for (const day of daily) {
+                html += `<td colspan="3" class="px-1.5 py-1 text-center font-medium border-l border-slate-300 dark:border-slate-600 whitespace-nowrap">${day.day}</td>`;
+            }
+            html += '</tr>';
+            // Stat sub-header
+            html += '<tr class="text-slate-400 dark:text-slate-500">';
+            html += `<td class="${stickyHdr} pr-2 py-0.5 text-[10px]">Source</td>`;
+            for (const day of daily) {
+                for (const stat of stats) {
+                    const border = stat === 'min' ? ' border-l border-slate-300 dark:border-slate-600' : '';
+                    html += `<td class="px-1 py-0.5 text-center text-[10px]${border}">${stat}</td>`;
+                }
+            }
+            html += '</tr></thead><tbody>';
+
+            for (const [varKey, meta] of varEntries) {
+                html += '<tr class="border-t border-slate-200/50 dark:border-slate-700/50">';
+                html += `<td class="${stickyCell} pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">${meta.label}</td>`;
+                for (const day of daily) {
+                    const varData = day[varKey];
+                    for (const stat of stats) {
+                        let val = null;
+                        if (varData && typeof varData === 'object') val = varData[stat];
+                        const display = val != null ? val.toFixed(meta.dec) : '\u2014';
+                        const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                        const tint = getSourceTint(day.source);
+                        const combined = bg || tint;
+                        const style = combined ? ` style="background:${combined}"` : '';
+                        const border = stat === 'min' ? ' border-l border-slate-300 dark:border-slate-600' : '';
+                        html += `<td class="px-1 py-0.5 text-right font-mono${border}"${style}>${display}</td>`;
+                    }
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+        }
+
+        contentEl.innerHTML = html;
+    } else {
+        // ===== NORMAL LAYOUT: rows = hours/days, columns = variables =====
+        let html = '<div class="flex items-center gap-2 mb-2">';
+        html += '<button id="latestTransposeBtn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">&#8644; Transpose</button>';
+        html += '</div>';
+
+        html += '<div class="bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700 overflow-x-auto max-h-[70vh] overflow-y-auto">';
+        html += '<table class="w-full text-xs">';
+
+        // Header
+        html += `<thead class="sticky top-0 bg-slate-50 dark:bg-slate-900 z-20"><tr class="text-slate-400 dark:text-slate-500">`;
+        html += `<td class="${stickyHdr} pr-2 py-1 font-medium z-30">Hour</td>`;
+        html += '<td class="px-2 py-1">Source</td>';
+        for (const [, meta] of varEntries) {
+            html += `<td class="px-2 py-1 text-right">${meta.label}</td>`;
+        }
+        html += '</tr></thead><tbody>';
+
+        // Hourly rows
+        for (const row of (lt.hourly || [])) {
+            const tint = getSourceTint(row.source);
+            const rowStyle = tint ? ` style="background:${tint}"` : '';
+            html += `<tr class="text-slate-600 dark:text-slate-300 border-t border-slate-200/50 dark:border-slate-700/50"${rowStyle}>`;
+            html += `<td class="${stickyCell} pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">${row.hour}</td>`;
+            html += `<td class="px-2 py-0.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">${row.source}</td>`;
+            for (const [varKey, meta] of varEntries) {
+                const val = row[varKey];
+                const display = val != null ? val.toFixed(meta.dec) : '\u2014';
+                const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                const style = bg ? ` style="background:${bg}"` : '';
+                html += `<td class="px-2 py-0.5 text-right font-mono"${style}>${display}</td>`;
+            }
+            html += '</tr>';
+        }
+
+        // Daily separator and section
+        if (lt.daily && lt.daily.length > 0) {
+            html += `<tr><td colspan="${colCount}" class="py-2"><div class="border-t-2 border-slate-300 dark:border-slate-600"></div></td></tr>`;
+
+            // Daily header
+            html += `<tr class="text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800/50">`;
+            html += `<td class="${stickyHdr} pr-2 py-1 font-medium bg-slate-100 dark:bg-slate-800/50">Day</td>`;
+            html += '<td class="px-2 py-1">Source</td>';
+            for (const [, meta] of varEntries) {
+                html += `<td class="px-2 py-1 text-right">${meta.label}</td>`;
+            }
+            html += '</tr>';
+
+            // Daily rows: 3 sub-rows per day (min/max/avg)
+            for (const day of lt.daily) {
+                const tint = getSourceTint(day.source);
+                const rowStyle = tint ? ` style="background:${tint}"` : '';
+                for (const stat of ['min', 'max', 'avg']) {
+                    const isFirst = stat === 'min';
+                    html += `<tr class="text-slate-600 dark:text-slate-300 border-t border-slate-200/30 dark:border-slate-700/30"${rowStyle}>`;
+                    html += `<td class="${stickyCell} pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">${isFirst ? day.day : ''}</td>`;
+                    html += `<td class="px-2 py-0.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">${isFirst ? day.source : ''} <span class="text-slate-300 dark:text-slate-600">${stat}</span></td>`;
+                    for (const [varKey, meta] of varEntries) {
+                        const varData = day[varKey];
+                        let val = null;
+                        if (varData && typeof varData === 'object') {
+                            val = varData[stat];
+                        }
+                        const display = val != null ? val.toFixed(meta.dec) : '\u2014';
+                        const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                        const style = bg ? ` style="background:${bg}"` : '';
+                        html += `<td class="px-2 py-0.5 text-right font-mono"${style}>${display}</td>`;
+                    }
+                    html += '</tr>';
+                }
+            }
+        }
+
+        html += '</tbody>';
+        // Units footer
+        html += '<tfoot><tr class="text-[10px] text-slate-400 dark:text-slate-600"><td></td><td></td>';
+        for (const [, meta] of varEntries) {
+            html += `<td class="px-2 text-right">${meta.unit}</td>`;
+        }
+        html += '</tr></tfoot></table></div>';
+
+        contentEl.innerHTML = html;
+    }
+
+    // Wire up transpose toggle button
+    const transposeBtn = document.getElementById('latestTransposeBtn');
+    if (transposeBtn) {
+        transposeBtn.addEventListener('click', () => {
+            latestTransposed = !latestTransposed;
+            renderLatest(data);
+        });
+    }
+
+    // Meta text
+    if (data.generated_at) {
+        const gen = new Date(data.generated_at);
+        const ago = Math.round((Date.now() - gen.getTime()) / 60000);
+        metaEl.textContent = ago < 60 ? `Updated ${ago}m ago` : `Updated ${Math.round(ago/60)}h ago`;
+    }
+}
+
 document.getElementById('toggleTableBtn').addEventListener('click', () => {
     const container = document.getElementById('dataTableContainer');
     container.classList.toggle('hidden');
     const btn = document.getElementById('toggleTableBtn');
-    btn.innerHTML = container.classList.contains('hidden') 
+    btn.innerHTML = container.classList.contains('hidden')
         ? '<span class="material-icons-outlined text-base">table_chart</span> Show Data Table'
         : '<span class="material-icons-outlined text-base">expand_less</span> Hide Data Table';
 });
@@ -1435,9 +1691,22 @@ function setLocation(lat, lon, name) {
     document.getElementById('locCoords').textContent = `${currentLat}, ${currentLon}`;
     
     localStorage.setItem(STORAGE_KEY_LAST_LOC, JSON.stringify({ lat, lon, name }));
-    loadData();
-    if (currentVariable === 'summary') {
-        fetchSummary().then(renderSummary);
+    if (currentVariable === 'latest') {
+        // Latest view — fetch qualitative data, don't load chart data
+        updateVarButtons();
+        document.getElementById('chartCard').style.display = 'none';
+        document.getElementById('toggleTableBtn').style.display = 'none';
+        document.getElementById('dataTableContainer').style.display = 'none';
+        document.getElementById('periodSelector').style.display = 'none';
+        document.getElementById('modelToggles').style.display = 'none';
+        document.getElementById('summaryPanel').classList.add('hidden');
+        document.getElementById('latestView').classList.remove('hidden');
+        fetchSummary().then(d => { _cachedSummaryData = d; renderLatest(d); });
+    } else if (currentVariable === 'summary') {
+        loadData();
+        fetchSummary().then(d => { _cachedSummaryData = d; renderSummary(d); });
+    } else {
+        loadData();
     }
 }
 
