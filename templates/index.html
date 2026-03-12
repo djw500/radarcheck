@@ -1295,6 +1295,7 @@ function renderLatest(lt) {
         // ===== TRANSPOSED LAYOUT: rows = variables, columns = hours/days =====
         let html = '<div class="flex items-center gap-2 mb-2">';
         html += '<button id="latestTransposeBtn" class="text-xs px-2 py-1 rounded border border-primary/50 text-primary hover:bg-primary/10 dark:border-primary/40 dark:text-primary dark:hover:bg-primary/10 font-medium">&#8644; Normal</button>';
+        html += '<button id="latestRefreshBtn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">&#8635; Refresh</button>';
         html += '</div>';
 
         // --- Transposed Hourly ---
@@ -1389,6 +1390,7 @@ function renderLatest(lt) {
         // ===== NORMAL LAYOUT: rows = hours/days, columns = variables =====
         let html = '<div class="flex items-center gap-2 mb-2">';
         html += '<button id="latestTransposeBtn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">&#8644; Transpose</button>';
+        html += '<button id="latestRefreshBtn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">&#8635; Refresh</button>';
         html += '</div>';
 
         html += '<div class="bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700 overflow-x-auto max-h-[70vh] overflow-y-auto">';
@@ -1476,6 +1478,15 @@ function renderLatest(lt) {
         transposeBtn.addEventListener('click', () => {
             latestTransposed = !latestTransposed;
             renderLatest(lt);
+        });
+    }
+
+    // Wire up manual refresh button
+    const refreshBtn = document.getElementById('latestRefreshBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            refreshBtn.textContent = '⟳ …';
+            fetchLatest().then(d => { if (d) renderLatest(d); });
         });
     }
 
