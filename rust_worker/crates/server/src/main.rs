@@ -147,6 +147,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/timeseries/multirun", get(api_timeseries_multirun))
         .route("/api/timeseries/stitched", get(api_timeseries_stitched))
         .route("/api/qualitative", get(api_qualitative))
+        .route("/api/latest", get(api_latest))
         // Status API
         .route("/api/status/summary", get(status::api_status_summary))
         .route("/api/status/run-grid", get(status::api_status_run_grid))
@@ -789,6 +790,73 @@ async fn api_qualitative(
         }
         Err(_) => error_response(404, "No qualitative data available"),
     }
+}
+
+// ── Live latest table endpoint ───────────────────────────────────────────────
+
+async fn api_latest(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<QualitativeParams>,
+) -> Response {
+    let lat = params.lat.unwrap_or(40.0);
+    let lon = params.lon.unwrap_or(-75.4);
+
+    // File-based cache with 60s TTL
+    let cache_file = state.cache_dir.join("latest").join(format!("{:.1}_{:.1}.json", lat, lon));
+    if let Ok(meta) = std::fs::metadata(&cache_file) {
+        let is_fresh = meta.modified().ok()
+            .and_then(|m| m.elapsed().ok())
+            .map(|age| age.as_secs() < 60)
+            .unwrap_or(false);
+        if is_fresh {
+            if let Ok(contents) = std::fs::read_to_string(&cache_file) {
+                return Response::builder()
+                    .status(200)
+                    .header("content-type", "application/json")
+                    .header("cache-control", "public, max-age=30")
+                    .body(Body::from(contents))
+                    .unwrap();
+            }
+        }
+    }
+
+    // Run Python script to compute live
+    let script = state.app_root.join("scripts").join("latest_table.py");
+    let output = match tokio::process::Command::new("python3")
+        .arg(&script)
+        .arg("--lat")
+        .arg(format!("{}", lat))
+        .arg("--lon")
+        .arg(format!("{}", lon))
+        .current_dir(&state.app_root)
+        .output()
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            return error_response(500, &format!("Failed to run latest_table.py: {}", e));
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return error_response(500, &format!("latest_table.py failed: {}", stderr));
+    }
+
+    let json_bytes = output.stdout;
+
+    // Cache to file
+    if let Some(parent) = cache_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&cache_file, &json_bytes);
+
+    Response::builder()
+        .status(200)
+        .header("content-type", "application/json")
+        .header("cache-control", "public, max-age=30")
+        .body(Body::from(json_bytes))
+        .unwrap()
 }
 
 // ── Writeup endpoints ────────────────────────────────────────────────────────
