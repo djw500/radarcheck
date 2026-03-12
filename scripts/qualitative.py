@@ -1001,25 +1001,58 @@ def build_latest_table(model_data, all_data=None, hour_labels=None, hour_isos=No
                 entry[var] = round(val, 4)
             prev_run = run_key
 
-    # NBM precip overlay (de-accumulated separately)
-    nbm = model_data.get("nbm")
-    nbm_apcp = list(nbm["data"].get("apcp", [])) if nbm and nbm.get("data") else []
-    prev_nbm = None
+    # NBM precip overlay — per-hour best-run from all_data (like HRRR)
+    nbm_apcp_runs = []
+    nbm_apcp_data = all_data.get("apcp") if all_data else None
+    if nbm_apcp_data:
+        for run_key, run_info in nbm_apcp_data.get("runs", {}).items():
+            if run_info.get("model_id", run_key.split("/")[0]) == "nbm":
+                init_time = run_info.get("init_time", "")
+                vals = {
+                    pt["valid_time"]: round(pt["value"], 4)
+                    for pt in run_info.get("series", [])
+                    if pt.get("value") is not None
+                }
+                nbm_apcp_runs.append((init_time, run_key, vals))
+        nbm_apcp_runs.sort(key=lambda x: x[0], reverse=True)
+
+    # For each hour, pick newest NBM run with data
     for i, entry in enumerate(hourly):
-        val = nbm_apcp[i] if i < len(nbm_apcp) else None
-        if val is not None and prev_nbm is not None:
+        if i < len(hour_isos):
+            iso_prefix = hour_isos[i][:13]
+            for _, run_key, vals in nbm_apcp_runs:
+                v = next((v for vt, v in vals.items() if vt.startswith(iso_prefix)), None)
+                if v is not None:
+                    entry["nbm_apcp"] = v
+                    entry["_nbm_run_key"] = run_key
+                    break
+            else:
+                entry.setdefault("nbm_apcp", None)
+                entry.setdefault("_nbm_run_key", None)
+
+    # De-accumulate NBM precip per source run
+    prev_nbm = None
+    prev_nbm_run = None
+    for entry in hourly:
+        val = entry.get("nbm_apcp")
+        run_key = entry.get("_nbm_run_key")
+        if val is None or run_key is None:
+            prev_nbm = None
+            prev_nbm_run = None
+            continue
+        if prev_nbm is not None and run_key == prev_nbm_run:
             entry["nbm_apcp"] = round(max(0, val - prev_nbm), 4)
-        elif val is not None:
-            entry["nbm_apcp"] = round(val, 4)
-        else:
-            entry.setdefault("nbm_apcp", None)
-        if val is not None:
             prev_nbm = val
+        else:
+            prev_nbm = val
+            entry["nbm_apcp"] = round(val, 4)
+        prev_nbm_run = run_key
 
     # Clean up internal keys
     for entry in hourly:
         entry.pop("_run_key", None)
         entry.pop("_var_run_keys", None)
+        entry.pop("_nbm_run_key", None)
 
     all_vars = set(VARIABLES)
     daily = _build_daily_section(model_data, all_vars)
