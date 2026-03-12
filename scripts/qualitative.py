@@ -886,6 +886,7 @@ def generate_summary(lat, lon, cache_dir):
 
     # Build final result
     raw_hrrr = build_raw_hrrr(model_data, nbm_apcp_prev=model_data.get("_nbm_apcp_prev"))
+    latest_table = build_latest_table(model_data)
 
     result = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -894,6 +895,7 @@ def generate_summary(lat, lon, cache_dir):
         "buckets": llm_data.get("buckets", llm_data.get("hours", [])),
         "narrative": llm_data["narrative"],
         "raw_hrrr": raw_hrrr,
+        "latest_table": latest_table,
         "prompt": prompt,
         "llm_raw": raw_output,
     }
