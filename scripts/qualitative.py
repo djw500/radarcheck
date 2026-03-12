@@ -216,12 +216,13 @@ def build_model_data(lat, lon, hours_ahead=48):
     for var in VARIABLES:
         gfs_runs = extract_latest_runs(all_data[var], "gfs", count=1)
         if gfs_runs:
-            values, labels, _ = extract_extended(gfs_runs, hours_ahead + 1, 240, step=6)
+            values, labels, ext_isos = extract_extended(gfs_runs, hours_ahead + 1, 240, step=6)
             if any(v is not None for v in values):
                 if "gfs_extended" not in model_data:
                     model_data["gfs_extended"] = {
                         "init": gfs_runs[0][0],
                         "hours": labels,
+                        "isos": ext_isos,
                         "data": {},
                         "note": "Every 6h, days 3-10 — for daily outlook buckets"
                     }
