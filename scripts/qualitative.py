@@ -88,7 +88,7 @@ def extract_latest_runs(api_response, model_id, count=1):
             vt = pt.get("valid_time", "")
             v = pt.get("value")
             if vt and v is not None:
-                values_by_time[vt] = round(v, 2)
+                values_by_time[vt] = round(v, 4)
         runs_by_init.append((init_time, values_by_time))
 
     runs_by_init.sort(key=lambda x: x[0], reverse=True)
@@ -189,7 +189,7 @@ def build_model_data(lat, lon, hours_ahead=48):
     # Build per-model data (48h detail)
     model_data = {}
 
-    # HRRR: latest 2 runs
+    # HRRR: latest 2 runs + latest synoptic run (00/06/12/18 UTC, 48h)
     for var in VARIABLES:
         hrrr_runs = extract_latest_runs(all_data[var], "hrrr", count=2)
         for i, (init_time, _) in enumerate(hrrr_runs):
@@ -197,6 +197,23 @@ def build_model_data(lat, lon, hours_ahead=48):
             if label not in model_data:
                 model_data[label] = {"init": init_time, "hours": hour_labels[:], "data": {}}
             model_data[label]["data"][var] = extract_hourly([hrrr_runs[i]], hour_isos)
+
+    # HRRR synoptic: latest run at 00/06/12/18 UTC (these go 48h)
+    SYNOPTIC_HOURS = {"00", "06", "12", "18"}
+    for var in VARIABLES:
+        all_hrrr = extract_latest_runs(all_data[var], "hrrr", count=20)
+        for init_time, values_by_time in all_hrrr:
+            try:
+                init_hour = init_time[11:13]  # "HH" from ISO
+            except (IndexError, TypeError):
+                continue
+            if init_hour in SYNOPTIC_HOURS and len(values_by_time) > 20:
+                if "hrrr_synoptic" not in model_data:
+                    model_data["hrrr_synoptic"] = {"init": init_time, "hours": hour_labels[:], "data": {}}
+                model_data["hrrr_synoptic"]["data"][var] = extract_hourly(
+                    [(init_time, values_by_time)], hour_isos
+                )
+                break
 
     # GFS, ECMWF, NBM: latest run each (48h detail)
     for model_id in ["gfs", "ecmwf_hres", "nbm"]:
@@ -664,7 +681,7 @@ def build_raw_hrrr(model_data, nbm_apcp_prev=None):
 def build_latest_table(model_data):
     """Build unified best-available forecast table with source attribution.
 
-    Priority per hour: hrrr_latest > hrrr_previous > gfs.
+    Priority per hour: hrrr_latest > hrrr_previous > hrrr_synoptic > gfs.
     Returns {"hourly": [...], "daily": [...]}.
     """
     if not model_data:
@@ -679,10 +696,11 @@ def build_latest_table(model_data):
         except Exception:
             return display_name
 
-    # Source priority: latest HRRR > previous HRRR > GFS
+    # Source priority: latest hourly > prev hourly > synoptic (48h) > GFS
     source_keys = [
         ("hrrr_latest", "HRRR"),
         ("hrrr_previous", "HRRR"),
+        ("hrrr_synoptic", "HRRR"),
         ("gfs", "GFS"),
     ]
     sources = []
@@ -735,11 +753,11 @@ def build_latest_table(model_data):
                 continue
             source = entry.get("source")
             if prev_val is not None and source == prev_source:
-                entry[var] = round(max(0, val - prev_val), 2)
+                entry[var] = round(max(0, val - prev_val), 4)
                 prev_val = val
             else:
                 prev_val = val
-                entry[var] = round(val, 2)
+                entry[var] = round(val, 4)
             prev_source = source
 
     # NBM precip overlay (de-accumulated separately)
@@ -749,9 +767,9 @@ def build_latest_table(model_data):
     for i, entry in enumerate(hourly):
         val = nbm_apcp[i] if i < len(nbm_apcp) else None
         if val is not None and prev_nbm is not None:
-            entry["nbm_apcp"] = round(max(0, val - prev_nbm), 2)
+            entry["nbm_apcp"] = round(max(0, val - prev_nbm), 4)
         elif val is not None:
-            entry["nbm_apcp"] = round(val, 2)
+            entry["nbm_apcp"] = round(val, 4)
         else:
             entry.setdefault("nbm_apcp", None)
         if val is not None:
@@ -773,9 +791,9 @@ def build_latest_table(model_data):
             prev = None
             for v in raw:
                 if v is not None and prev is not None:
-                    increments.append(round(max(0, v - prev), 2))
+                    increments.append(round(max(0, v - prev), 4))
                 elif v is not None:
-                    increments.append(round(v, 2))
+                    increments.append(round(v, 4))
                 else:
                     increments.append(None)
                 if v is not None:
@@ -812,15 +830,15 @@ def build_latest_table(model_data):
                     day_entry[var] = {"min": None, "max": None, "avg": None}
                 elif var in ACCUM_VARS:
                     day_entry[var] = {
-                        "min": round(min(vals), 2),
-                        "max": round(max(vals), 2),
-                        "avg": round(sum(vals), 2),
+                        "min": round(min(vals), 4),
+                        "max": round(max(vals), 4),
+                        "avg": round(sum(vals), 4),
                     }
                 else:
                     day_entry[var] = {
-                        "min": round(min(vals), 1),
-                        "max": round(max(vals), 1),
-                        "avg": round(sum(vals) / len(vals), 1),
+                        "min": round(min(vals), 2),
+                        "max": round(max(vals), 2),
+                        "avg": round(sum(vals) / len(vals), 2),
                     }
             daily.append(day_entry)
 
