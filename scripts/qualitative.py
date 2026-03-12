@@ -871,20 +871,21 @@ def build_latest_table(model_data, all_data=None, hour_labels=None, hour_isos=No
         return _build_latest_table_legacy(model_data)
 
     # ---- Collect all HRRR runs, sorted newest-first ----
-    # Build a list of (init_time, run_key, {var: {valid_iso: value}})
+    # Scan ALL variables to discover run keys (a partial run may only have
+    # some variables tiled so far — we must not miss it).
     hrrr_runs = []
-    all_run_keys = set()
-    t2m_data = all_data.get("t2m")
-    if t2m_data:
-        for run_key, run_info in t2m_data.get("runs", {}).items():
+    all_run_keys = {}  # run_key -> init_time
+    for var in VARIABLES:
+        api_resp = all_data.get(var)
+        if not api_resp:
+            continue
+        for run_key, run_info in api_resp.get("runs", {}).items():
             if run_info.get("model_id", run_key.split("/")[0]) == "hrrr":
-                all_run_keys.add(run_key)
+                if run_key not in all_run_keys:
+                    all_run_keys[run_key] = run_info.get("init_time", "")
 
-    for run_key in all_run_keys:
-        # Get init time from t2m run
-        run_info = t2m_data["runs"][run_key]
-        init_time = run_info.get("init_time", "")
-        # Collect all vars for this run
+    # Build (init_time, run_key, {var: {valid_iso: value}}) for each run
+    for run_key, init_time in all_run_keys.items():
         run_vars = {}
         for var in VARIABLES:
             api_resp = all_data.get(var)
