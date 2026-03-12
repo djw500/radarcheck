@@ -1008,14 +1008,17 @@ function renderSummary(data) {
     trendsEl.innerHTML = '';
 
     const VARIABLE_META = {
-        t2m:         {label: 'Temp',    unit: '°F'},
-        dpt:         {label: 'Dew Pt',  unit: '°F'},
-        cloud_cover: {label: 'Clouds',  unit: '%'},
-        dswrf:       {label: 'Solar',   unit: 'W/m²'},
-        apcp:        {label: 'Precip',  unit: 'in'},
-        nbm_apcp:    {label: 'NBM Pcp', unit: 'in'},
-        asnow:       {label: 'Snow',    unit: 'in'},
-        snod:        {label: 'Depth',   unit: 'in'},
+        t2m:         {label: 'Temp',    unit: '°F',   dec: 0},
+        dpt:         {label: 'Dew Pt',  unit: '°F',   dec: 0},
+        wind_10m:    {label: 'Wind',    unit: 'mph',  dec: 0},
+        gust:        {label: 'Gust',    unit: 'mph',  dec: 0},
+        cloud_cover: {label: 'Clouds',  unit: '%',    dec: 0},
+        dswrf:       {label: 'Solar',   unit: 'W/m²', dec: 0},
+        refc:        {label: 'Refl',    unit: 'dBZ',  dec: 0},
+        apcp:        {label: 'Precip',  unit: 'in',   dec: 2},
+        nbm_apcp:    {label: 'NBM Pcp', unit: 'in',   dec: 2},
+        asnow:       {label: 'Snow',    unit: 'in',   dec: 2},
+        snod:        {label: 'Depth',   unit: 'in',   dec: 1},
     };
 
     timelineEl.innerHTML = '';
@@ -1051,9 +1054,9 @@ function renderSummary(data) {
             const stitched = hourData._stitched ? ' text-slate-400 dark:text-slate-500 italic' : ' text-slate-600 dark:text-slate-300';
             fullTable += `<tr class="${stitched} border-t border-slate-200/50 dark:border-slate-700/50">`;
             fullTable += `<td class="pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400">${hourData.hour}${hourData._stitched ? '*' : ''}</td>`;
-            for (const [varKey] of Object.entries(VARIABLE_META)) {
+            for (const [varKey, meta] of Object.entries(VARIABLE_META)) {
                 const val = hourData[varKey];
-                const display = val != null ? (Number.isInteger(val) ? val : val.toFixed(1)) : '—';
+                const display = val != null ? val.toFixed(meta.dec) : '—';
                 fullTable += `<td class="px-2 py-0.5 text-right font-mono">${display}</td>`;
             }
             fullTable += '</tr>';
@@ -1143,7 +1146,7 @@ function renderSummary(data) {
                 tableHtml += `<td class="pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400">${hourData.hour}</td>`;
                 for (const [varKey, meta] of Object.entries(VARIABLE_META)) {
                     const val = hourData[varKey];
-                    const display = val != null ? (Number.isInteger(val) ? val : val.toFixed(1)) : '—';
+                    const display = val != null ? val.toFixed(meta.dec) : '—';
                     tableHtml += `<td class="px-2 py-0.5 text-right font-mono">${display}</td>`;
                 }
                 tableHtml += '</tr>';
