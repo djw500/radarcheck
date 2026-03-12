@@ -372,7 +372,7 @@ document.querySelectorAll('.var-btn').forEach(btn => {
             document.getElementById('modelToggles').style.display = 'none';
             document.getElementById('summaryPanel').classList.add('hidden');
             document.getElementById('latestView').classList.remove('hidden');
-            fetchSummary().then(d => { _cachedSummaryData = d; renderLatest(d); });
+            fetchLatest().then(d => renderLatest(d));
             return;
         }
 
@@ -986,6 +986,15 @@ async function fetchSummary() {
     }
 }
 
+async function fetchLatest() {
+    try {
+        return await fetchJSON(`/api/latest`);
+    } catch (e) {
+        console.error('Latest fetch error:', e);
+        return null;
+    }
+}
+
 // Color functions return rgba background for "interesting" values, null otherwise
 // Shared by renderSummary and renderLatest
 const _refcBg = v => {
@@ -1245,15 +1254,14 @@ function renderSummary(data) {
     });
 }
 
-function renderLatest(data) {
+function renderLatest(lt) {
     const contentEl = document.getElementById('latestContent');
     const metaEl = document.getElementById('latestMeta');
-    if (!data || !data.latest_table) {
+    if (!lt || !lt.hourly) {
         contentEl.innerHTML = '<p class="text-slate-400">No latest forecast data available yet.</p>';
         metaEl.textContent = '';
         return;
     }
-    const lt = data.latest_table;
 
     // Source tint colors (very subtle)
     const SOURCE_TINTS = {
@@ -1457,16 +1465,12 @@ function renderLatest(data) {
     if (transposeBtn) {
         transposeBtn.addEventListener('click', () => {
             latestTransposed = !latestTransposed;
-            renderLatest(data);
+            renderLatest(lt);
         });
     }
 
-    // Meta text
-    if (data.generated_at) {
-        const gen = new Date(data.generated_at);
-        const ago = Math.round((Date.now() - gen.getTime()) / 60000);
-        metaEl.textContent = ago < 60 ? `Updated ${ago}m ago` : `Updated ${Math.round(ago/60)}h ago`;
-    }
+    // Meta text — live endpoint, so always fresh
+    metaEl.textContent = 'Live';
 }
 
 document.getElementById('toggleTableBtn').addEventListener('click', () => {
@@ -1701,7 +1705,7 @@ function setLocation(lat, lon, name) {
         document.getElementById('modelToggles').style.display = 'none';
         document.getElementById('summaryPanel').classList.add('hidden');
         document.getElementById('latestView').classList.remove('hidden');
-        fetchSummary().then(d => { _cachedSummaryData = d; renderLatest(d); });
+        fetchLatest().then(d => renderLatest(d));
     } else if (currentVariable === 'summary') {
         loadData();
         fetchSummary().then(d => { _cachedSummaryData = d; renderSummary(d); });
