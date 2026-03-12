@@ -169,3 +169,27 @@ def test_build_raw_hrrr_precip_2_decimals():
 
     # 0.04 should NOT round to 0.0
     assert raw["hours"][1]["apcp"] == 0.04
+
+
+def test_build_raw_hrrr_includes_storm_vars():
+    """Wind, gust, and refc should appear in raw HRRR output."""
+    from scripts.qualitative import build_raw_hrrr
+
+    model_data = {
+        "hrrr_latest": {
+            "init": "2026-03-11T15:00:00+00:00",
+            "hours": ["5pm", "6pm", "7pm"],
+            "data": {
+                "t2m": [53.2, 51.8, 49.5],
+                "wind_10m": [8.0, 12.0, 15.0],
+                "gust": [15.0, 22.0, 28.0],
+                "refc": [0.0, 25.0, 40.0],
+                "apcp": [0.0, 0.0, 0.01],
+            },
+        },
+    }
+    raw = build_raw_hrrr(model_data)
+
+    assert raw["hours"][0]["wind_10m"] == 8.0
+    assert raw["hours"][1]["gust"] == 22.0
+    assert raw["hours"][2]["refc"] == 40.0

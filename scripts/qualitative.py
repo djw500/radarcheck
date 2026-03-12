@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 API_BASE = os.environ.get("RADARCHECK_API_BASE", "http://localhost:5001")
 CACHE_DIR = Path(os.environ.get("QUALITATIVE_CACHE_DIR", "cache/qualitative"))
-VARIABLES = ["t2m", "dpt", "cloud_cover", "dswrf", "apcp", "asnow", "snod"]
+VARIABLES = ["t2m", "dpt", "cloud_cover", "dswrf", "apcp", "asnow", "snod", "wind_10m", "gust", "refc"]
 SNAPSHOT_RETAIN_HOURS = 25
 VALID_ICONS = {"sun", "moon", "cloud", "cloud-sun", "cloud-moon", "cloud-rain", "snowflake", "question"}
 
@@ -385,7 +385,7 @@ All hour labels in the data below are in Eastern time.
             sections.append(f"  {var}: {vals_str}")
         sections.append("")
 
-    sections.append("Variable key: t2m=temp(°F), dpt=dewpoint(°F), cloud_cover=clouds(%), dswrf=solar(W/m²), apcp=rain(in), asnow=snow(in), snod=snow_depth(in)")
+    sections.append("Variable key: t2m=temp(°F), dpt=dewpoint(°F), cloud_cover=clouds(%), dswrf=solar(W/m²), apcp=rain(in), asnow=snow(in), snod=snow_depth(in), wind_10m=wind(mph), gust=gusts(mph), refc=radar_reflectivity(dBZ, HRRR-only)")
     sections.append("Note: 'gfs_extended' has every-6h data for days 3-10 — use it for the daily outlook buckets beyond 24h.")
     sections.append("")
 
@@ -464,6 +464,7 @@ Produce JSON with this exact structure:
     - Express uncertainty: "Precip is a coin flip between models"
   - MUST mention precip if non-zero — include the amount (e.g. "0.2 in rain", "1 in snow")
   - Note: apcp values are CUMULATIVE from forecast start. To get period amounts, subtract consecutive values.
+  - Wind/gust in mph. refc (composite reflectivity) is dBZ — 0=clear, 20-35=light rain, 35-50=moderate, 50+=severe. refc is HRRR-only (not available in GFS/NBM/ECMWF).
   - Don't be repetitive across consecutive buckets
 
 ## Rules for "narrative"
