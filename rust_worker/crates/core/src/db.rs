@@ -171,23 +171,48 @@ pub fn fail(conn: &Connection, job_id: i64, error: &str) -> Result<()> {
     Ok(())
 }
 
-/// Cancel all pending sibling jobs for the same model+run.
+/// Cancel pending sibling jobs that can't succeed yet.
+///
+/// If forecast_hour 0 fails → the entire run isn't available, cancel everything
+/// for this model+run.  Otherwise, only cancel the same variable's higher
+/// forecast hours (NOMADS publishes sequentially, so if h10 404s, h11-h17
+/// won't be there either — but other variables may be fully available).
 pub fn cancel_siblings(conn: &Connection, job: &Job) -> Result<usize> {
     let args: BuildTileHourArgs = serde_json::from_str(&job.args_json)?;
-    let model_like = format!("%\"model_id\":%\"{}\"%" , args.model_id);
-    let run_like = format!("%\"run_id\":%\"{}\"%" , args.run_id);
-    let count = conn.execute(
-        "UPDATE jobs
-         SET status = 'failed',
-             error_message = 'cancelled: sibling job failed',
-             completed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-         WHERE status = 'pending'
-           AND type = ?1
-           AND args_json LIKE ?2
-           AND args_json LIKE ?3",
-        params![job.job_type, model_like, run_like],
-    )?;
-    Ok(count)
+    let model_like = format!("%\"model_id\":\"{}\"%", args.model_id);
+    let run_like = format!("%\"run_id\":\"{}\"%", args.run_id);
+
+    if args.forecast_hour == 0 {
+        // h0 failed → entire run unavailable, cancel all pending for this run
+        let count = conn.execute(
+            "UPDATE jobs
+             SET status = 'failed',
+                 error_message = 'cancelled: run not available (h0 failed)',
+                 completed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+             WHERE status = 'pending'
+               AND type = ?1
+               AND args_json LIKE ?2
+               AND args_json LIKE ?3",
+            params![job.job_type, model_like, run_like],
+        )?;
+        Ok(count)
+    } else {
+        // Higher hour failed → only cancel same variable's remaining hours
+        let var_like = format!("%\"variable_id\":\"{}\"%", args.variable_id);
+        let count = conn.execute(
+            "UPDATE jobs
+             SET status = 'failed',
+                 error_message = 'cancelled: later forecast hours not yet available',
+                 completed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+             WHERE status = 'pending'
+               AND type = ?1
+               AND args_json LIKE ?2
+               AND args_json LIKE ?3
+               AND args_json LIKE ?4",
+            params![job.job_type, model_like, run_like, var_like],
+        )?;
+        Ok(count)
+    }
 }
 
 // ── Forecast trigger helpers ────────────────────────────────────────────────
