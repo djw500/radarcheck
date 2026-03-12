@@ -266,7 +266,7 @@ def build_model_data(lat, lon, hours_ahead=48):
                 vals[var] = all_values[len(all_values) // 2]
         current_by_time[full_iso] = vals
 
-    return model_data, hour_labels, hour_isos, current_by_time
+    return model_data, hour_labels, hour_isos, current_by_time, all_data
 
 
 def load_trend_snapshots(cache_dir, grid_id, hour_isos):
@@ -678,15 +678,8 @@ def build_raw_hrrr(model_data, nbm_apcp_prev=None):
     }
 
 
-def build_latest_table(model_data):
-    """Build unified best-available forecast table with source attribution.
-
-    Priority per hour: hrrr_latest > hrrr_previous > hrrr_synoptic > gfs.
-    Returns {"hourly": [...], "daily": [...]}.
-    """
-    if not model_data:
-        return {"hourly": [], "daily": []}
-
+def _build_latest_table_legacy(model_data):
+    """Legacy fallback for tests that don't pass all_data."""
     eastern = datetime.timezone(datetime.timedelta(hours=-5))
 
     def _source_label(display_name, init_iso):
@@ -696,7 +689,6 @@ def build_latest_table(model_data):
         except Exception:
             return display_name
 
-    # Source priority: latest hourly > prev hourly > synoptic (48h) > GFS
     source_keys = [
         ("hrrr_latest", "HRRR"),
         ("hrrr_previous", "HRRR"),
@@ -710,25 +702,22 @@ def build_latest_table(model_data):
             label = _source_label(display, mdata.get("init", ""))
             sources.append((key, label, mdata))
 
-    # Determine hour count from first available source
     n_hours = 0
-    hour_labels = []
+    hlabels = []
     for _, _, mdata in sources:
         if mdata.get("hours"):
-            hour_labels = mdata["hours"]
-            n_hours = len(hour_labels)
+            hlabels = mdata["hours"]
+            n_hours = len(hlabels)
             break
 
-    # Collect all variable names across sources
     all_vars = set()
     for _, _, mdata in sources:
         all_vars.update(mdata.get("data", {}).keys())
     all_vars.discard("_stitched")
 
-    # ---- Hourly section (48h) ----
     hourly = []
     for i in range(n_hours):
-        entry = {"hour": hour_labels[i], "source": "—"}
+        entry = {"hour": hlabels[i], "source": "\u2014"}
         for key, source_label, mdata in sources:
             data = mdata.get("data", {})
             t2m_vals = data.get("t2m", [])
@@ -740,7 +729,6 @@ def build_latest_table(model_data):
                 break
         hourly.append(entry)
 
-    # De-accumulate precip within each source run
     ACCUM_VARS = ["apcp", "asnow"]
     for var in ACCUM_VARS:
         prev_val = None
@@ -760,7 +748,6 @@ def build_latest_table(model_data):
                 entry[var] = round(val, 4)
             prev_source = source
 
-    # NBM precip overlay (de-accumulated separately)
     nbm = model_data.get("nbm")
     nbm_apcp = list(nbm["data"].get("apcp", [])) if nbm and nbm.get("data") else []
     prev_nbm = None
@@ -775,7 +762,22 @@ def build_latest_table(model_data):
         if val is not None:
             prev_nbm = val
 
-    # ---- Daily section (days 3-7 from gfs_extended) ----
+    daily = _build_daily_section(model_data, all_vars)
+    return {"hourly": hourly, "daily": daily}
+
+
+def _build_daily_section(model_data, all_vars):
+    """Build daily aggregation rows from gfs_extended data."""
+    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+    ACCUM_VARS = ["apcp", "asnow"]
+
+    def _source_label(display_name, init_iso):
+        try:
+            t = datetime.datetime.fromisoformat(init_iso).astimezone(eastern)
+            return f"{display_name} {t.strftime('%-I%p').lower()}"
+        except Exception:
+            return display_name
+
     daily = []
     gfs_ext = model_data.get("gfs_extended")
     if gfs_ext and gfs_ext.get("isos"):
@@ -842,6 +844,165 @@ def build_latest_table(model_data):
                     }
             daily.append(day_entry)
 
+    return daily
+
+
+def build_latest_table(model_data, all_data=None, hour_labels=None, hour_isos=None):
+    """Build unified best-available forecast table with source attribution.
+
+    For each hour, picks the most recent HRRR run that has data for that hour.
+    Falls back to GFS only when no HRRR run covers an hour.
+    Returns {"hourly": [...], "daily": [...]}.
+    """
+    if not model_data:
+        return {"hourly": [], "daily": []}
+
+    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+
+    def _source_label(display_name, init_iso):
+        try:
+            t = datetime.datetime.fromisoformat(init_iso).astimezone(eastern)
+            return f"{display_name} {t.strftime('%-I%p').lower()}"
+        except Exception:
+            return display_name
+
+    # Fall back to old behavior if all_data not provided (tests)
+    if all_data is None or hour_labels is None or hour_isos is None:
+        return _build_latest_table_legacy(model_data)
+
+    # ---- Collect all HRRR runs, sorted newest-first ----
+    # Build a list of (init_time, run_key, {var: {valid_iso: value}})
+    hrrr_runs = []
+    all_run_keys = set()
+    t2m_data = all_data.get("t2m")
+    if t2m_data:
+        for run_key, run_info in t2m_data.get("runs", {}).items():
+            if run_info.get("model_id", run_key.split("/")[0]) == "hrrr":
+                all_run_keys.add(run_key)
+
+    for run_key in all_run_keys:
+        # Get init time from t2m run
+        run_info = t2m_data["runs"][run_key]
+        init_time = run_info.get("init_time", "")
+        # Collect all vars for this run
+        run_vars = {}
+        for var in VARIABLES:
+            api_resp = all_data.get(var)
+            if api_resp and run_key in api_resp.get("runs", {}):
+                pts = api_resp["runs"][run_key].get("series", [])
+                run_vars[var] = {
+                    pt["valid_time"]: round(pt["value"], 4)
+                    for pt in pts if pt.get("value") is not None
+                }
+            else:
+                run_vars[var] = {}
+        hrrr_runs.append((init_time, run_key, run_vars))
+
+    hrrr_runs.sort(key=lambda x: x[0], reverse=True)  # newest first
+
+    # Also get GFS as fallback
+    gfs_run_vars = {}
+    gfs_init = ""
+    gfs_data = all_data.get("t2m")
+    if gfs_data:
+        for run_key, run_info in gfs_data.get("runs", {}).items():
+            if run_info.get("model_id", run_key.split("/")[0]) == "gfs":
+                if run_info.get("init_time", "") > gfs_init:
+                    gfs_init = run_info["init_time"]
+        if gfs_init:
+            for var in VARIABLES:
+                api_resp = all_data.get(var)
+                if not api_resp:
+                    continue
+                for run_key, run_info in api_resp.get("runs", {}).items():
+                    if run_info.get("model_id", run_key.split("/")[0]) == "gfs" and \
+                       run_info.get("init_time", "") == gfs_init:
+                        gfs_run_vars[var] = {
+                            pt["valid_time"]: round(pt["value"], 4)
+                            for pt in run_info.get("series", [])
+                            if pt.get("value") is not None
+                        }
+                        break
+
+    gfs_label = _source_label("GFS", gfs_init) if gfs_init else "GFS"
+
+    # ---- Per-hour best-run selection ----
+    hourly = []
+    for i, iso in enumerate(hour_isos):
+        iso_prefix = iso[:13]  # "YYYY-MM-DDTHH"
+        entry = {"hour": hour_labels[i], "source": "\u2014", "_run_key": None}
+
+        # Try each HRRR run, newest first
+        found = False
+        for init_time, run_key, run_vars in hrrr_runs:
+            t2m_map = run_vars.get("t2m", {})
+            # Check if this run has t2m for this hour
+            has_data = any(vt.startswith(iso_prefix) for vt in t2m_map)
+            if has_data:
+                entry["source"] = _source_label("HRRR", init_time)
+                entry["_run_key"] = run_key
+                for var in VARIABLES:
+                    var_map = run_vars.get(var, {})
+                    val = next((v for vt, v in var_map.items() if vt.startswith(iso_prefix)), None)
+                    entry[var] = val
+                found = True
+                break
+
+        # Fallback to GFS
+        if not found and gfs_run_vars:
+            t2m_gfs = gfs_run_vars.get("t2m", {})
+            has_gfs = any(vt.startswith(iso_prefix) for vt in t2m_gfs)
+            if has_gfs:
+                entry["source"] = gfs_label
+                entry["_run_key"] = "gfs"
+                for var in VARIABLES:
+                    var_map = gfs_run_vars.get(var, {})
+                    val = next((v for vt, v in var_map.items() if vt.startswith(iso_prefix)), None)
+                    entry[var] = val
+
+        hourly.append(entry)
+
+    # ---- De-accumulate precip per source run ----
+    ACCUM_VARS = ["apcp", "asnow"]
+    for var in ACCUM_VARS:
+        prev_val = None
+        prev_run = None
+        for entry in hourly:
+            val = entry.get(var)
+            run_key = entry.get("_run_key")
+            if val is None or run_key is None:
+                prev_val = None
+                prev_run = None
+                continue
+            if prev_val is not None and run_key == prev_run:
+                entry[var] = round(max(0, val - prev_val), 4)
+                prev_val = val
+            else:
+                prev_val = val
+                entry[var] = round(val, 4)
+            prev_run = run_key
+
+    # NBM precip overlay (de-accumulated separately)
+    nbm = model_data.get("nbm")
+    nbm_apcp = list(nbm["data"].get("apcp", [])) if nbm and nbm.get("data") else []
+    prev_nbm = None
+    for i, entry in enumerate(hourly):
+        val = nbm_apcp[i] if i < len(nbm_apcp) else None
+        if val is not None and prev_nbm is not None:
+            entry["nbm_apcp"] = round(max(0, val - prev_nbm), 4)
+        elif val is not None:
+            entry["nbm_apcp"] = round(val, 4)
+        else:
+            entry.setdefault("nbm_apcp", None)
+        if val is not None:
+            prev_nbm = val
+
+    # Clean up internal keys
+    for entry in hourly:
+        entry.pop("_run_key", None)
+
+    all_vars = set(VARIABLES)
+    daily = _build_daily_section(model_data, all_vars)
     return {"hourly": hourly, "daily": daily}
 
 
@@ -851,7 +1012,7 @@ def generate_summary(lat, lon, cache_dir):
     log.info(f"Generating summary for {grid_id}")
 
     # Fetch raw model data
-    model_data, hour_labels, hour_isos, current_by_time = build_model_data(lat, lon)
+    model_data, hour_labels, hour_isos, current_by_time, _all_data = build_model_data(lat, lon)
 
     if not model_data:
         log.warning("No model data available")
