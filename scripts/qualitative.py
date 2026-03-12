@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -102,7 +103,7 @@ def build_model_data(lat, lon, hours_ahead=48):
     """
     now = datetime.datetime.now(datetime.timezone.utc)
     # Hardcoded to US Eastern (Radnor, PA) — container runs UTC
-    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+    eastern = ZoneInfo("America/New_York")
 
     # Build target hours for detailed 48h view
     target_hours = []
@@ -362,7 +363,7 @@ def build_prompt(model_data, trends, hour_labels, lat, lon):
     sections = []
     # Tell LLM the current local time so it knows what "today" means
     now = datetime.datetime.now(datetime.timezone.utc)
-    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+    eastern = ZoneInfo("America/New_York")
     local_now = now.astimezone(eastern)
     sections.append(f"""You are a meteorologist who finally got their own forecast column. This is your chance to shine.
 You have raw data from 5 weather models (HRRR, GFS, ECMWF, NBM). Your job is to interpret
@@ -382,7 +383,7 @@ All hour labels in the data below are in Eastern time.
         rise, sset = sun_times(lat, lon, d)
         if rise and sset:
             # Hardcoded to US Eastern (Radnor, PA) — container runs UTC
-            eastern = datetime.timezone(datetime.timedelta(hours=-5))
+            eastern = ZoneInfo("America/New_York")
             rise_local = rise.astimezone(eastern).strftime("%-I:%M%p").lower()
             sset_local = sset.astimezone(eastern).strftime("%-I:%M%p").lower()
             day_label = ["Today", "Tomorrow", d.strftime("%A")][day_offset]
@@ -680,7 +681,7 @@ def build_raw_hrrr(model_data, nbm_apcp_prev=None):
 
 def _build_latest_table_legacy(model_data):
     """Legacy fallback for tests that don't pass all_data."""
-    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+    eastern = ZoneInfo("America/New_York")
 
     def _source_label(display_name, init_iso):
         try:
@@ -768,7 +769,7 @@ def _build_latest_table_legacy(model_data):
 
 def _build_daily_section(model_data, all_vars):
     """Build daily aggregation rows from gfs_extended data."""
-    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+    eastern = ZoneInfo("America/New_York")
     ACCUM_VARS = ["apcp", "asnow"]
 
     def _source_label(display_name, init_iso):
@@ -857,7 +858,7 @@ def build_latest_table(model_data, all_data=None, hour_labels=None, hour_isos=No
     if not model_data:
         return {"hourly": [], "daily": []}
 
-    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+    eastern = ZoneInfo("America/New_York")
 
     def _source_label(display_name, init_iso):
         try:

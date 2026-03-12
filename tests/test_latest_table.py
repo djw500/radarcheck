@@ -85,12 +85,12 @@ def test_latest_table_source_labels():
     result = build_latest_table(_make_model_data())
     hourly = result["hourly"]
 
-    # HRRR latest init 23:00 UTC = 6pm Eastern
-    assert hourly[0]["source"] == "HRRR 6pm"
-    # HRRR previous init 22:00 UTC = 5pm Eastern
-    assert hourly[2]["source"] == "HRRR 5pm"
-    # GFS init 18:00 UTC = 1pm Eastern
-    assert hourly[3]["source"] == "GFS 1pm"
+    # HRRR latest init 23:00 UTC = 7pm EDT (DST active March 11)
+    assert hourly[0]["source"] == "HRRR 7pm"
+    # HRRR previous init 22:00 UTC = 6pm EDT
+    assert hourly[2]["source"] == "HRRR 6pm"
+    # GFS init 18:00 UTC = 2pm EDT
+    assert hourly[3]["source"] == "GFS 2pm"
 
 
 def test_latest_table_deaccumulates_precip():
