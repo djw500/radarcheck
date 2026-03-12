@@ -661,6 +661,172 @@ def build_raw_hrrr(model_data, nbm_apcp_prev=None):
     }
 
 
+def build_latest_table(model_data):
+    """Build unified best-available forecast table with source attribution.
+
+    Priority per hour: hrrr_latest > hrrr_previous > gfs.
+    Returns {"hourly": [...], "daily": [...]}.
+    """
+    if not model_data:
+        return {"hourly": [], "daily": []}
+
+    eastern = datetime.timezone(datetime.timedelta(hours=-5))
+
+    def _source_label(display_name, init_iso):
+        try:
+            t = datetime.datetime.fromisoformat(init_iso).astimezone(eastern)
+            return f"{display_name} {t.strftime('%-I%p').lower()}"
+        except Exception:
+            return display_name
+
+    # Source priority: latest HRRR > previous HRRR > GFS
+    source_keys = [
+        ("hrrr_latest", "HRRR"),
+        ("hrrr_previous", "HRRR"),
+        ("gfs", "GFS"),
+    ]
+    sources = []
+    for key, display in source_keys:
+        mdata = model_data.get(key)
+        if mdata:
+            label = _source_label(display, mdata.get("init", ""))
+            sources.append((key, label, mdata))
+
+    # Determine hour count from first available source
+    n_hours = 0
+    hour_labels = []
+    for _, _, mdata in sources:
+        if mdata.get("hours"):
+            hour_labels = mdata["hours"]
+            n_hours = len(hour_labels)
+            break
+
+    # Collect all variable names across sources
+    all_vars = set()
+    for _, _, mdata in sources:
+        all_vars.update(mdata.get("data", {}).keys())
+    all_vars.discard("_stitched")
+
+    # ---- Hourly section (48h) ----
+    hourly = []
+    for i in range(n_hours):
+        entry = {"hour": hour_labels[i], "source": "—"}
+        for key, source_label, mdata in sources:
+            data = mdata.get("data", {})
+            t2m_vals = data.get("t2m", [])
+            if i < len(t2m_vals) and t2m_vals[i] is not None:
+                entry["source"] = source_label
+                for var in all_vars:
+                    vals = data.get(var, [])
+                    entry[var] = vals[i] if i < len(vals) else None
+                break
+        hourly.append(entry)
+
+    # De-accumulate precip within each source run
+    ACCUM_VARS = ["apcp", "asnow"]
+    for var in ACCUM_VARS:
+        prev_val = None
+        prev_source = None
+        for entry in hourly:
+            val = entry.get(var)
+            if val is None:
+                prev_val = None
+                prev_source = None
+                continue
+            source = entry.get("source")
+            if prev_val is not None and source == prev_source:
+                entry[var] = round(max(0, val - prev_val), 2)
+                prev_val = val
+            else:
+                prev_val = val
+                entry[var] = round(val, 2)
+            prev_source = source
+
+    # NBM precip overlay (de-accumulated separately)
+    nbm = model_data.get("nbm")
+    nbm_apcp = list(nbm["data"].get("apcp", [])) if nbm and nbm.get("data") else []
+    prev_nbm = None
+    for i, entry in enumerate(hourly):
+        val = nbm_apcp[i] if i < len(nbm_apcp) else None
+        if val is not None and prev_nbm is not None:
+            entry["nbm_apcp"] = round(max(0, val - prev_nbm), 2)
+        elif val is not None:
+            entry["nbm_apcp"] = round(val, 2)
+        else:
+            entry.setdefault("nbm_apcp", None)
+        if val is not None:
+            prev_nbm = val
+
+    # ---- Daily section (days 3-7 from gfs_extended) ----
+    daily = []
+    gfs_ext = model_data.get("gfs_extended")
+    if gfs_ext and gfs_ext.get("isos"):
+        ext_data = gfs_ext.get("data", {})
+        ext_isos = gfs_ext.get("isos", [])
+        gfs_source = _source_label("GFS", gfs_ext.get("init", ""))
+
+        # De-accumulate extended precip first
+        ext_precip = {}
+        for var in ACCUM_VARS:
+            raw = list(ext_data.get(var, []))
+            increments = []
+            prev = None
+            for v in raw:
+                if v is not None and prev is not None:
+                    increments.append(round(max(0, v - prev), 2))
+                elif v is not None:
+                    increments.append(round(v, 2))
+                else:
+                    increments.append(None)
+                if v is not None:
+                    prev = v
+            ext_precip[var] = increments
+
+        # Group by Eastern date
+        days = {}
+        day_order = []
+        for idx, iso in enumerate(ext_isos):
+            try:
+                dt = datetime.datetime.fromisoformat(iso + "+00:00").astimezone(eastern)
+                day_key = dt.strftime("%a %b %-d")
+            except Exception:
+                continue
+            if day_key not in days:
+                days[day_key] = []
+                day_order.append(day_key)
+            point = {}
+            for var in all_vars:
+                if var in ACCUM_VARS:
+                    vals = ext_precip.get(var, [])
+                else:
+                    vals = ext_data.get(var, [])
+                point[var] = vals[idx] if idx < len(vals) else None
+            days[day_key].append(point)
+
+        for day_key in day_order[:5]:
+            points = days[day_key]
+            day_entry = {"day": day_key, "source": gfs_source}
+            for var in all_vars:
+                vals = [p[var] for p in points if p.get(var) is not None]
+                if not vals:
+                    day_entry[var] = {"min": None, "max": None, "avg": None}
+                elif var in ACCUM_VARS:
+                    day_entry[var] = {
+                        "min": round(min(vals), 2),
+                        "max": round(max(vals), 2),
+                        "avg": round(sum(vals), 2),
+                    }
+                else:
+                    day_entry[var] = {
+                        "min": round(min(vals), 1),
+                        "max": round(max(vals), 1),
+                        "avg": round(sum(vals) / len(vals), 1),
+                    }
+            daily.append(day_entry)
+
+    return {"hourly": hourly, "daily": daily}
+
+
 def generate_summary(lat, lon, cache_dir):
     """Main generation function for a single lat/lon."""
     grid_id = grid_key(lat, lon)
