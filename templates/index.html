@@ -1325,7 +1325,8 @@ function renderLatest(lt) {
             html += `<td class="${stickyCell} pr-2 py-0.5 font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">${meta.label}</td>`;
             for (const row of hourly) {
                 const val = row[varKey];
-                const display = fmtVal(varKey, val, meta.dec);
+                let display = fmtVal(varKey, val, meta.dec);
+                if (row.starred && row.starred.includes(varKey)) display += '<span class="text-amber-400 text-[9px]">*</span>';
                 const bg = (val != null && val !== 0 && meta.bg) ? meta.bg(val) : null;
                 const tint = getSourceTint(row.source);
                 const combined = bg || tint;
@@ -1411,7 +1412,8 @@ function renderLatest(lt) {
             html += `<td class="px-2 py-0.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">${row.source}</td>`;
             for (const [varKey, meta] of varEntries) {
                 const val = row[varKey];
-                const display = fmtVal(varKey, val, meta.dec);
+                let display = fmtVal(varKey, val, meta.dec);
+                if (row.starred && row.starred.includes(varKey)) display += '<span class="text-amber-400 text-[9px]">*</span>';
                 const bg = (val != null && val !== 0 && meta.bg) ? meta.bg(val) : null;
                 const style = bg ? ` style="background:${bg}"` : '';
                 html += `<td class="px-2 py-0.5 text-right font-mono"${style}>${display}</td>`;
@@ -1480,6 +1482,13 @@ function renderLatest(lt) {
     // Meta text — live endpoint, so always fresh
     metaEl.textContent = 'Live';
 }
+
+// --- Auto-refresh for Latest view (every 5 minutes) ---
+setInterval(() => {
+    if (currentVariable === 'latest') {
+        fetchLatest().then(d => { if (d) renderLatest(d); });
+    }
+}, 5 * 60 * 1000);
 
 document.getElementById('toggleTableBtn').addEventListener('click', () => {
     const container = document.getElementById('dataTableContainer');

@@ -926,50 +926,67 @@ def build_latest_table(model_data, all_data=None, hour_labels=None, hour_isos=No
 
     gfs_label = _source_label("GFS", gfs_init) if gfs_init else "GFS"
 
-    # ---- Per-hour best-run selection ----
+    # ---- Per-hour, per-variable best-run selection ----
+    # For each hour AND each variable, pick the newest HRRR run with data.
+    # "source" = primary run (newest with t2m). Variables from a different
+    # (newer) run get a "*" suffix in the "starred" list.
     hourly = []
     for i, iso in enumerate(hour_isos):
         iso_prefix = iso[:13]  # "YYYY-MM-DDTHH"
-        entry = {"hour": hour_labels[i], "source": "\u2014", "_run_key": None}
+        entry = {"hour": hour_labels[i], "source": "\u2014", "_run_key": None, "_var_run_keys": {}, "starred": []}
 
-        # Try each HRRR run, newest first
-        found = False
+        # Find primary source (newest HRRR with t2m for this hour)
+        primary_run_key = None
         for init_time, run_key, run_vars in hrrr_runs:
             t2m_map = run_vars.get("t2m", {})
-            # Check if this run has t2m for this hour
-            has_data = any(vt.startswith(iso_prefix) for vt in t2m_map)
-            if has_data:
+            if any(vt.startswith(iso_prefix) for vt in t2m_map):
                 entry["source"] = _source_label("HRRR", init_time)
                 entry["_run_key"] = run_key
-                for var in VARIABLES:
-                    var_map = run_vars.get(var, {})
-                    val = next((v for vt, v in var_map.items() if vt.startswith(iso_prefix)), None)
-                    entry[var] = val
-                found = True
+                primary_run_key = run_key
                 break
 
-        # Fallback to GFS
-        if not found and gfs_run_vars:
+        # For each variable, find the newest HRRR run with data
+        for var in VARIABLES:
+            val = None
+            val_run_key = None
+            for _, run_key, run_vars in hrrr_runs:
+                var_map = run_vars.get(var, {})
+                v = next((v for vt, v in var_map.items() if vt.startswith(iso_prefix)), None)
+                if v is not None:
+                    val = v
+                    val_run_key = run_key
+                    break
+            entry[var] = val
+            if val_run_key:
+                entry["_var_run_keys"][var] = val_run_key
+            # Mark with * if this value came from a different run than primary
+            if val is not None and val_run_key and primary_run_key and val_run_key != primary_run_key:
+                entry["starred"].append(var)
+
+        # Fallback to GFS for variables still null
+        if primary_run_key is None and gfs_run_vars:
             t2m_gfs = gfs_run_vars.get("t2m", {})
-            has_gfs = any(vt.startswith(iso_prefix) for vt in t2m_gfs)
-            if has_gfs:
+            if any(vt.startswith(iso_prefix) for vt in t2m_gfs):
                 entry["source"] = gfs_label
                 entry["_run_key"] = "gfs"
                 for var in VARIABLES:
-                    var_map = gfs_run_vars.get(var, {})
-                    val = next((v for vt, v in var_map.items() if vt.startswith(iso_prefix)), None)
-                    entry[var] = val
+                    if entry.get(var) is None:
+                        var_map = gfs_run_vars.get(var, {})
+                        val = next((v for vt, v in var_map.items() if vt.startswith(iso_prefix)), None)
+                        entry[var] = val
+                        if val is not None:
+                            entry["_var_run_keys"][var] = "gfs"
 
         hourly.append(entry)
 
-    # ---- De-accumulate precip per source run ----
+    # ---- De-accumulate precip per source run (using per-variable run keys) ----
     ACCUM_VARS = ["apcp", "asnow"]
     for var in ACCUM_VARS:
         prev_val = None
         prev_run = None
         for entry in hourly:
             val = entry.get(var)
-            run_key = entry.get("_run_key")
+            run_key = entry.get("_var_run_keys", {}).get(var) or entry.get("_run_key")
             if val is None or run_key is None:
                 prev_val = None
                 prev_run = None
@@ -1000,6 +1017,7 @@ def build_latest_table(model_data, all_data=None, hour_labels=None, hour_isos=No
     # Clean up internal keys
     for entry in hourly:
         entry.pop("_run_key", None)
+        entry.pop("_var_run_keys", None)
 
     all_vars = set(VARIABLES)
     daily = _build_daily_section(model_data, all_vars)
