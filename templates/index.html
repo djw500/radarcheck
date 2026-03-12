@@ -1007,18 +1007,49 @@ function renderSummary(data) {
 
     trendsEl.innerHTML = '';
 
+    // Color functions return rgba background for "interesting" values, null otherwise
+    const _refcBg = v => {
+        if (v < 5) return null;
+        if (v < 20) return 'rgba(34,197,94,0.15)';    // green - light
+        if (v < 35) return 'rgba(234,179,8,0.2)';     // yellow - moderate
+        if (v < 50) return 'rgba(249,115,22,0.3)';    // orange - heavy
+        if (v < 65) return 'rgba(239,68,68,0.35)';    // red - severe
+        return 'rgba(168,85,247,0.4)';                 // purple - extreme
+    };
+    const _precipBg = v => {
+        if (v < 0.01) return null;
+        const t = Math.min(v / 0.5, 1);
+        return `rgba(59,130,246,${0.1 + t * 0.3})`;   // blue ramp
+    };
+    const _snowBg = v => {
+        if (v < 0.01) return null;
+        const t = Math.min(v / 1.0, 1);
+        return `rgba(147,112,219,${0.1 + t * 0.35})`;  // purple ramp
+    };
+    const _gustBg = v => {
+        if (v < 15) return null;
+        if (v < 25) return 'rgba(234,179,8,0.15)';
+        if (v < 40) return 'rgba(249,115,22,0.25)';
+        if (v < 58) return 'rgba(239,68,68,0.3)';
+        return 'rgba(168,85,247,0.4)';                 // hurricane force
+    };
+    const _tempBg = v => {
+        if (v <= 32) return 'rgba(59,130,246,0.15)';   // freezing
+        if (v >= 95) return 'rgba(239,68,68,0.15)';    // extreme heat
+        return null;
+    };
     const VARIABLE_META = {
-        t2m:         {label: 'Temp',    unit: '°F',   dec: 0},
-        dpt:         {label: 'Dew Pt',  unit: '°F',   dec: 0},
-        wind_10m:    {label: 'Wind',    unit: 'mph',  dec: 0},
-        gust:        {label: 'Gust',    unit: 'mph',  dec: 0},
-        cloud_cover: {label: 'Clouds',  unit: '%',    dec: 0},
-        dswrf:       {label: 'Solar',   unit: 'W/m²', dec: 0},
-        refc:        {label: 'Refl',    unit: 'dBZ',  dec: 0},
-        apcp:        {label: 'Precip',  unit: 'in',   dec: 2},
-        nbm_apcp:    {label: 'NBM Pcp', unit: 'in',   dec: 2},
-        asnow:       {label: 'Snow',    unit: 'in',   dec: 2},
-        snod:        {label: 'Depth',   unit: 'in',   dec: 1},
+        t2m:         {label: 'Temp',    unit: '°F',   dec: 0, bg: _tempBg},
+        dpt:         {label: 'Dew Pt',  unit: '°F',   dec: 0, bg: v => v >= 70 ? 'rgba(249,115,22,0.2)' : v >= 65 ? 'rgba(234,179,8,0.15)' : null},
+        wind_10m:    {label: 'Wind',    unit: 'mph',  dec: 0, bg: _gustBg},
+        gust:        {label: 'Gust',    unit: 'mph',  dec: 0, bg: _gustBg},
+        cloud_cover: {label: 'Clouds',  unit: '%',    dec: 0, bg: null},
+        dswrf:       {label: 'Solar',   unit: 'W/m²', dec: 0, bg: null},
+        refc:        {label: 'Refl',    unit: 'dBZ',  dec: 0, bg: _refcBg},
+        apcp:        {label: 'Precip',  unit: 'in',   dec: 2, bg: _precipBg},
+        nbm_apcp:    {label: 'NBM Pcp', unit: 'in',   dec: 2, bg: _precipBg},
+        asnow:       {label: 'Snow',    unit: 'in',   dec: 2, bg: _snowBg},
+        snod:        {label: 'Depth',   unit: 'in',   dec: 1, bg: v => v > 0 ? `rgba(147,112,219,${Math.min(v/12,1)*0.3})` : null},
     };
 
     timelineEl.innerHTML = '';
@@ -1057,7 +1088,9 @@ function renderSummary(data) {
             for (const [varKey, meta] of Object.entries(VARIABLE_META)) {
                 const val = hourData[varKey];
                 const display = val != null ? val.toFixed(meta.dec) : '—';
-                fullTable += `<td class="px-2 py-0.5 text-right font-mono">${display}</td>`;
+                const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                const style = bg ? ` style="background:${bg}"` : '';
+                fullTable += `<td class="px-2 py-0.5 text-right font-mono"${style}>${display}</td>`;
             }
             fullTable += '</tr>';
         }
@@ -1147,7 +1180,9 @@ function renderSummary(data) {
                 for (const [varKey, meta] of Object.entries(VARIABLE_META)) {
                     const val = hourData[varKey];
                     const display = val != null ? val.toFixed(meta.dec) : '—';
-                    tableHtml += `<td class="px-2 py-0.5 text-right font-mono">${display}</td>`;
+                    const bg = (val != null && meta.bg) ? meta.bg(val) : null;
+                    const style = bg ? ` style="background:${bg}"` : '';
+                    tableHtml += `<td class="px-2 py-0.5 text-right font-mono"${style}>${display}</td>`;
                 }
                 tableHtml += '</tr>';
             }
