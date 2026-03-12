@@ -88,7 +88,7 @@ def extract_latest_runs(api_response, model_id, count=1):
             vt = pt.get("valid_time", "")
             v = pt.get("value")
             if vt and v is not None:
-                values_by_time[vt] = round(v, 1)
+                values_by_time[vt] = round(v, 2)
         runs_by_init.append((init_time, values_by_time))
 
     runs_by_init.sort(key=lambda x: x[0], reverse=True)
@@ -629,6 +629,28 @@ def build_raw_hrrr(model_data, nbm_apcp_prev=None):
             entry[var] = val
         entry["nbm_apcp"] = nbm_apcp[i] if i < len(nbm_apcp) else None
         per_hour.append(entry)
+
+    # De-accumulate precipitation variables (cumulative → per-hour)
+    ACCUM_VARS = ["apcp", "asnow", "nbm_apcp"]
+    for var in ACCUM_VARS:
+        prev_val = None
+        prev_stitched = None
+        for entry in per_hour:
+            val = entry.get(var)
+            if val is None:
+                prev_val = None
+                prev_stitched = None
+                continue
+            is_stitched = entry.get("_stitched", False)
+            # Reset at stitch boundary (don't diff across different runs)
+            if prev_val is not None and is_stitched == prev_stitched:
+                increment = round(max(0, val - prev_val), 2)
+                prev_val = val
+                entry[var] = increment
+            else:
+                prev_val = val
+                entry[var] = round(val, 2)
+            prev_stitched = is_stitched
 
     return {
         "init": hrrr.get("init", "unknown"),

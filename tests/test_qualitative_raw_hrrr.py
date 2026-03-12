@@ -89,3 +89,83 @@ def test_build_raw_hrrr_stitches_synoptic():
     assert raw["hours"][2]["t2m"] == 48.0
 
     assert raw["synoptic_init"] == "2026-03-11T12:00:00+00:00"
+
+
+def test_build_raw_hrrr_deaccumulates_precip():
+    """apcp/asnow should be per-hour increments, not cumulative totals."""
+    from scripts.qualitative import build_raw_hrrr
+
+    model_data = {
+        "hrrr_latest": {
+            "init": "2026-03-11T15:00:00+00:00",
+            "hours": ["5pm", "6pm", "7pm", "8pm"],
+            "data": {
+                "t2m": [53.2, 51.8, 49.5, 48.0],
+                "apcp": [0.0, 0.1, 0.3, 0.5],
+                "asnow": [0.0, 0.0, 0.1, 0.3],
+            },
+        },
+    }
+    raw = build_raw_hrrr(model_data)
+
+    # Per-hour increments, not cumulative
+    assert raw["hours"][0]["apcp"] == 0.0
+    assert raw["hours"][1]["apcp"] == 0.1
+    assert raw["hours"][2]["apcp"] == 0.2
+    assert raw["hours"][3]["apcp"] == 0.2
+
+    assert raw["hours"][2]["asnow"] == 0.1
+    assert raw["hours"][3]["asnow"] == 0.2
+
+
+def test_build_raw_hrrr_deaccum_resets_at_stitch_boundary():
+    """De-accumulation must NOT diff across the latest→stitched boundary."""
+    from scripts.qualitative import build_raw_hrrr
+
+    model_data = {
+        "hrrr_latest": {
+            "init": "2026-03-11T15:00:00+00:00",
+            "hours": ["5pm", "6pm", "7pm", "8pm"],
+            "data": {
+                "t2m": [53.2, 51.8, None, None],
+                "apcp": [0.0, 0.1, None, None],
+            },
+        },
+        "hrrr_previous": {
+            "init": "2026-03-11T12:00:00+00:00",
+            "hours": ["5pm", "6pm", "7pm", "8pm"],
+            "data": {
+                "t2m": [52.0, 50.5, 48.0, 46.0],
+                "apcp": [0.0, 0.2, 0.5, 0.9],
+            },
+        },
+    }
+    raw = build_raw_hrrr(model_data)
+
+    # Latest hours: de-accumulated normally
+    assert raw["hours"][0]["apcp"] == 0.0
+    assert raw["hours"][1]["apcp"] == 0.1
+
+    # Stitched hours: de-accumulated within their own sequence (NOT diffed against latest)
+    assert raw["hours"][2]["apcp"] == 0.5   # First stitched value: keep as-is
+    assert raw["hours"][3]["apcp"] == 0.4   # 0.9 - 0.5 = 0.4
+
+
+def test_build_raw_hrrr_precip_2_decimals():
+    """Precip should preserve 2 decimal places, not round to 1."""
+    from scripts.qualitative import build_raw_hrrr
+
+    model_data = {
+        "hrrr_latest": {
+            "init": "2026-03-11T15:00:00+00:00",
+            "hours": ["5pm", "6pm"],
+            "data": {
+                "t2m": [53.2, 51.8],
+                "apcp": [0.0, 0.04],
+            },
+        },
+    }
+    raw = build_raw_hrrr(model_data)
+
+    # 0.04 should NOT round to 0.0
+    assert raw["hours"][1]["apcp"] == 0.04
